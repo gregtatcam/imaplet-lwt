@@ -94,7 +94,7 @@ let create () =
       catch(
         fun () ->
         let rec loop_conn channels =
-          Imap_cmd.handle_commands id channels >>= fun res ->
+          Imap_cmd.client_requests id channels >>= fun res ->
           rem_id id;
           try_close channels >>= fun () ->
           match res with

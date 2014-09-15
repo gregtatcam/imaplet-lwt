@@ -13,9 +13,25 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
+open Lwt
+open Imaplet_types
 
-exception InvalidDate
+module StatusResponse :
+  sig
+    type response_type = Ok | Bad | No | Preauth | Bye
+    val ok :
+      ?tag:string -> ?code:responseCode option -> string -> string
+    val bad :
+      ?tag:string -> ?code:responseCode option -> string -> string
+    val no :
+      ?tag:string -> ?code:responseCode option -> string -> string
+    val preauth : ?code:responseCode option -> string -> string
+    val bye : ?code:responseCode option -> string -> string
+    val untagged : string -> string
+    val any : string -> string
+    val continue : ?text:string -> unit -> string
+  end
 
-val imapd_to_date_exn : string -> Core.Std.Date.t
+val write_resp : Lwt_io.output_channel -> ?tag:string -> response -> unit Lwt.t
 
-val imapd_to_date_time_exn : string -> Core.Std.Time.t
+val write_resp_untagged : Lwt_io.output_channel -> string -> unit Lwt.t

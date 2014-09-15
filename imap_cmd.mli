@@ -13,4 +13,4 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
-val handle_commands : Int64.t -> Lwt_io.input_channel * Lwt_io.output_channel -> [`Done|`Starttls] Lwt.t
+val client_requests : Int64.t -> Lwt_io.input_channel * Lwt_io.output_channel -> [`Done|`Starttls] Lwt.t

@@ -13,7 +13,7 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
-let match_regex_i case str regx = 
+let match_regex_i ?(case=true) ~regx str = 
   try
     let regexp =
     (
@@ -27,7 +27,7 @@ let match_regex_i case str regx =
     (-1)
 
 let match_regex ?(case=true) ~regx str = 
-  let i = match_regex_i case str regx in
+  let i = match_regex_i ~case str ~regx in
   (i >= 0)
 
 let replace ~regx ~tmpl str =
@@ -62,6 +62,14 @@ let sol = "^"
 
 let eol = "$"
 
+let crlf = "\r\n"
+
+let quote_spec_char = "[\\\"]"
+
+let quoted_char = "[^\r\n\\\"]"
+
+let tag = "[^\r\n{()%*\"\\ ]+"
+
 let optional re = (group re) ^ "?"
 
 let orxl l = Core.Std.String.concat l ~sep:"\\|"
@@ -73,6 +81,8 @@ let nz_number = "[1-9][0-9]*"
 let number = "[0-9]+"
 
 let space = " "
+
+let qstring = quote ( ( group ( orx quote_spec_char quoted_char ) ) ^ "+" )
 
 (* date regex *)
 let mon = group "Jan\\|Feb\\|Mar\\|Apr\\|May\\|Jun\\|Jul\\|Aug\\|Sep\\|Oct\\|Nov\\|Dec"
@@ -97,3 +107,23 @@ let date_time_regex =
 
 let date_time_dqregex =
   quote( date_time_regex)
+
+(* append regex *)
+let append_regex =
+  let cmd = "append" in
+  let mbox = group astring in
+  let qmbox = group qstring in
+  let mailbox = group (orx mbox qmbox) in
+  let flags = group (" " ^ list_of astring) in
+  let date = group (" " ^ date_time_dqregex) in
+  "^" ^ tag ^ " " ^ cmd ^ " " ^ mailbox ^ flags ^ "?" ^ date ^ "? $"
+
+let lappend_regex =
+  let cmd = "lappend" in
+  let mbox = group astring in
+  let qmbox = group qstring in
+  let mailbox = group (orx mbox qmbox) in
+  let user = group astring in
+  let quser = group qstring in
+  let user_ = group (orx user quser) in
+  "^" ^ tag ^ " " ^ cmd ^ " " ^ mailbox ^ " " ^ user_ ^ "$"
