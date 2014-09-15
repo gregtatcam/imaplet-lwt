@@ -1,0 +1,18 @@
+OASISFormat: 0.4
+Name:        imaplet
+Version:     1.0.0
+Synopsis:    IMAP server
+Authors:     Gregory Tsipenyuk
+License:     GPL
+Plugins:     DevFiles (0.4)
+PreBuildCommand: ocaml inst.ml $bindir $datadir > install.ml
+
+Executable imaplet
+  Build		  : true
+  Install	  : true
+  Path		  : .
+  CompiledObject  : native
+  BuildTools	  : ocamlbuild
+  MainIs	  : imaplet.ml
+  BuildDepends	  : core,batteries,lwt,lwt.unix,lwt.syntax,tls.lwt,sexplib,sexplib.syntax,threads,str,cstruct.unix
+  DataFiles	  : certificates/server.pem($datadir/imaplet),certificates/server.key($datadir/imaplet),imaplet.cf($datadir/imaplet),users($datadir/imaplet)

@@ -1,0 +1,41 @@
+# OASIS_START
+# DO NOT EDIT (digest: 287b17b2768808d42db7f8b8b86cd437)
+# Ignore VCS directories, you can use the same kind of rule outside
+# OASIS_START/STOP if you want to exclude directories that contains
+# useless stuff for the build process
+<**/.svn>: -traverse
+<**/.svn>: not_hygienic
+".bzr": -traverse
+".bzr": not_hygienic
+".hg": -traverse
+".hg": not_hygienic
+".git": -traverse
+".git": not_hygienic
+"_darcs": -traverse
+"_darcs": not_hygienic
+# Executable imaplet
+"imaplet.native": pkg_batteries
+"imaplet.native": pkg_core
+"imaplet.native": pkg_cstruct.unix
+"imaplet.native": pkg_lwt
+"imaplet.native": pkg_lwt.syntax
+"imaplet.native": pkg_lwt.unix
+"imaplet.native": pkg_sexplib
+"imaplet.native": pkg_sexplib.syntax
+"imaplet.native": pkg_str
+"imaplet.native": pkg_threads
+"imaplet.native": pkg_tls.lwt
+<*.ml{,i}>: pkg_batteries
+<*.ml{,i}>: pkg_core
+<*.ml{,i}>: pkg_cstruct.unix
+<*.ml{,i}>: pkg_lwt
+<*.ml{,i}>: pkg_lwt.syntax
+<*.ml{,i}>: pkg_lwt.unix
+<*.ml{,i}>: pkg_sexplib
+<*.ml{,i}>: pkg_sexplib.syntax
+<*.ml{,i}>: pkg_str
+<*.ml{,i}>: pkg_threads
+<*.ml{,i}>: pkg_tls.lwt
+# OASIS_STOP
+<*.mly>: pkg_batteries
+true: use_menhir
