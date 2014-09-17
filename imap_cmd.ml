@@ -19,105 +19,89 @@ open BatLog
 open Imaplet_types
 open Response
 open Regex
+open Context
+open Utils
 
 exception SystemError of string
 exception ExpectedDone
 
-(*
-let make_resp_ctx resp_state_ctx resp_ctx resp_mbx_ctx =
-  {resp_state_ctx; resp_ctx; resp_mbx_ctx};;
+let response context state resp mailbox =
+  begin
+  match state with
+  |None -> ()
+  |Some state -> context.state := state
+  end;
+  begin
+  match mailbox with
+  |None -> ()
+  |Some mailbox -> context.mailbox := mailbox
+  end;
+  return resp
 
-let return_resp_ctx resp_state_ctx resp_ctx resp_mbx_ctx =
-  return (make_resp_ctx resp_state_ctx resp_ctx resp_mbx_ctx);;
-
-(** parse the buffer, return ok (request) or error (msg) **)
-let get_request_context contexts buff =
-  printf "get_request_context -%s-\n%!" buff; Out_channel.flush stdout;
-  try
-    let lexbuff = Lexing.from_string buff in
-    let command = (Parser.request (Lex.read (ref `Tag)) lexbuff) in
-    printf "get_request_context, returned from parser\n%!"; Out_channel.flush stdout;
-    let idle = find_idle contexts.req_ctx in
-    let isdone = is_done command in
-    if idle <> None && isdone = false then
-      raise ExpectedDone
-    else (
-      let t =
-      (
-        if isdone then
-          (match idle with Some idle -> idle.request.tag | None -> "")
-        else
-          command.tag
-      ) in
-      Ok ({request={command with tag = t}})
-    )
-  with
-  | SyntaxError e -> printf "get_request_context error %s\n%!" e; Error (e)
-  | Parser.Error -> printf "get_request_context bad command\n%!"; Error ("bad command, parser")
-  | Interpreter.InvalidSequence -> Error ("bad command, invalid sequence")
-  | Regex.InvalidDate -> Error("bad command, invalid date")
-  | ExpectedDone -> Error("Expected DONE")
-  | e -> Error(Exn.backtrace())
-
-(** handle all commands
+(* handle all commands
  * return either Ok, Bad, No, Preauth, Bye, or Continue response
-**)
-(**
+ *)
+
+(*
  * Any state
-**)
-let handle_id writer l =
-  write_resp writer (Resp_Untagged (formated_id(Configuration.id)));
-  return_resp_ctx None (Resp_Ok (None, "ID completed")) None
+ *)
+let handle_id context l =
+  write_resp context.!netw (Resp_Untagged (formated_id(Configuration.id))) >>
+  response context None (Resp_Ok (None, "ID completed")) None
 
-let handle_capability mbx writer = 
-  (if (Amailbox.user mbx) = None then
-    write_resp writer (Resp_Untagged (formated_capability(Configuration.capability)))
+let handle_capability context = 
+  begin
+  if (Amailbox.user context.!mailbox) = None then
+    write_resp context.!netw (Resp_Untagged (formated_capability(Configuration.capability)))
   else
-    write_resp writer (Resp_Untagged (formated_capability(Configuration.auth_capability))));
-  return_resp_ctx None (Resp_Ok (None, "CAPABILITY completed")) None
+    write_resp context.!netw (Resp_Untagged (formated_capability(Configuration.auth_capability)))
+  end >>
+  response context None (Resp_Ok (None, "CAPABILITY completed")) None
 
-let handle_logout ipc_ctx =
-  write_resp ipc_ctx.net_w (Resp_Bye(None,""));
-  return_resp_ctx (Some State_Logout) (Resp_Ok (None, "LOGOUT completed")) None
+let handle_logout context =
+  write_resp context.!netw (Resp_Bye(None,"")) >>
+  response context (Some State_Logout) (Resp_Ok (None, "LOGOUT completed")) None
 
 (** TBD should have a hook into the maintenance to recet inactivity **)
-let handle_noop () =
-  return_resp_ctx None (Resp_Ok (None, "NOOP completed")) None
+let handle_noop context =
+  response context None (Resp_Ok (None, "NOOP completed")) None
 
-(** TBD, needs work, server should send updates while idle is active (terminated
- * by clien'ts done)
-**)
-let handle_idle contexts ipc_ctx =
-  (match Amailbox.user contexts.mbx_ctx with
+let handle_idle context =
+  begin
+  match Amailbox.user context.!mailbox with
   | Some user -> 
-    Printf.printf "handle_idle ======== %s %s\n%!" (Int64.to_string ipc_ctx.connid) user;
-    ipc_ctx.connections := (ipc_ctx.connid,user,ipc_ctx.net_w) :: ipc_ctx.!connections
-  | None -> ());
-  return_resp_ctx None (Resp_Any ("+ idling")) None
+    Easy.logf `debug "handle_idle ======== %s %s\n%!" (Int64.to_string context.id) user;
+    Connections.add_id context.id user context.!netw 
+  | None -> ()
+  end;
+  response context None (Resp_Any ("+ idling")) None
 
-let handle_done contexts ipc_ctx =
-  ipc_ctx.connections := List.fold ipc_ctx.!connections ~init:[] ~f:(fun acc i ->
-    let (cid,u,_) = i in
-    if Int64.equal ipc_ctx.connid cid then (
-      Printf.printf "handle_done removing ======== %s %s\n%!" (Int64.to_string cid) u;
-      acc
-    ) else
-      i :: acc
-  );
-  return_resp_ctx None (Resp_Ok (None, "IDLE")) None
+let handle_done context =
+  Connections.rem_id context.id;
+  response context None (Resp_Ok (None, "IDLE")) None
 
 (**
  * Not Authenticated state
 **)
-let handle_authenticate auth_type text ipc_ctx =
-  Account.authenticate ipc_ctx.net_w auth_type text >>= function
-    | Ok (m,u) -> return_resp_ctx (Some State_Authenticated) m (Some (Amailbox.create u ipc_ctx.str_rw))
-    | Error e -> return_resp_ctx None e None
+let handle_authenticate context auth_type text =
+  Account.authenticate auth_type text >>= function
+    | Ok (m,u) -> response context (Some State_Authenticated) m (Some (Amailbox.create u))
+    | Error e -> response context None e None
 
-let handle_login user password ipc_ctx =
-  Account.login ipc_ctx.net_w user password >>= function
-    | Ok (m,u) -> return_resp_ctx (Some State_Authenticated) m (Some (Amailbox.create u ipc_ctx.str_rw))
-    | Error e -> return_resp_ctx None e None
+let handle_login context user password =
+  Account.login user password >>= function
+    | Ok (m,u) -> response context (Some State_Authenticated) m (Some (Amailbox.create u))
+    | Error e -> response context None e None
+
+let handle_starttls context =
+ let open Server_config in
+ if srv_config.!starttls = true then (
+   context.Context.starttls () >>= fun (r,w) ->
+   context.netr := r;
+   context.netw := w;
+   response context None (Resp_Ok(None,"STARTTLS")) None
+ ) else
+   response context None (Resp_Bad(None,"")) None
 (**
  * Done Not Authenticated state
 **)
@@ -137,126 +121,126 @@ let list_resp flags file =
   let l = List.concat [["LIST ("]; [flags_str]; [") \"/\" "]; [quote_file file]] in 
   Resp_Untagged(String.concat ~sep:"" l)
 
-let handle_list writer reference mailbox contexts lsub =
-  (if lsub = false then
-    Amailbox.listmbx contexts.mbx_ctx reference mailbox
+let handle_list context reference mailbox lsub =
+  begin
+  if lsub = false then
+    Amailbox.listmbx context.!mailbox reference mailbox
   else
-    Amailbox.lsubmbx contexts.mbx_ctx reference mailbox
-  )>>= fun l ->
-    List.iter l 
-    ~f:(fun (file, flags) ->
-      write_resp writer (list_resp flags file)
-    );
-  return_resp_ctx None (Resp_Ok(None, "LIST completed")) None
+    Amailbox.lsubmbx context.!mailbox reference mailbox
+  end >>= fun l ->
+  Lwt_list.iter_s (fun (file, flags) ->
+      write_resp context.!netw (list_resp flags file)
+  ) l >>
+  response context None (Resp_Ok(None, "LIST completed")) None
 
 (** review - where the flags are coming from TBD **)
-let handle_select writer mailbox contexts rw =
-  let open Amailbox in
+let handle_select context mailbox rw =
   (if rw then
-    select contexts.mbx_ctx mailbox
+    Amailbox.select context.!mailbox mailbox
   else
-    examine contexts.mbx_ctx mailbox
+    Amailbox.examine context.!mailbox mailbox
   ) >>= function
-  | `NotExists -> return_resp_ctx None (Resp_No(None,"Mailbox doesn't exist:" ^ mailbox)) None
-  | `NotSelectable ->  return_resp_ctx None (Resp_No(None,"Mailbox is not selectable :" ^ mailbox)) None
-  | `Error e -> return_resp_ctx None (Resp_No(None, e)) None
+  | `NotExists -> response context None (Resp_No(None,"Mailbox doesn't exist:" ^ mailbox)) None
+  | `NotSelectable ->  response context None (Resp_No(None,"Mailbox is not selectable :" ^ mailbox)) None
+  | `Error e -> response context None (Resp_No(None, e)) None
   | `Ok (mbx, header) ->
+    let open StorageMeta in
     if header.uidvalidity = "" then (** give up TBD **)
-    (
-      return_resp_ctx None (Resp_No(None,"Uidvalidity failed")) None
-    )
+      response context None (Resp_No(None,"Uidvalidity failed")) None
     else
     (
       let (flags,prmnt_flags) = Configuration.get_mbox_flags in
       let flags = to_plist (String.concat ~sep:" " flags) in
-      write_resp writer (Resp_Untagged ("FLAGS " ^ flags));
-      let flags = to_plist (String.concat ~sep:" " prmnt_flags) in
-      write_resp writer (Resp_Ok (Some RespCode_Permanentflags, flags));
-      write_resp writer (Resp_Untagged ((string_of_int header.count) ^ " EXISTS"));
-      write_resp writer (Resp_Untagged ((string_of_int header.recent) ^ " RECENT"));
-      write_resp writer (Resp_Ok (Some RespCode_Uidvalidity, header.uidvalidity));
-      write_resp writer (Resp_Ok (Some RespCode_Uidnext, string_of_int header.uidnext));
+      let pflags = to_plist (String.concat ~sep:" " prmnt_flags) in
+      write_resp context.!netw (Resp_Untagged ("FLAGS " ^ flags)) >>
+      write_resp context.!netw (Resp_Ok (Some RespCode_Permanentflags, pflags)) >>
+      write_resp context.!netw (Resp_Untagged ((string_of_int header.count) ^ " EXISTS")) >>
+      write_resp context.!netw (Resp_Untagged ((string_of_int header.recent) ^ " RECENT")) >>
+      write_resp context.!netw (Resp_Ok (Some RespCode_Uidvalidity, header.uidvalidity)) >>
+      write_resp context.!netw (Resp_Ok (Some RespCode_Uidnext, string_of_int header.uidnext)) >>
+      begin
       if rw then
-        return_resp_ctx (Some State_Selected) (Resp_Ok(Some RespCode_Read_write, "")) (Some mbx)
+        response context (Some State_Selected) (Resp_Ok(Some RespCode_Read_write, "")) (Some mbx)
       else
-        return_resp_ctx (Some State_Selected) (Resp_Ok(Some RespCode_Read_only, "")) (Some mbx)
+        response context (Some State_Selected) (Resp_Ok(Some RespCode_Read_only, "")) (Some mbx)
+      end
     )
 
 (** create a mailbox **)
-let handle_create writer mailbox contexts =
-  Amailbox.create_mailbox contexts.mbx_ctx mailbox >>= function
-    | `Ok -> return_resp_ctx None (Resp_Ok(None, "CREATE completed")) None
-    | `Error e -> return_resp_ctx None (Resp_No(None,e)) None
+let handle_create context mailbox =
+  Amailbox.create_mailbox context.!mailbox mailbox >>= function
+    | `Ok -> response context None (Resp_Ok(None, "CREATE completed")) None
+    | `Error e -> response context None (Resp_No(None,e)) None
 
 (** delete a mailbox **)
-let handle_delete writer mailbox contexts =
-  Amailbox.delete_mailbox contexts.mbx_ctx mailbox >>= function
-    | `Ok -> return_resp_ctx None (Resp_Ok(None, "DELETE completed")) None
-    | `Error e -> return_resp_ctx None (Resp_No(None,e)) None
+let handle_delete context mailbox =
+  Amailbox.delete_mailbox context.!mailbox mailbox >>= function
+    | `Ok -> response context None (Resp_Ok(None, "DELETE completed")) None
+    | `Error e -> response context None (Resp_No(None,e)) None
 
 (** rename a mailbox **)
-let handle_rename writer src dest contexts = 
-  Amailbox.rename_mailbox contexts.mbx_ctx src dest >>= function
-    | `Ok -> return_resp_ctx None (Resp_Ok(None, "RENAME completed")) None
-    | `Error e -> return_resp_ctx None (Resp_No(None,e)) None
+let handle_rename context src dest = 
+  Amailbox.rename_mailbox context.!mailbox src dest >>= function
+    | `Ok -> response context None (Resp_Ok(None, "RENAME completed")) None
+    | `Error e -> response context None (Resp_No(None,e)) None
 
 (** subscribe a mailbox **)
-let handle_subscribe writer mailbox contexts = 
-  Amailbox.subscribe contexts.mbx_ctx mailbox >>= function
-    | `Ok -> return_resp_ctx None (Resp_Ok(None, "SUBSCRIBE completed")) None
-    | `Error e -> return_resp_ctx None (Resp_No(None,e)) None
+let handle_subscribe context mailbox = 
+  Amailbox.subscribe context.!mailbox mailbox >>= function
+    | `Ok -> response context None (Resp_Ok(None, "SUBSCRIBE completed")) None
+    | `Error e -> response context None (Resp_No(None,e)) None
 
 (** subscribe a mailbox **)
-let handle_unsubscribe writer mailbox contexts = 
-  Amailbox.unsubscribe contexts.mbx_ctx mailbox >>= function
-    | `Ok -> return_resp_ctx None (Resp_Ok(None, "UNSUBSCRIBE completed")) None
-    | `Error e -> return_resp_ctx None (Resp_No(None,e)) None
+let handle_unsubscribe context mailbox = 
+  Amailbox.unsubscribe context.!mailbox mailbox >>= function
+    | `Ok -> response context None (Resp_Ok(None, "UNSUBSCRIBE completed")) None
+    | `Error e -> response context None (Resp_No(None,e)) None
 
-let handle_status writer mailbox optlist contexts =
-  let open Amailbox in
-    examine contexts.mbx_ctx mailbox >>= function
-    | `NotExists -> return_resp_ctx None (Resp_No(None,"Mailbox doesn't exist:" ^ mailbox)) None
-    | `NotSelectable ->  return_resp_ctx None (Resp_No(None,"Mailbox is not selectable :" ^ mailbox)) None
-    | `Error e -> return_resp_ctx None (Resp_No(None, e)) None
-    | `Ok (mbx, header) ->
-    if header.uidvalidity = "" then (** give up TBD **)
-    (
-      return_resp_ctx None (Resp_No(None,"Uidvalidity failed")) None
-    )
-    else
-    (
-      let output = (List.fold optlist ~init:"" ~f:(fun acc opt ->
-        let str = (match opt with
-        | Stat_Messages -> "EXISTS " ^ (string_of_int header.count)
-        | Stat_Recent -> "RECENT " ^ (string_of_int header.recent)
-        | Stat_Uidnext -> "UIDNEXT " ^(string_of_int header.uidnext)
-        | Stat_Uidvalidity -> "UIDVALIDITY " ^ header.uidvalidity
-        | Stat_Unseen -> "UNSEEN " ^ (string_of_int header.nunseen)
-        ) in 
-        if acc = "" then
-          acc ^ str
-        else
-          acc ^ " " ^ str
-      )) in
-      write_resp writer (Resp_Untagged (to_plist output));
-      return_resp_ctx None (Resp_Ok(None, "STATUS completed")) None
-    )
+let handle_status context mailbox optlist =
+  let open StorageMeta in
+  Amailbox.examine context.!mailbox mailbox >>= function
+  | `NotExists -> response context None (Resp_No(None,"Mailbox doesn't exist:" ^ mailbox)) None
+  | `NotSelectable ->  response context None (Resp_No(None,"Mailbox is not selectable :" ^ mailbox)) None
+  | `Error e -> response context None (Resp_No(None, e)) None
+  | `Ok (mbx, header) ->
+  if header.uidvalidity = "" then (** give up TBD **)
+  (
+    response context None (Resp_No(None,"Uidvalidity failed")) None
+  )
+  else
+  (
+    let output = (List.fold optlist ~init:"" ~f:(fun acc opt ->
+      let str = (match opt with
+      | Stat_Messages -> "EXISTS " ^ (string_of_int header.count)
+      | Stat_Recent -> "RECENT " ^ (string_of_int header.recent)
+      | Stat_Uidnext -> "UIDNEXT " ^(string_of_int header.uidnext)
+      | Stat_Uidvalidity -> "UIDVALIDITY " ^ header.uidvalidity
+      | Stat_Unseen -> "UNSEEN " ^ (string_of_int header.nunseen)
+      ) in 
+      if acc = "" then
+        acc ^ str
+      else
+        acc ^ " " ^ str
+    )) in
+    write_resp context.!netw (Resp_Untagged (to_plist output)) >>
+    response context None (Resp_Ok(None, "STATUS completed")) None
+  )
 
 (* send unsolicited response to idle clients *)
-let idle_clients contexts ipc_ctx =
-  let open Amailbox in
+let idle_clients context =
+  let open StorageMeta in
   let get_status () =
-   match selected_mbox contexts.mbx_ctx with
+   match Amailbox.selected_mbox context.!mailbox with
    | Some mailbox ->
-    (examine contexts.mbx_ctx mailbox >>= function
+    (Amailbox.examine context.!mailbox mailbox >>= function
     |`Ok(mbx,header) -> return (Some header)
     | _ -> return None
     )
    | None -> return None
   in
-  match user contexts.mbx_ctx with
+  match Amailbox.user context.!mailbox with
   |Some user ->
-    let idle = List.fold ipc_ctx.!connections ~init:[] ~f:(fun acc i ->
+    let idle = List.fold context.!connections ~init:[] ~f:(fun acc i ->
       let (_,u,_) = i in
       if u = user then 
         i :: acc
@@ -266,16 +250,16 @@ let idle_clients contexts ipc_ctx =
     if List.length idle > 0 then (
       get_status () >>= function
       | Some status ->
-        List.iter idle ~f:(fun i ->
-         let (id,u,w) = i in
-         if u = user then (
-           Printf.printf "=========== idle_clients %s %s\n%!" (Int64.to_string id) u;
-           write_resp_untagged w ("EXISTS " ^ (string_of_int status.count));
-           write_resp_untagged w ("RECENT " ^ (string_of_int status.recent))
-         ) else (
-           ()
-         )
-        ); return ()
+        Lwt_list.iter_s (fun i ->
+          let (id,u,w) = i in
+          if u = user then (
+            Easy.logf `debug "=========== idle_clients %s %s\n%!" (Int64.to_string id) u;
+            write_resp_untagged w ("EXISTS " ^ (string_of_int status.count)) >>
+            write_resp_untagged w ("RECENT " ^ (string_of_int status.recent))
+          ) else (
+            return()
+          )
+        ) idle
       | None -> return ()
     ) else (
       return ()
@@ -283,25 +267,24 @@ let idle_clients contexts ipc_ctx =
   |None -> return ()
 
 (** handle append **)
-let handle_append ipc_ctx mailbox flags date literal contexts =
-  printf "handle_append\n%!";
-  let open Amailbox in
+let handle_append context mailbox flags date literal =
+  Easy.logf `debug "handle_append\n%!";
   (** is the size sane? **)
   let size = (match literal with
   | Literal n -> n
   | LiteralPlus n -> n) in
-  let open ServerConfig in
+  let open Server_config in
   if size > srv_config.max_msg_size then
-    return_resp_ctx None (Resp_No(None,"Max message size")) None
+    response context None (Resp_No(None,"Max message size")) None
   else (
-    append contexts.mbx_ctx mailbox ipc_ctx.net_r ipc_ctx.net_w flags date literal >>= function
-      | `NotExists -> return_resp_ctx None (Resp_No(Some RespCode_Trycreate,"")) None
-      | `NotSelectable -> return_resp_ctx None (Resp_No(Some RespCode_Trycreate,"Noselect")) None
-      | `Error e -> return_resp_ctx None (Resp_No(None,e)) None
-      | `Eof i -> return_resp_ctx (Some State_Logout) (Resp_No(None, "Truncated Message")) None
+    Amailbox.append context.!mailbox mailbox context.!netr context.!netw flags date literal >>= function
+      | `NotExists -> response context None (Resp_No(Some RespCode_Trycreate,"")) None
+      | `NotSelectable -> response context None (Resp_No(Some RespCode_Trycreate,"Noselect")) None
+      | `Error e -> response context None (Resp_No(None,e)) None
+      | `Eof i -> response context (Some State_Logout) (Resp_No(None, "Truncated Message")) None
       | `Ok -> 
-        idle_clients contexts ipc_ctx >>= fun () ->
-        return_resp_ctx None (Resp_Ok(None, "APPEND completed")) None
+        idle_clients context >>= fun () ->
+        response context None (Resp_Ok(None, "APPEND completed")) None
   )
 
 (**
@@ -312,167 +295,132 @@ let handle_append ipc_ctx mailbox flags date literal contexts =
  * Selected state
 **)
 
-let handle_close writer contexts context =
-  let mbx = Amailbox.close contexts.mbx_ctx in
-  return_resp_ctx (Some State_Authenticated) (Resp_Ok(None, "CLOSE completed")) (Some mbx)
+let handle_close context =
+  let mbx = Amailbox.close context.!mailbox in
+  response context (Some State_Authenticated) (Resp_Ok(None, "CLOSE completed")) (Some mbx)
 
 let rec print_search_tree t indent =
-  printf "search ------\n%!";
+  Easy.logf `debug "search ------\n%!";
   let indent = indent ^ " " in
   let open Amailbox in
   match t with
-  | Key k -> printf "%s-key\n%!" indent
-  | KeyList k -> printf "%s-key list %d\n%!" indent (List.length k);List.iter k ~f:(fun i -> print_search_tree i indent)
-  | NotKey k -> printf "%s-key not\n%!" indent; print_search_tree k indent
-  | OrKey (k1,k2) -> printf "%s-key or\n%!" indent; print_search_tree k1 indent; print_search_tree k2 indent
+  | Key k -> Easy.logf `debug "%s-key\n%!" indent
+  | KeyList k -> Easy.logf `debug "%s-key list %d\n%!" indent (List.length k);
+    List.iter k ~f:(fun i -> print_search_tree i indent)
+  | NotKey k -> Easy.logf `debug "%s-key not\n%!" indent; print_search_tree k indent
+  | OrKey (k1,k2) -> Easy.logf `debug "%s-key or\n%!" indent; print_search_tree k1 indent; print_search_tree k2 indent
 
 (** handle the charset TBD **)
-let handle_search writer charset search buid context =
-  Amailbox.search context.mbx_ctx search buid >>= function 
+let handle_search context charset search buid =
+  Amailbox.search context.!mailbox search buid >>= function 
     (** what do these two states mean in this contex? TBD **)
-  | `NotExists -> return_resp_ctx None (Resp_No(None,"Mailbox doesn't exist")) None
-  | `NotSelectable ->  return_resp_ctx None (Resp_No(None,"Mailbox is not selectable")) None
-  | `Error e -> return_resp_ctx None (Resp_No(None,e)) None
+  | `NotExists -> response context None (Resp_No(None,"Mailbox doesn't exist")) None
+  | `NotSelectable ->  response context None (Resp_No(None,"Mailbox is not selectable")) None
+  | `Error e -> response context None (Resp_No(None,e)) None
   | `Ok r -> 
-      write_resp writer (Resp_Untagged (List.fold r ~init:""  ~f:(fun acc i ->
-        let s = string_of_int i in
-        if acc = "" then 
-          s 
-        else 
-          s ^ " " ^ acc)
-      ));
-      return_resp_ctx None (Resp_Ok(None, "SEARCH completed")) None
+    write_resp context.!netw (Resp_Untagged (List.fold r ~init:""  ~f:(fun acc i ->
+      let s = string_of_int i in
+      if acc = "" then 
+        s 
+      else 
+        s ^ " " ^ acc)
+    )) >>
+    response context None (Resp_Ok(None, "SEARCH completed")) None
 
-let handle_fetch writer sequence fetchattr buid context =
-  printf "handle_fetch\n";
-  Amailbox.fetch context.mbx_ctx (write_resp_untagged writer) sequence fetchattr buid >>= function
-  | `NotExists -> return_resp_ctx None (Resp_No(None,"Mailbox doesn't exist")) None
-  | `NotSelectable ->  return_resp_ctx None (Resp_No(None,"Mailbox is not selectable")) None
-  | `Error e -> return_resp_ctx None (Resp_No(None,e)) None
-  | `Ok -> return_resp_ctx None (Resp_Ok(None, "FETCH completed")) None
+let handle_fetch context sequence fetchattr buid =
+  Easy.logf `debug "handle_fetch\n";
+  Amailbox.fetch context.!mailbox (write_resp_untagged context.!netw) sequence fetchattr buid >>= function
+  | `NotExists -> response context None (Resp_No(None,"Mailbox doesn't exist")) None
+  | `NotSelectable ->  response context None (Resp_No(None,"Mailbox is not selectable")) None
+  | `Error e -> response context None (Resp_No(None,e)) None
+  | `Ok -> response context None (Resp_Ok(None, "FETCH completed")) None
 
-let handle_store ipc_ctx sequence flagsatt flagsval buid contexts =
-  printf "handle_store %d %d\n" (List.length sequence) (List.length flagsval);
-  Amailbox.store contexts.mbx_ctx (write_resp_untagged ipc_ctx.net_w) sequence flagsatt flagsval buid >>= function
-  | `NotExists -> return_resp_ctx None (Resp_No(None,"Mailbox doesn't exist")) None
-  | `NotSelectable ->  return_resp_ctx None (Resp_No(None,"Mailbox is not selectable")) None
-  | `Error e -> return_resp_ctx None (Resp_No(None,e)) None
+let handle_store context sequence flagsatt flagsval buid =
+  Easy.logf `debug "handle_store %d %d\n" (List.length sequence) (List.length flagsval);
+  Amailbox.store context.!mailbox (write_resp_untagged context.!netw) sequence flagsatt flagsval buid >>= function
+  | `NotExists -> response context None (Resp_No(None,"Mailbox doesn't exist")) None
+  | `NotSelectable ->  response context None (Resp_No(None,"Mailbox is not selectable")) None
+  | `Error e -> response context None (Resp_No(None,e)) None
   | `Ok ->
-    idle_clients contexts ipc_ctx >>= fun () ->
-    return_resp_ctx None (Resp_Ok(None, "STORE completed")) None
+    idle_clients context >>= fun () ->
+    response context None (Resp_Ok(None, "STORE completed")) None
 
-let handle_copy writer sequence mailbox buid contexts =
-  printf "handle_copy %d %s\n" (List.length sequence) mailbox;
-  Amailbox.copy contexts.mbx_ctx mailbox sequence buid >>= function
-  | `NotExists -> return_resp_ctx None (Resp_No(None,"Mailbox doesn't exist")) None
-  | `NotSelectable ->  return_resp_ctx None (Resp_No(None,"Mailbox is not selectable")) None
-  | `Error e -> return_resp_ctx None (Resp_No(None,e)) None
-  | `Ok -> return_resp_ctx None (Resp_Ok(None, "COPY completed")) None
+let handle_copy context sequence mailbox buid =
+  Easy.logf `debug "handle_copy %d %s\n" (List.length sequence) mailbox;
+  Amailbox.copy context.!mailbox mailbox sequence buid >>= function
+  | `NotExists -> response context None (Resp_No(None,"Mailbox doesn't exist")) None
+  | `NotSelectable ->  response context None (Resp_No(None,"Mailbox is not selectable")) None
+  | `Error e -> response context None (Resp_No(None,e)) None
+  | `Ok -> response context None (Resp_Ok(None, "COPY completed")) None
 
-let handle_expunge writer contexts =
-  printf "handle_expunge\n";
-  Amailbox.expunge contexts.mbx_ctx (write_resp_untagged writer) >>= function
+let handle_expunge context =
+  Easy.logf `debug "handle_expunge\n";
+  Amailbox.expunge context.!mailbox (write_resp_untagged context.!netw) >>= function
   (**
   | `NotExists -> return_resp_ctx None (Resp_No(None,"Mailbox doesn't exist")) None
   | `NotSelectable ->  return_resp_ctx None (Resp_No(None,"Mailbox is not selectable")) None
   **)
-  | `Error e -> return_resp_ctx None (Resp_No(None,e)) None
-  | `Ok -> return_resp_ctx None (Resp_Ok(None, "EXPUNGE completed")) None
+  | `Error e -> response context None (Resp_No(None,e)) None
+  | `Ok -> response context None (Resp_Ok(None, "EXPUNGE completed")) None
 
 (**
  * Done Selected state
 **)
 
-let handle_any request contexts ipc_ctx context = match request with
-  | Cmd_Id l -> handle_id ipc_ctx.net_w l
-  | Cmd_Capability -> handle_capability contexts.mbx_ctx ipc_ctx.net_w
-  | Cmd_Noop -> handle_noop()
-  | Cmd_Logout -> handle_logout ipc_ctx
+let handle_any context = function
+  | Cmd_Id l -> handle_id context l
+  | Cmd_Capability -> handle_capability context
+  | Cmd_Noop -> handle_noop context
+  | Cmd_Logout -> handle_logout  context
 
-let handle_notauthenticated request contexts ipc_ctx context = match request with
-  | Cmd_Authenticate (a,s) -> handle_authenticate a s ipc_ctx
-  | Cmd_Login (u, p) -> handle_login u p ipc_ctx
-  | Cmd_Starttls -> 
-    let open ServerConfig in
-    if srv_config.starttls = true then
-      return_resp_ctx None (Resp_Ok(None,"STARTTLS")) None
-    else
-      return_resp_ctx None (Resp_Bad(None,"")) None
+let handle_notauthenticated context = function
+  | Cmd_Authenticate (a,s) -> handle_authenticate context a s 
+  | Cmd_Login (u, p) -> handle_login context u p 
+  | Cmd_Starttls -> handle_starttls context
   | Cmd_Lappend (user,mailbox,literal) -> 
-      let mbx = Amailbox.create user ipc_ctx.str_rw in
-      let contexts = { contexts with mbx_ctx = mbx } in
-      handle_append ipc_ctx mailbox None None literal contexts
+      let mbx = Amailbox.create user in
+      let context = {context with mailbox = ref mbx} in
+      handle_append context mailbox None None literal 
 
-let handle_authenticated request contexts ipc_ctx context = match request with
-  | Cmd_Select mailbox -> handle_select ipc_ctx.net_w mailbox contexts true
-  | Cmd_Examine mailbox -> handle_select ipc_ctx.net_w mailbox contexts false
-  | Cmd_Create mailbox -> handle_create ipc_ctx.net_w mailbox contexts
-  | Cmd_Delete mailbox -> handle_delete ipc_ctx.net_w mailbox contexts
-  | Cmd_Rename (mailbox,to_mailbox) -> handle_rename ipc_ctx.net_w mailbox to_mailbox contexts
-  | Cmd_Subscribe mailbox -> handle_subscribe ipc_ctx.net_w mailbox contexts
-  | Cmd_Unsubscribe mailbox -> handle_unsubscribe ipc_ctx.net_w mailbox contexts
-  | Cmd_List (reference, mailbox) -> handle_list ipc_ctx.net_w reference mailbox contexts false
-  | Cmd_Lsub (reference, mailbox) -> handle_list ipc_ctx.net_w reference mailbox contexts true
-  | Cmd_Status (mailbox,optlist) -> handle_status ipc_ctx.net_w mailbox optlist contexts
-  | Cmd_Append (mailbox,flags,date,size) -> handle_append ipc_ctx mailbox flags date size contexts
-  | Cmd_Idle -> handle_idle contexts ipc_ctx
-  | Cmd_Done -> handle_done contexts ipc_ctx
+let handle_authenticated context = function
+  | Cmd_Select mailbox -> handle_select context mailbox true
+  | Cmd_Examine mailbox -> handle_select context mailbox false
+  | Cmd_Create mailbox -> handle_create context mailbox 
+  | Cmd_Delete mailbox -> handle_delete context mailbox 
+  | Cmd_Rename (mailbox,to_mailbox) -> handle_rename context mailbox to_mailbox 
+  | Cmd_Subscribe mailbox -> handle_subscribe context mailbox
+  | Cmd_Unsubscribe mailbox -> handle_unsubscribe context mailbox 
+  | Cmd_List (reference, mailbox) -> handle_list context reference mailbox false
+  | Cmd_Lsub (reference, mailbox) -> handle_list context reference mailbox true
+  | Cmd_Status (mailbox,optlist) -> handle_status context mailbox optlist 
+  | Cmd_Append (mailbox,flags,date,size) -> handle_append context mailbox flags date size 
+  | Cmd_Idle -> handle_idle context
+  | Cmd_Done -> handle_done context
 
-let handle_selected request contexts ipc_ctx context = match request with
-  | Cmd_Check -> return_resp_ctx None (Resp_Ok(None, "CHECK completed")) None
-  | Cmd_Close -> handle_close ipc_ctx.net_w contexts context
-  | Cmd_Expunge -> handle_expunge ipc_ctx.net_w contexts
-  | Cmd_Search (charset,search, buid) -> handle_search ipc_ctx.net_w charset search buid contexts
-  | Cmd_Fetch (sequence,fetchattr, buid) -> handle_fetch ipc_ctx.net_w sequence fetchattr buid contexts
+let handle_selected context = function
+  | Cmd_Check -> response context None (Resp_Ok(None, "CHECK completed")) None
+  | Cmd_Close -> handle_close context
+  | Cmd_Expunge -> handle_expunge context
+  | Cmd_Search (charset,search, buid) -> handle_search context charset search buid
+  | Cmd_Fetch (sequence,fetchattr, buid) -> handle_fetch context sequence fetchattr buid 
   | Cmd_Store (sequence,flagsatt,flagsval, buid) -> 
-      handle_store ipc_ctx sequence flagsatt flagsval buid contexts
-  | Cmd_Copy (sequence,mailbox, buid) -> handle_copy ipc_ctx.net_w sequence mailbox buid contexts
+      handle_store context sequence flagsatt flagsval buid 
+  | Cmd_Copy (sequence,mailbox, buid) -> handle_copy context sequence mailbox buid 
 
-let handle_commands contexts ipc_ctx context = 
-  try_with ( fun () -> 
-    let state = contexts.state_ctx in
-    (
-      match context.request.req with
-      | Any r -> printf "handling any\n%!"; handle_any r contexts ipc_ctx context 
-      | Notauthenticated r when state = State_Notauthenticated-> 
-        printf "handling nonauthenticated\n%!"; handle_notauthenticated r contexts ipc_ctx context 
-      | Authenticated r when state = State_Authenticated || state = State_Selected -> 
-        printf "handling authenticated\n%!"; handle_authenticated r contexts ipc_ctx context 
-      | Selected r when state = State_Selected -> 
-        printf "handling selected\n%!"; handle_selected r contexts ipc_ctx context 
-      | Done -> printf "Done, should log out\n%!"; 
-        return_resp_ctx (Some State_Logout) (Resp_Bad(None,"")) None
-      | _ -> return_resp_ctx None (Resp_Bad(None, "Bad Command")) None
-    ) >>= fun rsp_ctx ->
-    match rsp_ctx.resp_state_ctx with
-    |Some state -> return ({rsp_ctx with resp_state_ctx = Some state})
-    |None -> return ({rsp_ctx with resp_state_ctx = Some state})
-  ) >>= function
-    | Ok res -> return res
-    | Error ex -> printf "%s\n%!" (Exn.to_string ex);
-        return_resp_ctx (Some contexts.state_ctx) (Resp_Bad(None, "Bad Command")) None (** need to handle this TBD **)
-
-(** need to add tag to the response as needed **)
-let handle_response w context response =
-  printf "handle_response\n%!";
-  match context with 
-  | Ok context -> write_resp w ~tag:context.request.tag response
-  | Error e -> write_resp w response
-
-let pr_state contexts = match contexts.state_ctx with
-  |State_Notauthenticated -> Easy.logf `debug "in notauthenticated state\n%!"
-  |State_Authenticated -> Easy.logf `debug "in authenticated state\n%!"
-  |State_Selected -> Easy.logf `debug "in selected state\n%!"
-  |State_Logout -> Easy.logf `debug "in logout state\n%!"
-
-let update_contexts contexts context response =
-  printf "update_contexts %d\n%!" (length contexts.req_ctx);
-  match context with 
-  |Ok (ctx) -> 
-    let _ = pop contexts.req_ctx in 
-    pushs contexts.req_ctx ctx
-  |Error (e) -> contexts.req_ctx
-*)
+let handle_command context =
+  let state = context.!state in
+  let command = (Stack.top_exn context.!commands).command in
+  match command with
+  | Any r -> Easy.logf `debug "handling any\n%!"; handle_any context r
+  | Notauthenticated r when state = State_Notauthenticated-> 
+    Easy.logf `debug "handling nonauthenticated\n%!"; handle_notauthenticated context r
+  | Authenticated r when state = State_Authenticated || state = State_Selected -> 
+    Easy.logf `debug "handling authenticated\n%!"; handle_authenticated context r
+  | Selected r when state = State_Selected -> 
+    Easy.logf `debug "handling selected\n%!"; handle_selected context r
+  | Done -> Easy.logf `debug "Done, should log out\n%!"; 
+    response context (Some State_Logout) (Resp_Bad(None,"")) None
+  | _ -> response context None (Resp_Bad(None, "Bad Command")) None
 
 (* read a line from the network
  * if the line ends with literal {N} and it is not the append
@@ -506,7 +454,7 @@ let rec read_network reader writer buffer =
       return (`Ok (Buffer.contents buffer))
     ) else if ((Buffer.length buffer) + len) > 10240 then (
       Easy.logf `debug "command size is too big: %s\n%!" (Buffer.contents buffer);
-      return (`Bad)
+      return (`Error "command too long")
     ) else (
       Easy.logf `debug "handling another command with the literal\n%!";
       (if match_regex literal ~regx:"[+]}$" = false then
@@ -524,22 +472,39 @@ let rec read_network reader writer buffer =
         read_network reader writer buffer
       | `Timeout ->
         Easy.logf `debug "network timeout\n%!";
-        return (`Bad)
+        return (`Error "timeout")
     )
   )
 
-let parse_command buff =
+let get_command context =
   let open Parsing in
   let open Lexing in
   let open Lex in
   catch (fun () ->
+    let buffer = Buffer.create 0 in
+    read_network context.!netr context.!netw buffer >>= function
+    | `Error err -> return (`Error err)
+    | `Ok buff ->
     let lexbuff = Lexing.from_string buff in
-    let command = (Parser.request (Lex.read (ref `Tag)) lexbuff) in
-    Easy.logf `debug "get_request_context, returned from parser\n%!"; Out_channel.flush stdout;
-    (* if done then need to match with idle 
-     * if last was idle and any other command than done then error
-     *)
-    return (`Ok command)
+    let current_cmd = 
+    (
+      let current_cmd = (Parser.request (Lex.read (ref `Tag)) lexbuff) in
+      Easy.logf `debug "get_request_context, returned from parser\n%!"; Out_channel.flush stdout;
+      (* if last command idle then next could only be done *)
+      match Stack.top context.!commands with
+      |None -> current_cmd
+      |Some last_cmd -> 
+        if is_idle last_cmd then (
+          if is_done current_cmd = false then
+            raise ExpectedDone 
+          else (*tag from idle goes into done *)
+            {current_cmd with tag = last_cmd.tag}
+        ) else
+          current_cmd
+    ) in
+    let _ = Stack.pop context.!commands in
+    Stack.push context.!commands current_cmd;
+    return (`Ok )
   )
   (function 
   | SyntaxError e -> Easy.logf `debug "parse_command error %s\n%!" e; return (`Error (e))
@@ -550,14 +515,16 @@ let parse_command buff =
   | e -> return (`Error(Exn.backtrace()))
   )
 
-let rec client_requests id (r,w) =
+let rec client_requests context =
   catch ( fun () ->
-  let buffer = Buffer.create 0 in
-  read_network r w buffer >>= function
-  | `Bad -> write_resp w (Resp_Bad(None, "")) >> client_requests id (r,w)
-  | `Ok buff -> Easy.logf `debug "read buff --%s--\n%!" buff;
-    parse_command buff >>= function
-    | `Error e -> write_resp w (Resp_Bad(None,e)) >> client_requests id (r,w)
-    | `Ok command -> write_resp w (Resp_Ok(None,"completed")) >> client_requests id (r,w)
+    get_command context >>= function
+    | `Error e -> write_resp context.!netw (Resp_Bad(None,e)) >> client_requests context
+    | `Ok -> handle_command context >>= fun response ->
+      if context.!state = State_Logout then
+        return `Done
+      else (
+        let command = Stack.top_exn context.!commands in
+        write_resp context.!netw ~tag:command.tag response >> client_requests context
+      )
   )
   (fun _ -> return `Done)

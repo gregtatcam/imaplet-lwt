@@ -39,3 +39,14 @@
 # OASIS_STOP
 <*.mly>: pkg_batteries
 true: use_menhir
+<storage/*.ml{,i}>: pkg_batteries
+<storage/*.ml{,i}>: pkg_core
+<storage/*.ml{,i}>: pkg_cstruct.unix
+<storage/*.ml{,i}>: pkg_lwt
+<storage/*.ml{,i}>: pkg_lwt.syntax
+<storage/*.ml{,i}>: pkg_lwt.unix
+<storage/*.ml{,i}>: pkg_sexplib
+<storage/*.ml{,i}>: pkg_sexplib.syntax
+<storage/*.ml{,i}>: pkg_str
+<storage/*.ml{,i}>: pkg_threads
+<storage/*.ml{,i}>: pkg_tls.lwt

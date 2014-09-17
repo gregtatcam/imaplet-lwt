@@ -132,7 +132,7 @@ let debug format =
 %%
 
 request:
-  | EOF	{ debug "got end of file\n%!"; ("",Done) }
+  | EOF	{ debug "got end of file\n%!"; {tag="";command=Done} }
   | cmd = command { debug "p:request\n%!"; (cmd) }
 
 list_of_quoted_string:
@@ -148,8 +148,8 @@ quoted:
   | qs = QUOTED_STRING { qs }
 
 command:
-  | t = tag_; SP; c = commands; CRLF { debug "p:command\n%!"; (t,c) }
-  | c = c_done { ("",c) }
+  | t = tag_; SP; c = commands; CRLF { debug "p:command\n%!"; {tag=t;command=c}}
+  | c = c_done { {tag="";command=c} }
 
 tag_:
   | s = TAG { s }

@@ -16,10 +16,8 @@
 open Lwt
 open BatLog
 
-let try_close (r,w) =
-  catch (fun () -> Lwt_io.close r)
-  (function _ -> return ()) >>
-  catch (fun () -> Lwt_io.close w)
+let try_close cio =
+  catch (fun () -> Lwt_io.close cio)
   (function _ -> return ())
 
 let try_close_sock sock =
@@ -71,45 +69,46 @@ let init_all ssl =
   ) else
     return None
 
-let init_connection channels =
-  let (_,w) = channels in
+let init_connection w =
   let resp = "* OK [CAPABILITY " ^ Configuration.capability ^ "] Imaplet ready.\r\n" in
   Lwt_io.write w resp >>
   Lwt_io.flush w
+
+let starttls sock () =
+  Ssl.init_ssl() >>= fun cert ->
+  Tls_lwt.Unix.server_of_fd
+    (Tls.Config.server_exn ~certificate:cert ())
+    (Core.Std.Option.value_exn sock) >>= fun srv ->
+  return (Tls_lwt.of_t srv)
 
 (**
  * start accepting connections
 **)
 let create () =
+  let open Core.Std in
   let open Connections in
   let open Server_config in
+  let open Context in
   init_all srv_config.!ssl >>= fun cert ->
   let sock  = create_srv_socket srv_config.!addr srv_config.!port in
   let rec connect sock cert =
-    accept_conn sock cert >>= fun (sock_c,channels) ->
-    init_connection channels >>= fun() ->
+    accept_conn sock cert >>= fun (sock_c,(netr,netw)) ->
+    init_connection netw >>= fun() ->
     let id = next_id () in
+    let ctx =
+      {id;connections=ref [];commands=ref (Stack.create());
+        netr=ref netr;netw=ref netw;state=ref
+        Imaplet_types.State_Notauthenticated;mailbox=ref (Amailbox.empty());
+        starttls=starttls sock_c} in
     async(
       fun () ->
       catch(
         fun () ->
-        let rec loop_conn channels =
-          Imap_cmd.client_requests id channels >>= fun res ->
+          Imap_cmd.client_requests ctx >>= fun _ ->
           rem_id id;
-          try_close channels >>= fun () ->
-          match res with
-          | `Done -> try_close_sock sock_c 
-          | `Starttls ->
-            Ssl.init_ssl() >>= fun cert ->
-            Tls_lwt.Unix.server_of_fd
-              (Tls.Config.server_exn ~certificate:cert ())
-              (Core.Std.Option.value_exn sock_c) >>= fun srv ->
-            let channels = Tls_lwt.of_t srv in
-            loop_conn channels
-        in
-        loop_conn channels
+          try_close ctx.!netr >> try_close ctx.!netw >> try_close_sock sock_c 
       )
-      (function _ -> rem_id id; try_close channels >> try_close_sock sock_c)
+      (function _ -> rem_id id; try_close ctx.!netr >> try_close ctx.!netw >> try_close_sock sock_c)
     ); 
     connect sock cert
   in

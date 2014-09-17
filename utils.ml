@@ -13,4 +13,11 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
-val client_requests : Context.context -> [`Done|`Starttls] Lwt.t
+
+let formated_capability capability =
+  "[CAPABILITY " ^ capability ^ "]"
+
+let formated_id id =
+  "ID (" ^ id ^ ")"
+
+let to_plist l = "(" ^ l ^ ")"

@@ -34,6 +34,7 @@ type imapConfig = {
   pem_name : string; (* pem file name, default server.pem *)
   key_name : string; (* private key file name, default server.key *)
   users_path : string; (* users file path, default datadir/imaplet *)
+  data_store : [`Irmin]; (* type of storage, only irmin supported so far *)
 }
 
 let srv_config = 
@@ -64,6 +65,7 @@ let srv_config =
     pem_name = "server.pem";
     key_name = "server.key";
     users_path = Install.users_path;
+    data_store = `Irmin;
   } in
   let rec proc lines acc =
     match lines with 
@@ -101,6 +103,7 @@ let srv_config =
       | "pem_name" -> {acc with pem_name = v}
       | "key_name" -> {acc with key_name = v}
       | "users_path" -> {acc with users_path = v}
+      | "data_store" -> {acc with data_store = `Irmin}
       | _ -> BatLog.Easy.logf `debug "unknown configuration %s\n%!" n; acc
     ) else 
       acc

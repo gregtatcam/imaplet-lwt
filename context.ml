@@ -13,4 +13,15 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
-val client_requests : Context.context -> [`Done|`Starttls] Lwt.t
+open Core.Std
+
+type context = {
+  id : Int64.t;
+  connections : (Int64.t*string*Lwt_io.output_channel) list ref;
+  commands : Imaplet_types.clientRequest Stack.t ref;
+  netr : Lwt_io.input_channel ref;
+  netw : Lwt_io.output_channel ref;
+  state : Imaplet_types.state ref;
+  mailbox : Amailbox.t ref;
+  starttls : unit -> (Lwt_io.input_channel * Lwt_io.output_channel) Lwt.t 
+}

@@ -213,7 +213,17 @@ type fromClient =
   | Done
 
 type clientRequest =
-  string * fromClient (* tag * command *)
+  {tag:string; command:fromClient}
+
+let is_idle command =
+  match command.command with
+  | Authenticated cmd -> (match cmd with |Cmd_Idle -> true |_->false)
+  | _ -> false
+
+let is_done command =
+  match command.command with
+  | Authenticated cmd -> (match cmd with |Cmd_Done -> true |_->false)
+  | _ -> false
 
 type response = 
  | Resp_Ok of responseCode option * string

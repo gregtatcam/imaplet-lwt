@@ -13,4 +13,10 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
-val client_requests : Context.context -> [`Done|`Starttls] Lwt.t
+open Core.Std
+
+val authenticate : Imaplet_types.authtype -> string ->
+  (Imaplet_types.response * string, Imaplet_types.response) Result.t Lwt.t
+
+val login : string -> string ->
+  (Imaplet_types.response * string, Imaplet_types.response) Result.t Lwt.t

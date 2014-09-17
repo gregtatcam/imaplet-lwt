@@ -31,3 +31,6 @@ let rem_id id =
   else
     i :: acc
   )
+
+let add_id id user w =
+  connections := (id,user,w) :: !connections

@@ -60,3 +60,6 @@ key_name server.key
 
 # users path default datadir/imaplet
 #users_path ""
+ 
+# type of data storage like mailbox,mbox,irmin
+data_store irmin
