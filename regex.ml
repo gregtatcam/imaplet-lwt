@@ -50,6 +50,8 @@ let dequote re =
 
 let list_of re = "(" ^ re ^ ")"
 
+let dlist_of re = "((" ^ re ^ "))"
+
 let bkt_list_of re = "\\[" ^ re ^ "\\]"
 
 let ang_list_of re = "<" ^ re ^ ">"
@@ -107,6 +109,10 @@ let date_time_regex =
 
 let date_time_dqregex =
   quote( date_time_regex)
+
+(**Date: Mon, 7 Feb 1994 21:52:25 -0800 (PST)**) 
+let email_date_regex =
+  dd ^ " " ^ mon ^ " " ^ yyyy ^ " " ^ time ^ " " ^ zone
 
 (* append regex *)
 let append_regex =

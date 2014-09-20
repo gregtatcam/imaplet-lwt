@@ -13,14 +13,5 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
-open Core.Std
-
-exception InvalidDate
-
-val imapd_to_date_exn : string -> Date.t
-
-val imapd_to_date_time_exn : string -> Time.t
-
-val date_time_to_email : Time.t -> string
-
-val email_to_date_time_exn : string -> Time.t
+open Storage
+module IrminStorage : Storage_intf with type t = string 

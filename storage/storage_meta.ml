@@ -53,10 +53,10 @@ let new_uidvalidity() =
   let f = (Time.to_float t) in
   string_of_int (Float.to_int f)
 
-let empty_mailbox_metadata ?uidvalidity () =
+let empty_mailbox_metadata ?uidvalidity ?(folders=false) () =
   let uidvalidity =
     (match uidvalidity with None->""|Some u -> u) in
-  {uidvalidity;modseq=Int64.zero;uidnext=1;count=0;unseen=0;nunseen=0;recent=0;folders=false}
+  {uidvalidity;modseq=Int64.zero;uidnext=1;count=0;unseen=0;nunseen=0;recent=0;folders}
 
 let empty_mailbox_message_metadata() =
   {uid=1;modseq=Int64.zero;internal_date=Time.now();size=0;flags=[]}

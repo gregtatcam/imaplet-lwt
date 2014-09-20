@@ -13,14 +13,23 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
-open Core.Std
+open Email_message
+open Imaplet_types
+open Storage_meta
 
-exception InvalidDate
+exception InvalidSequence
 
-val imapd_to_date_exn : string -> Date.t
+val exec_search : Email.t -> (searchKey) searchKeys -> mailbox_message_metadata -> int -> bool
 
-val imapd_to_date_time_exn : string -> Time.t
+val get_sequence : string -> (seq_set list)
 
-val date_time_to_email : Time.t -> string
+val exec_fetch : int -> sequence -> Mailbox.Message.t ->
+  mailbox_message_metadata -> fetch -> bool -> string option
 
-val email_to_date_time_exn : string -> Time.t
+val exec_store : mailbox_message_metadata->int -> sequence ->
+  storeFlags -> mailboxFlags list -> bool -> 
+  [`Ok of mailbox_message_metadata*string|`Silent of mailbox_message_metadata|`None]
+
+val exec_seq : sequence -> int -> bool
+
+val check_search_seq : (searchKey) searchKeys -> seq:int -> uid:int -> bool

@@ -13,6 +13,7 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
+open Imaplet_types
 
 let formated_capability capability =
   "[CAPABILITY " ^ capability ^ "]"
@@ -21,3 +22,32 @@ let formated_id id =
   "ID (" ^ id ^ ")"
 
 let to_plist l = "(" ^ l ^ ")"
+
+let fl_to_str fl =
+  match fl with
+  | Flags_Answered -> "\\Answered"
+  | Flags_Flagged -> "\\Flagged"
+  | Flags_Deleted -> "\\Deleted"
+  | Flags_Seen -> "\\Seen"
+  | Flags_Recent -> "\\Recent"
+  | Flags_Draft -> "\\Draft"
+  | Flags_Extention e -> "\\" ^ e
+  | Flags_Keyword k -> k
+  | Flags_Template -> "\\Template"
+
+let substr str ~start ~size =
+  let len = String.length str in
+  let str =
+  if len > start then
+    Str.string_after str start
+  else
+    str
+  in
+  match size with
+  | None -> str
+  | Some size ->
+    let len = String.length str in
+    if len > size then
+      Str.string_before str size
+    else
+      str

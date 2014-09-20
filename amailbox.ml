@@ -14,10 +14,15 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 open Lwt
-open StorageMeta
+open Storage_meta
 open Imaplet_types
+open Irmin_storage
 
 type selection = [`Select of string | `Examine of string | `None]
+
+let factory user =
+  let open Storage in
+  build_strg_inst (module IrminStorage) user
 
 (* inbox location * all mailboxes location * user * type of selected mailbox *)
 type t = string * string * string option * selection 
@@ -53,6 +58,8 @@ let lsubmbx mailboxt reference mailbox =
 
 (* select mailbox : `NotExists, `NotSelectable, `Error, `Ok *)
 let select mailboxt mailbox = 
+  let (module Mailbox) = factory "dovecot" in
+  Mailbox.MailboxStorage.select Mailbox.this mailbox >>= fun _ ->
   return (`Ok (mailboxt, empty_mailbox_metadata ()))
 
 (* examine mailbox *)

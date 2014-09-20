@@ -144,7 +144,7 @@ let handle_select context mailbox rw =
   | `NotSelectable ->  response context None (Resp_No(None,"Mailbox is not selectable :" ^ mailbox)) None
   | `Error e -> response context None (Resp_No(None, e)) None
   | `Ok (mbx, header) ->
-    let open StorageMeta in
+    let open Storage_meta in
     if header.uidvalidity = "" then (** give up TBD **)
       response context None (Resp_No(None,"Uidvalidity failed")) None
     else
@@ -197,7 +197,7 @@ let handle_unsubscribe context mailbox =
     | `Error e -> response context None (Resp_No(None,e)) None
 
 let handle_status context mailbox optlist =
-  let open StorageMeta in
+  let open Storage_meta in
   Amailbox.examine context.!mailbox mailbox >>= function
   | `NotExists -> response context None (Resp_No(None,"Mailbox doesn't exist:" ^ mailbox)) None
   | `NotSelectable ->  response context None (Resp_No(None,"Mailbox is not selectable :" ^ mailbox)) None
@@ -228,7 +228,7 @@ let handle_status context mailbox optlist =
 
 (* send unsolicited response to idle clients *)
 let idle_clients context =
-  let open StorageMeta in
+  let open Storage_meta in
   let get_status () =
    match Amailbox.selected_mbox context.!mailbox with
    | Some mailbox ->

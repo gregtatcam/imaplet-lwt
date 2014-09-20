@@ -25,9 +25,15 @@ val date_dqregex : string
 
 val date_time_dqregex : string
 
+val email_date_regex : string
+
+val quote : string -> string
+
 val dequote : string -> string
 
 val list_of : string -> string
+
+val dlist_of : string -> string
 
 val astring : string
 

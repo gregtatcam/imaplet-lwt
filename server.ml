@@ -64,7 +64,7 @@ let init_local_delivery () =
 let init_all ssl =
   init_local_delivery ();
   if ssl then (
-    Ssl.init_ssl () >>= fun cert ->
+    Ssl_.init_ssl () >>= fun cert ->
     return (Some cert)
   ) else
     return None
@@ -75,7 +75,7 @@ let init_connection w =
   Lwt_io.flush w
 
 let starttls sock () =
-  Ssl.init_ssl() >>= fun cert ->
+  Ssl_.init_ssl() >>= fun cert ->
   Tls_lwt.Unix.server_of_fd
     (Tls.Config.server_exn ~certificate:cert ())
     (Core.Std.Option.value_exn sock) >>= fun srv ->

@@ -48,7 +48,7 @@ type mbox_message_metadata = {
 
 type mbox_index = [`Header of mbox_mailbox_metadata | `Record of mbox_message_metadata]
 
-val empty_mailbox_metadata : ?uidvalidity:string -> unit -> mailbox_metadata
+val empty_mailbox_metadata : ?uidvalidity:string -> ?folders:bool -> unit -> mailbox_metadata
 
 val empty_mailbox_message_metadata : unit -> mailbox_message_metadata
 

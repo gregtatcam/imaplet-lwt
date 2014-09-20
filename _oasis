@@ -14,5 +14,5 @@ Executable imaplet
   CompiledObject  : native
   BuildTools	  : ocamlbuild
   MainIs	  : imaplet.ml
-  BuildDepends	  : core,batteries,lwt,lwt.unix,lwt.syntax,tls.lwt,sexplib,sexplib.syntax,threads,str,cstruct.unix
+  BuildDepends	  : core,batteries,lwt,lwt.unix,lwt.syntax,tls.lwt,sexplib,sexplib.syntax,threads,str,cstruct.unix,irmin.unix,irmin.backend,email_message
   DataFiles	  : certificates/server.pem($datadir/imaplet),certificates/server.key($datadir/imaplet),imaplet.cf($datadir/imaplet),users($datadir/imaplet)
