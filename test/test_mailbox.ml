@@ -39,9 +39,11 @@ let () = Lwt_main.run(
   in
   create mailboxes >>= fun () ->
   IrminMailbox.create "dovecot" "" >>= fun mbox ->
-  IrminMailbox.list mbox "" >>= fun listing ->
+    IrminMailbox.list mbox "" ~init:[] ~f:(
+      fun acc item -> return ((item::acc),true)
+    ) >>= fun listing ->
   List.iter listing ~f:(fun i -> match i with
-    | `Folder f -> Printf.printf "folder: %s\n%!" f
+    | `Folder (f,cnt) -> Printf.printf "folder: %s %d\n%!" f cnt
     | `Mailbox m -> Printf.printf "mailbox: %s\n%!" m
   ); return ()
 )

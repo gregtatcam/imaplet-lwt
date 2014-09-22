@@ -372,7 +372,11 @@ module IrminMailbox :
     val read_message_metadata : t -> [`Sequence of int|`UID of int] -> 
       [`NotFound|`Eof|`Ok of mailbox_message_metadata] Lwt.t
     val delete_message : t -> [`Sequence of int|`UID of int] -> unit Lwt.t
-    val list : t -> string -> [`Folder of string|`Mailbox of string] list Lwt.t
+    (* function is called on each item, it takes accum, folder with count of
+     * children or mailbox, and returns accum and indicates if the item can be
+     * accessed *)
+    val list : t -> string -> init:'a -> 
+      f:('a -> [`Folder of string*int|`Mailbox of string] -> ('a*bool) Lwt.t) -> 'a Lwt.t
   end with type t = mailbox = 
   struct 
     (* user * mailbox * is-folder * irmin key including the mailbox *)
@@ -665,22 +669,29 @@ module IrminMailbox :
       | `Folder -> return true
       | _ -> return false
 
-    let rec list_ mbox key acc =
+    let rec list_ mbox key init f =
       list_mailbox mbox key >>= fun listing ->
-      Lwt_list.fold_left_s (fun acc name ->
+      Lwt_list.fold_left_s (fun (acc,cnt) name ->
         let key = IrminKey.t_of_list name in
         is_folder mbox key >>= fun res ->
-        if res = true then
-          list_ mbox key acc >>= fun acc -> return ((`Folder (IrminKey.view_key_to_path key)) :: acc)
-        else
-          return ((`Mailbox (IrminKey.view_key_to_path key)) :: acc)
-      ) acc listing
+        begin
+        if res = true then (
+          list_ mbox key acc f >>= fun (acc,cnt) -> 
+          f acc (`Folder ((IrminKey.view_key_to_path key),cnt)) 
+        ) else (
+          f acc (`Mailbox (IrminKey.view_key_to_path key)) 
+        )
+        end >>= fun (acc,access) ->
+        let cnt = if access then cnt + 1 else cnt in
+        return (acc,cnt)
+      ) (init,0) listing
 
     (* assuming that "reference" and "mailbox" arguments in list command
      * are converted into initial mailbox and regular expression to match
      *)
-    let list mbox path =
+    let list mbox path ~init ~f =
       let (_,_,key) = IrminKey.mailbox_of_path path in
-      list_ mbox key []
+      list_ mbox key init f >>= fun (acc,_) ->
+      return acc
 
   end
