@@ -15,6 +15,8 @@
  *)
 open Lwt
 open Storage
+open Irmin_core
+open Storage_meta
 
 module IrminStorage : Storage_intf with type t = string =
 struct
@@ -26,73 +28,129 @@ struct
 
   (* status *)
   let status t mailbox =
-    let open Irmin_core in
-    IrminMailbox.create "dovecot" mailbox >>= fun _ ->
-    return `NotExists
+    IrminMailbox.create t mailbox >>= fun mbox ->
+    IrminMailbox.read_mailbox_metadata mbox
 
   (* select mailbox *)
   let select t mailbox =
-    return `NotExists
+    status t mailbox
 
   (* examine mailbox *)
   let examine t mailbox =
-    return `NotExists
+    status t mailbox
 
   (* create mailbox *)
   let create_mailbox t mailbox  =
-    return `Ok
+    IrminMailbox.create t mailbox >>= fun mbox ->
+    IrminMailbox.create_mailbox mbox >>
+    IrminMailbox.commit mbox
 
   (* delete mailbox *)
   let delete t mailbox = 
-    return `Ok
+    IrminMailbox.create t mailbox >>= fun mbox ->
+    IrminMailbox.delete_mailbox mbox >>
+    IrminMailbox.commit mbox
 
   (* rename mailbox1 mailbox2 *)
   let rename t mailbox1 mailbox2 =
-    return `Ok
+    IrminMailbox.create t mailbox1 >>= fun mbox ->
+    IrminMailbox.move_mailbox mbox mailbox2 >>
+    IrminMailbox.commit mbox
 
   (* subscribe mailbox *)
   let subscribe t mailbox =
-    return `Ok
+    Subscriptions.create t >>= fun sub ->
+    Subscriptions.subscribe sub mailbox
 
   (* unsubscribe mailbox *)
   let unsubscribe t mailbox =
-    return ()
+    Subscriptions.create t >>= fun sub ->
+    Subscriptions.unsubscribe sub mailbox
 
   (* list reference mailbox 
    * returns list of files/folders with list of flags 
    *)
-  let list t reference mailbox =
-    return []
+  let list t reference mailbox ~init ~f =
+    IrminMailbox.create t reference >>= fun mbox ->
+    IrminMailbox.list mbox mailbox ~init ~f
 
   (* lsub reference mailbox - list of subscribed mailboxes
    * returns list of files/folders with list of flags 
    *)
-  let lsub t reference mailbox =
-    return []
+  let lsub t reference mailbox ~init ~f =
+    IrminMailbox.create t reference >>= fun mbox ->
+    IrminMailbox.list mbox mailbox ~init ~f
 
   (* append message(s) to selected mailbox *)
-  let append t mailbox ci time flags literal =
-    return `Ok
+  let append t mailbox message mailbox_metadata =
+    IrminMailbox.create t mailbox >>= fun mbox ->
+    IrminMailbox.append_message mbox message mailbox_metadata >>
+    IrminMailbox.commit mbox
 
   (* expunge, permanently delete messages with \Deleted flag 
    * from selected mailbox 
    *)
   let expunge t mailbox f =
-    return ()
+    let open Core.Std in
+    let open Imaplet_types in
+    IrminMailbox.create t mailbox >>= fun mbox ->
+    IrminMailbox.read_index_uid mbox >>= fun uids ->
+    IrminMailbox.read_mailbox_metadata mbox >>= fun mailbox_metadata ->
+    Lwt_list.fold_left_s (fun (count,nunseen,recent,unseen) uid ->
+      IrminMailbox.read_message_metadata mbox (`UID uid) >>= function
+      | `Ok message_metadata ->
+        let find_flag fl = List.find message_metadata.flags ~f:(fun f -> f = fl) <> None in
+        if find_flag Flags_Deleted then (
+          IrminMailbox.delete_message mbox (`UID uid) >>
+          f uid >>
+          return (count,nunseen,recent,unseen)
+        ) else (
+          let count = count + 1 in
+          let recent = if find_flag Flags_Recent then recent + 1 else recent in
+          let (nunseen,unseen) =
+            if find_flag Flags_Seen = false then (
+              if unseen = 0 then
+                (nunseen + 1, count)
+              else
+                (nunseen + 1, unseen)
+            ) else (
+              (nunseen, unseen)
+            )
+          in
+          return (count, nunseen, recent, unseen)
+        )
+      | _ -> return (count,nunseen,recent,unseen)
+    ) (0,0,0,0) uids >>= fun (count,nunseen,recent,unseen) ->
+    let modseq = Int64.(+) mailbox_metadata.modseq Int64.one in
+    let mailbox_metadata = {mailbox_metadata with count;nunseen;recent;unseen;modseq} in
+    IrminMailbox.update_mailbox_metadata mbox mailbox_metadata >>
+    IrminMailbox.commit mbox
 
   (* search selected mailbox *)
-  let search t mailbox f keys buid =
-    return `Ok
+  let search t mailbox keys buid =
+    IrminMailbox.create t mailbox >>= fun mbox ->
+    IrminMailbox.read_index_uid mbox >>= fun uids ->
+    IrminMailbox.read_mailbox_metadata mbox >>= fun mailbox_metadata ->
+    Lwt_list.fold_left_s (fun (seq,acc) uid ->
+      IrminMailbox.read_message mbox (`UID uid)?filter:(Some keys) >>= function
+      | `Ok _ -> return (if buid then (seq+1,uid :: acc) else (seq+1, seq :: acc))
+      | _ -> return (seq+1,acc)
+    ) (1,[]) uids >>= fun (_,acc) -> return acc
 
   (* fetch messages from selected mailbox *)
-  let fetch t mailbox f sequence fetchAttr buid =
-    return `Ok
+  let fetch t mailbox position =
+    IrminMailbox.create t mailbox >>= fun mbox ->
+    IrminMailbox.read_message mbox position
 
   (* store flags to selected mailbox *)
-  let store t mailbox f sequence storeFlags flags buid =
-    return `Ok
+  let store t mailbox position message_metadata =
+    IrminMailbox.create t mailbox >>= fun mbox ->
+    IrminMailbox.update_message_metadata mbox position message_metadata >>= fun _ ->
+    return ()
 
   (* copy messages from selected mailbox *)
   let copy t mailbox1 mailbox2 sequence buid =
-    return `Ok
+    IrminMailbox.create t mailbox1 >>= fun mbox1 ->
+    IrminMailbox.create t mailbox2 >>= fun mbox2 ->
+    IrminMailbox.copy_mailbox mbox1 mbox2 sequence buid
 end

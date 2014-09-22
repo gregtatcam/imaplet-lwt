@@ -17,6 +17,8 @@ open Lwt
 open Core.Std
 open Storage_meta
 open Imaplet_types
+open Email_message
+open Email_message.Mailbox.Message
 
 module type Storage_intf = 
 sig
@@ -26,25 +28,25 @@ sig
   val create : string -> t
 
   (* status *)
-  val status : t -> string -> [`NotExists|`NotSelectable|`Selected of mailbox_metadata] Lwt.t
+  val status : t -> string -> mailbox_metadata Lwt.t
 
   (* select mailbox *)
-  val select : t -> string -> [`NotExists|`NotSelectable|`Selected of mailbox_metadata] Lwt.t
+  val select : t -> string -> mailbox_metadata Lwt.t
 
   (* examine mailbox *)
-  val examine : t -> string -> [`NotExists|`NotSelectable|`Selected of mailbox_metadata] Lwt.t
+  val examine : t -> string -> mailbox_metadata Lwt.t
 
   (* create mailbox *)
-  val create_mailbox : t -> string -> [`Error of string|`Ok] Lwt.t
+  val create_mailbox : t -> string -> unit Lwt.t
 
   (* delete mailbox *)
-  val delete : t -> string -> [`Error of string|`Ok] Lwt.t
+  val delete : t -> string -> unit Lwt.t
 
   (* rename mailbox1 mailbox2 *)
-  val rename : t -> string -> string -> [`Error of string|`Ok] Lwt.t
+  val rename : t -> string -> string -> unit Lwt.t
 
   (* subscribe mailbox *)
-  val subscribe : t -> string -> [`Error of string|`Ok] Lwt.t
+  val subscribe : t -> string -> unit Lwt.t
 
   (* unsubscribe mailbox *)
   val unsubscribe : t -> string -> unit Lwt.t
@@ -52,16 +54,17 @@ sig
   (* list reference mailbox 
    * returns list of files/folders with list of flags 
    *)
-  val list : t -> string -> string -> (string * string list) list Lwt.t
+  val list : t -> string -> string -> init:'a -> 
+    f:('a -> [`Folder of (string*int)|`Mailbox of string] -> ('a*bool) Lwt.t) -> 'a Lwt.t
 
   (* lsub reference mailbox - list of subscribed mailboxes
    * returns list of files/folders with list of flags 
    *)
-  val lsub : t -> string -> string -> (string * string list) list Lwt.t
+  val lsub : t -> string -> string -> init:'a -> 
+    f:('a -> [`Folder of (string*int)|`Mailbox of string] -> ('a*bool) Lwt.t) -> 'a Lwt.t
 
   (* append message(s) to selected mailbox *)
-  val append : t -> string -> Lwt_io.input_channel -> Time.t option -> mailboxFlags list option -> 
-    literal -> [`NotExists|`NotSelectable|`Eof|`Error of string|`Ok] Lwt.t
+  val append : t -> string -> Mailbox.Message.t -> mailbox_message_metadata -> unit Lwt.t 
 
   (* expunge, permanently delete messages with \Deleted flag 
    * from selected mailbox 
@@ -69,19 +72,17 @@ sig
   val expunge : t -> string -> (int -> unit Lwt.t) -> unit Lwt.t
 
   (* search selected mailbox *)
-  val search : t -> string -> (int -> unit Lwt.t) -> (searchKey) searchKeys -> bool ->
-    [`NotExists|`NotSelectable|`Error of string|`Ok] Lwt.t
+  val search : t -> string -> (searchKey) searchKeys -> bool -> int list Lwt.t
 
   (* fetch messages from selected mailbox *)
-  val fetch : t -> string -> (string -> unit Lwt.t) -> sequence -> fetch -> bool ->
-    [`NotExists|`NotSelectable|`Error of string|`Ok] Lwt.t
+  val fetch : t -> string -> [`Sequence of int|`UID of int] ->
+    [`NotFound|`Eof|`Ok of (Mailbox.Message.t * mailbox_message_metadata)] Lwt.t
 
   (* store flags to selected mailbox *)
-  val store : t -> string -> (string -> unit Lwt.t) -> sequence -> storeFlags ->
-    mailboxFlags list -> bool -> [`NotExists|`NotSelectable|`Error of string|`Ok] Lwt.t
+  val store : t -> string -> [`Sequence of int|`UID of int] -> mailbox_message_metadata -> unit Lwt.t
 
   (* copy messages from selected mailbox *)
-  val copy : t -> string -> string -> sequence -> bool -> [`NotExists|`NotSelectable|`Error of string|`Ok] Lwt.t
+  val copy : t -> string -> string -> sequence -> bool -> unit Lwt.t
 end
 
 module type Storage_inst =

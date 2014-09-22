@@ -377,6 +377,7 @@ module IrminMailbox :
      * accessed *)
     val list : t -> string -> init:'a -> 
       f:('a -> [`Folder of string*int|`Mailbox of string] -> ('a*bool) Lwt.t) -> 'a Lwt.t
+    val read_index_uid : t -> int list Lwt.t
   end with type t = mailbox = 
   struct 
     (* user * mailbox * is-folder * irmin key including the mailbox *)
