@@ -15,7 +15,7 @@
  *)
 open Imaplet_types
 
-module type SequenceIterator_intf :
+module SequenceIterator :
   sig
     type t
 

@@ -27,10 +27,8 @@ open Storage_meta
 exception KeyDoesntExist
 exception DuplicateUID
 
-let path = srv_config.irmin_path
-
 module Git = IrminGit.FS(struct
-  let root = Some path
+  let root = Some (srv_config.irmin_path)
   let bare = true
 end)
 
@@ -41,13 +39,19 @@ module IrminKey :
     type t
 
     (* user and unix path to key *)
-    val create : string -> t
+    val t_of_path : string -> t
+    val t_of_list : string list -> t
+    val add_path : t -> string -> t
+    val add_list : t -> string list -> t
     val create_account : string -> t
-    val create_mailboxes : string -> string -> (string*bool*t)
+    val mailbox_of_path : ?user:string -> string -> (string*bool*t)
+    val mailbox_of_list : ?user:string -> string list -> (string*bool*t)
+    val mailboxes_of_mailbox : t -> t 
     val t_to_list : t -> string list
     val t_to_irmin_key : t -> Store.key
     val key_to_string : t -> string
     val key_to_path : t -> string
+    val view_key_to_path : t -> string
   end =
   struct
     type t = Store.key
@@ -55,14 +59,26 @@ module IrminKey :
     let create_account user =
       ["imaplet";user]
 
-    let create str =
-      let path = String.lstrip ~drop:(fun c -> c = '/') path in
+    let t_to_list key = key
+
+    let t_to_irmin_key key = key
+
+    let t_of_path str =
+      let path = String.lstrip ~drop:(fun c -> c = '/') str in
       let path = String.rstrip ~drop:(fun c -> c = '/') path in
       String.split path ~on:'/'
 
-    let create_mailboxes user path =
-      let key = String.split path ~on:'/' in
-      let mailbox,folder,key = List.fold_right key ~init:("",false,[]) 
+    let t_of_list (l:string list) =
+      l
+
+    let add_path key str =
+      List.concat [t_to_list key;t_of_path str]
+
+    let add_list key l =
+      List.concat [t_to_list key;l]
+
+    let mailbox_of_list ?user l =
+      let mailbox,folder,key = List.fold_right l ~init:("",false,[]) 
       ~f:(fun i (mailbox,folder,acc) -> 
         if i <> "" then (
           if List.length acc <> 0 then
@@ -74,11 +90,18 @@ module IrminKey :
         else
           mailbox,folder,acc
       ) in
-      mailbox,folder,"imaplet" :: (user :: key)
+      if user <> None then
+        mailbox,folder,"imaplet" :: ((Option.value_exn user) :: key)
+      else
+        mailbox,folder,key
 
-    let t_to_list key = key
-
-    let t_to_irmin_key key = key
+    (* if user is None then relative path, otherwise root, i.e. /imaplet/user *)
+    let mailbox_of_path ?user path =
+      let key = String.split path ~on:'/' in
+      mailbox_of_list ?user key
+      
+    let mailboxes_of_mailbox key =
+      add_path key "mailboxes"
 
     (* convert key to path, keep "imaplet", user, and "mailboxes" *)
     let key_to_string key = 
@@ -127,6 +150,7 @@ module IrminIntf :
     type transaction
     val create : unit -> store Lwt.t
     val remove : store -> IrminKey.t -> unit Lwt.t
+    val read_exn : store -> IrminKey.t -> string Lwt.t
     val update_view : store -> IrminKey.t -> Store.View.t -> unit Lwt.t
     val read_view : store -> IrminKey.t -> Store.View.t Lwt.t
     val remove_view : transaction -> unit Lwt.t
@@ -150,6 +174,9 @@ module IrminIntf :
 
     let remove store key =
       Store.remove store (IrminKey.t_to_irmin_key key)
+
+    let read_exn store key =
+      Store.read_exn store (IrminKey.t_to_irmin_key key)
 
     let update_view store key view =
       Easy.logf `debug "------ store update_view %s\n%!" (IrminKey.key_to_string key);
@@ -214,6 +241,10 @@ module IrminIntf :
       let (_,view,_,_) = tr in
       Store.View.mem view (IrminKey.t_to_irmin_key key)
 
+    let tr_key tr =
+      let (_,_,key,_) = tr in
+      key
+
   end
 
 (* mailboxes subscription *)
@@ -230,7 +261,7 @@ module Subscriptions :
   struct
     type t = IrminIntf.transaction
 
-    let key_subscr = IrminKey.create "subscriptions"
+    let key_subscr = IrminKey.t_of_path "subscriptions"
 
     (* create type *)
     let create user =
@@ -314,6 +345,9 @@ module UserAccount :
 
   end
 
+  type mailbox = {user:string;mailbox:string;folders:bool;trans:IrminIntf.transaction;
+      index:int list option ref}
+
 (* consistency TBD *)
 module IrminMailbox :
   sig
@@ -321,6 +355,8 @@ module IrminMailbox :
     val create : string -> string  -> t Lwt.t
     val commit : t -> unit Lwt.t
     val exists : t -> [`No|`Folder|`Mailbox] Lwt.t
+    val exists_path : t -> string -> [`No|`Folder|`Mailbox] Lwt.t
+    val exists_key : t -> IrminKey.t -> [`No|`Folder|`Mailbox] Lwt.t
     val create_mailbox : t -> unit Lwt.t
     val delete_mailbox : t -> unit Lwt.t
     val move_mailbox : t -> string -> unit Lwt.t
@@ -336,29 +372,27 @@ module IrminMailbox :
     val read_message_metadata : t -> [`Sequence of int|`UID of int] -> 
       [`NotFound|`Eof|`Ok of mailbox_message_metadata] Lwt.t
     val delete_message : t -> [`Sequence of int|`UID of int] -> unit Lwt.t
-    val list : t -> [`Folder of string|`Mailbox of string] list Lwt.t
-  end =
-  struct
+    val list : t -> string -> [`Folder of string|`Mailbox of string] list Lwt.t
+  end with type t = mailbox = 
+  struct 
     (* user * mailbox * is-folder * irmin key including the mailbox *)
-    type t =
-      {user:string;mailbox:string;folders:bool;trans:IrminIntf.transaction;
-      index:int list option ref}
+    type t = mailbox
 
     let get_key = function
-    | `Metamailbox -> IrminKey.create "meta"
-    | `Index -> IrminKey.create "index"
-    | `Messages -> IrminKey.create "messages"
-    | `Postmark uid -> IrminKey.create ("messages/" ^ (string_of_int uid) ^ "/postmark")
-    | `Headers uid -> IrminKey.create ("messages/" ^ (string_of_int uid) ^ "/headers")
-    | `Email uid -> IrminKey.create ("messages/" ^ (string_of_int uid) ^ "/email")
-    | `Metamessage uid -> IrminKey.create ("messages/" ^ (string_of_int uid) ^ "/meta")
-    | `Uid uid -> IrminKey.create ("messages/" ^ (string_of_int uid))
+    | `Metamailbox -> IrminKey.t_of_path "meta"
+    | `Index -> IrminKey.t_of_path "index"
+    | `Messages -> IrminKey.t_of_path "messages"
+    | `Postmark uid -> IrminKey.t_of_path ("messages/" ^ (string_of_int uid) ^ "/postmark")
+    | `Headers uid -> IrminKey.t_of_path ("messages/" ^ (string_of_int uid) ^ "/headers")
+    | `Email uid -> IrminKey.t_of_path ("messages/" ^ (string_of_int uid) ^ "/email")
+    | `Metamessage uid -> IrminKey.t_of_path ("messages/" ^ (string_of_int uid) ^ "/meta")
+    | `Uid uid -> IrminKey.t_of_path ("messages/" ^ (string_of_int uid))
 
     (* commit should be called explicitly on each created mailbox to have the
      * changes commited to Irmin
      *)
     let create user path =
-      let (mailbox,folders,key) = IrminKey.create_mailboxes user path in
+      let (mailbox,folders,key) = IrminKey.mailbox_of_path ?user:(Some user) path in
       IrminIntf.begin_transaction key >>= fun trans ->
         return {user;mailbox;folders;trans;index=ref None}
 
@@ -381,7 +415,7 @@ module IrminMailbox :
 
     (* how to make this the transaction? TBD *)
     let move_mailbox mbox path =
-      let (_,_,key2) = IrminKey.create_mailboxes mbox.user path in
+      let (_,_,key2) = IrminKey.mailbox_of_path ?user:(Some mbox.user) path in
       IrminIntf.move_view mbox.trans key2 >>
       IrminIntf.remove_view mbox.trans
 
@@ -402,6 +436,20 @@ module IrminMailbox :
       )
       (fun _ -> return `No)
 
+    let exists_key mbox key =
+      catch (fun () ->
+        let key = IrminKey.add_path key "meta" in
+        IrminIntf.tr_read_exn mbox.trans key >>= fun metadata_sexp_str ->
+        let metadata_sexp = Sexp.of_string metadata_sexp_str in
+        let metadata = mailbox_metadata_of_sexp metadata_sexp in
+        return (if metadata.folders then `Folder else `Mailbox)
+      )
+      (fun _ -> return `No)
+
+    let exists_path mbox path =
+      let (_,_,key) = IrminKey.mailbox_of_path path in
+      exists_key mbox key
+
     let find_flag l fl =
       List.find l ~f:(fun f -> if f = fl then true else false) <> None
 
@@ -413,6 +461,11 @@ module IrminMailbox :
             (Sexp.of_string index_sexp_str))
       | Some uids -> return uids
 
+    let update_index_uids mbox uids = 
+      mbox.index := Some uids;
+      IrminIntf.tr_update mbox.trans (get_key `Index) 
+        (Sexp.to_string (List.sexp_of_t (fun i -> Sexp.of_string (string_of_int i)) (uids)))
+
     let update_index_uid mbox uid =
       read_index_uid mbox >>= fun uids ->
       if List.find uids ~f:(fun u -> if u = uid then true else false) <> None then
@@ -420,13 +473,11 @@ module IrminMailbox :
       else (
         (* reverse index *)
         let uids = (uid :: uids) in
-        mbox.index := Some uids;
-        IrminIntf.tr_update mbox.trans (get_key `Index) 
-          (Sexp.to_string (List.sexp_of_t (fun i -> Sexp.of_string (string_of_int i)) (uids)))
+        update_index_uids mbox uids
       )
 
-    let append_message mbox message message_metadata =
-      read_mailbox_metadata mbox >>= fun mailbox_metadata ->
+    let append_message_raw mbox ~postmark_sexp_str ~headers_sexp_str ~email_sexp_str 
+        mailbox_metadata message_metadata =
       let count = mailbox_metadata.count + 1 in
       let uid = mailbox_metadata.uidnext in
       let uidnext = uid + 1 in
@@ -451,25 +502,27 @@ module IrminMailbox :
         else 
           mailbox_metadata.unseen 
       in
-      let mailbox_metadata = {mailbox_metadata with
-        uidnext;count;nunseen;recent;unseen} in
-      let size = String.length (Mailbox.Message.to_string message) in
-      let message_metadata = {message_metadata with uid;modseq;size} in
-      update_mailbox_metadata mbox mailbox_metadata >>= fun () ->
+      let mailbox_metadata = {mailbox_metadata with uidnext;count;nunseen;recent;unseen} in
+      let message_metadata = {message_metadata with uid;modseq} in
       let message_metadata_sexp = sexp_of_mailbox_message_metadata message_metadata in
       IrminIntf.tr_update mbox.trans (get_key (`Metamessage uid)) 
-        (Sexp.to_string message_metadata_sexp) >>= fun () ->
-      let postmark = message.postmark in
-      let postmark_sexp = Mailbox.Postmark.sexp_of_t postmark in
-      IrminIntf.tr_update mbox.trans (get_key (`Postmark uid)) 
-        (Sexp.to_string postmark_sexp) >>= fun () ->
-      let email = message.email in
-      let email_sexp = Email.sexp_of_t email in
-      IrminIntf.tr_update mbox.trans (get_key (`Email uid)) (Sexp.to_string email_sexp) >>= fun () ->
-      let header = Email.header email in
-      let header_sexp = Header.sexp_of_t header in
-      IrminIntf.tr_update mbox.trans (get_key (`Headers uid)) (Sexp.to_string header_sexp) >>= fun () ->
-      update_index_uid mbox uid
+        (Sexp.to_string message_metadata_sexp) >>
+      IrminIntf.tr_update mbox.trans (get_key (`Postmark uid)) postmark_sexp_str >>
+      IrminIntf.tr_update mbox.trans (get_key (`Email uid)) email_sexp_str >>
+      IrminIntf.tr_update mbox.trans (get_key (`Headers uid)) headers_sexp_str >>
+      return (mailbox_metadata,message_metadata)
+
+    let append_message mbox message message_metadata =
+      let size = String.length (Mailbox.Message.to_string message) in
+      let postmark_sexp_str = Sexp.to_string (Mailbox.Postmark.sexp_of_t message.postmark) in
+      let email_sexp_str = Sexp.to_string (Email.sexp_of_t message.email) in
+      let headers_sexp_str = Sexp.to_string (Header.sexp_of_t (Email.header message.email)) in
+      read_mailbox_metadata mbox >>= fun mailbox_metadata ->
+      let message_metadata = {message_metadata with size} in
+      append_message_raw mbox ~postmark_sexp_str ~headers_sexp_str ~email_sexp_str 
+          mailbox_metadata message_metadata >>= fun (mailbox_metadata,message_metadata) ->
+      update_mailbox_metadata mbox mailbox_metadata >>
+      update_index_uid mbox message_metadata.uid
 
     let get_uid mbox position = 
       read_index_uid mbox >>= fun uids ->
@@ -498,7 +551,7 @@ module IrminMailbox :
           (Sexp.to_string (sexp_of_mailbox_message_metadata metadata)) >>= fun () ->
         return `Ok
 
-    let read_message mbox ?filter position =
+    let read_message_raw mbox ?filter position =
       get_uid mbox position >>= function
       | `Eof -> return `Eof
       | `NotFound -> return `NotFound
@@ -512,19 +565,35 @@ module IrminMailbox :
         else (
           IrminIntf.tr_read_exn mbox.trans (get_key (`Metamessage uid)) >>= fun sexp_str ->
           let message_metadata = mailbox_message_metadata_of_sexp (Sexp.of_string sexp_str) in
+          IrminIntf.tr_read_exn mbox.trans (get_key (`Headers uid)) >>= fun headers_sexp_str ->
           IrminIntf.tr_read_exn mbox.trans (get_key (`Postmark uid)) >>= fun postmark_sexp_str ->
           IrminIntf.tr_read_exn mbox.trans (get_key (`Email uid)) >>= fun email_sexp_str ->
-          let postmark_sexp = Sexp.of_string postmark_sexp_str in
-          let postmark = Mailbox.Postmark.t_of_sexp postmark_sexp in
-          let email_sexp = Sexp.of_string email_sexp_str in
-          let email = Email.t_of_sexp email_sexp in
-          let message = {Mailbox.Message.postmark=postmark;Mailbox.Message.email=email} in
-          if filter = None || Interpreter.exec_search 
-              email (Option.value_exn filter) message_metadata seq = true then
-            return (`Ok (message,message_metadata))
-          else
-            return `NotFound
+          if filter = None then
+            return (`Ok (None,postmark_sexp_str,headers_sexp_str,email_sexp_str,message_metadata))
+          else (
+            let postmark = Mailbox.Postmark.t_of_sexp (Sexp.of_string postmark_sexp_str) in
+            let email = Email.t_of_sexp (Sexp.of_string email_sexp_str) in
+            let message = {Mailbox.Message.postmark=postmark;Mailbox.Message.email=email} in
+            if Interpreter.exec_search email (Option.value_exn filter) message_metadata seq = true then
+              return (`Ok (Some message,postmark_sexp_str,headers_sexp_str,email_sexp_str,message_metadata))
+            else
+              return `NotFound
+          )
         )
+
+    let read_message mbox ?filter position =
+      read_message_raw mbox ?filter position >>= function
+      | `Eof -> return `Eof
+      | `NotFound -> return `NotFound
+      | `Ok (message,postmark_sexp_str,_,email_sexp_str,message_metadata) ->
+          if message <> None then
+            return (`Ok (Option.value_exn message,message_metadata))
+          else (
+            let postmark = Mailbox.Postmark.t_of_sexp (Sexp.of_string postmark_sexp_str) in
+            let email = Email.t_of_sexp (Sexp.of_string email_sexp_str) in
+            let message = {Mailbox.Message.postmark=postmark;Mailbox.Message.email=email} in
+            return (`Ok (message,message_metadata))
+          )
 
     let read_message_metadata mbox position =
       get_uid mbox position >>= function
@@ -534,15 +603,84 @@ module IrminMailbox :
         IrminIntf.tr_read_exn mbox.trans (get_key (`Metamessage uid)) >>= fun sexp_str ->
         return (`Ok (mailbox_message_metadata_of_sexp (Sexp.of_string sexp_str)))
 
+    let get_min_max_uid uids =
+      if List.length uids = 0 then
+        (0,0)
+      else
+        (List.nth_exn uids 0),(List.last_exn uids)
+
+    let get_min_max_seq mailbox_metadata =
+      (1, mailbox_metadata.count)
+
+    let get_min_max mailbox_metadata uids buid =
+      if buid then
+        get_min_max_uid uids
+      else
+        get_min_max_seq mailbox_metadata
+
     let copy_mailbox mbox1 mbox2 sequence buid =
-      return ()
+      let open Seq_iterator in
+      read_mailbox_metadata mbox1 >>= fun mailbox_metadata1 ->
+      read_index_uid mbox1 >>= fun uids1 ->
+      read_mailbox_metadata mbox2 >>= fun mailbox_metadata2 ->
+      read_index_uid mbox2 >>= fun uids2 ->
+      let (min,max) = get_min_max mailbox_metadata1 uids1 buid in
+      let iterator = SequenceIterator.create sequence min max in
+      let rec copy mailbox_metadata2 uids2 = function
+        | `End -> return (mailbox_metadata2,uids2) (* and of iteration *)
+        | `Ok seq ->
+          let position = if buid then (`UID seq) else (`Sequence seq) in
+          read_message_raw mbox1 position >>= function
+          | `Eof -> return (mailbox_metadata2, uids2)
+          | `NotFound -> copy mailbox_metadata2 uids2 (SequenceIterator.next iterator)
+          | `Ok (_,postmark_sexp_str,headers_sexp_str,email_sexp_str,message_metadata) ->
+            let flags = 
+              if List.find message_metadata.flags ~f:(fun f -> f = Flags_Recent) <> None then
+                message_metadata.flags
+              else
+                Flags_Recent :: message_metadata.flags
+            in
+            let message_metadata = {message_metadata with flags} in
+            append_message_raw mbox2 ~postmark_sexp_str ~headers_sexp_str
+              ~email_sexp_str mailbox_metadata2 message_metadata >>= 
+            fun (mailbox_metadata2,message_metadata2) ->
+            let uids2 = message_metadata2.uid :: uids2 in
+            copy mailbox_metadata2 uids2 (SequenceIterator.next iterator)
+      in
+      copy mailbox_metadata2 uids2 (SequenceIterator.next iterator) >>= 
+      fun (mailbox_metadata2,uids2) ->
+      update_mailbox_metadata mbox2 mailbox_metadata2 >>
+      update_index_uids mbox2 uids2
 
     let delete_message mbox position =
       get_uid mbox position >>= function
       | `Ok (_,uid) -> IrminIntf.tr_remove mbox.trans (get_key (`Uid uid))
       |_ -> return ()
 
-    let list mbox =
-      return []
+    let list_mailbox mbox key =
+      IrminIntf.tr_list mbox.trans (IrminKey.mailboxes_of_mailbox key)
+
+    let is_folder mbox key =
+      exists_key mbox key >>= function
+      | `Folder -> return true
+      | _ -> return false
+
+    let rec list_ mbox key acc =
+      list_mailbox mbox key >>= fun listing ->
+      Lwt_list.fold_left_s (fun acc name ->
+        let key = IrminKey.t_of_list name in
+        is_folder mbox key >>= fun res ->
+        if res = true then
+          list_ mbox key acc >>= fun acc -> return ((`Folder (IrminKey.view_key_to_path key)) :: acc)
+        else
+          return ((`Mailbox (IrminKey.view_key_to_path key)) :: acc)
+      ) acc listing
+
+    (* assuming that "reference" and "mailbox" arguments in list command
+     * are converted into initial mailbox and regular expression to match
+     *)
+    let list mbox path =
+      let (_,_,key) = IrminKey.mailbox_of_path path in
+      list_ mbox key []
 
   end
