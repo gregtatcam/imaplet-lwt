@@ -51,3 +51,11 @@ let substr str ~start ~size =
       Str.string_before str size
     else
       str
+
+let concat_path a1 a2 =
+  if a1 <> "" && a2 <> "" then
+    Filename.concat a1 a2
+  else if a1 <> "" then
+    a1
+  else 
+    a2

@@ -375,8 +375,8 @@ module IrminMailbox :
     (* function is called on each item, it takes accum, folder with count of
      * children or mailbox, and returns accum and indicates if the item can be
      * accessed *)
-    val list : t -> string -> init:'a -> 
-      f:('a -> [`Folder of string*int|`Mailbox of string] -> ('a*bool) Lwt.t) -> 'a Lwt.t
+    val list : t -> subscribed:bool -> ?access:(string -> bool) -> string -> init:'a -> 
+      f:('a -> [`Folder of string*int|`Mailbox of string] -> 'a Lwt.t) -> 'a Lwt.t
     val read_index_uid : t -> int list Lwt.t
   end with type t = mailbox = 
   struct 
@@ -670,29 +670,41 @@ module IrminMailbox :
       | `Folder -> return true
       | _ -> return false
 
-    let rec list_ mbox key init f =
+    let rec list_ mbox key subscriptions access init f =
       list_mailbox mbox key >>= fun listing ->
       Lwt_list.fold_left_s (fun (acc,cnt) name ->
-        let key = IrminKey.t_of_list name in
-        is_folder mbox key >>= fun res ->
-        begin
-        if res = true then (
-          list_ mbox key acc f >>= fun (acc,cnt) -> 
-          f acc (`Folder ((IrminKey.view_key_to_path key),cnt)) 
-        ) else (
-          f acc (`Mailbox (IrminKey.view_key_to_path key)) 
+        (* if folder is not accessible then neither are the children *)
+        if access (IrminKey.view_key_to_path key) = false then
+          return (acc,cnt)
+        else (
+          let key = IrminKey.t_of_list name in
+          is_folder mbox key >>= fun res ->
+          begin
+          if res = true then (
+            list_ mbox key subscriptions access acc f >>= fun (acc,cnt) -> 
+            f acc (`Folder ((IrminKey.view_key_to_path key),cnt)) 
+          ) else (
+            f acc (`Mailbox (IrminKey.view_key_to_path key)) 
+          )
+          end >>= fun (acc) ->
+          return (acc,cnt+1)
         )
-        end >>= fun (acc,access) ->
-        let cnt = if access then cnt + 1 else cnt in
-        return (acc,cnt)
       ) (init,0) listing
 
     (* assuming that "reference" and "mailbox" arguments in list command
      * are converted into initial mailbox and regular expression to match
      *)
-    let list mbox path ~init ~f =
+    let list mbox ~subscribed ?(access=(fun _ -> true)) path ~init ~f =
       let (_,_,key) = IrminKey.mailbox_of_path path in
-      list_ mbox key init f >>= fun (acc,_) ->
+      begin
+      if subscribed then (
+        Subscriptions.create mbox.user >>= fun sub ->
+        Subscriptions.read sub >>= fun sub -> return (Some sub)
+      ) else (
+        return None
+      ) 
+      end >>= fun subscriptions ->
+      list_ mbox key subscriptions access init f >>= fun (acc,_) ->
       return acc
 
   end

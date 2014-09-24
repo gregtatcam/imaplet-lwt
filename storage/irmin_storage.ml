@@ -26,6 +26,10 @@ struct
   let create user =
     user
 
+  let exists t mailbox = 
+    IrminMailbox.create t mailbox >>= fun mbox ->
+    IrminMailbox.exists mbox
+
   (* status *)
   let status t mailbox =
     IrminMailbox.create t mailbox >>= fun mbox ->
@@ -70,16 +74,9 @@ struct
   (* list reference mailbox 
    * returns list of files/folders with list of flags 
    *)
-  let list t reference mailbox ~init ~f =
+  let list t ~subscribed ?(access=(fun _ -> true)) reference mailbox ~init ~f =
     IrminMailbox.create t reference >>= fun mbox ->
-    IrminMailbox.list mbox mailbox ~init ~f
-
-  (* lsub reference mailbox - list of subscribed mailboxes
-   * returns list of files/folders with list of flags 
-   *)
-  let lsub t reference mailbox ~init ~f =
-    IrminMailbox.create t reference >>= fun mbox ->
-    IrminMailbox.list mbox mailbox ~init ~f
+    IrminMailbox.list mbox ~subscribed ~access mailbox ~init ~f
 
   (* append message(s) to selected mailbox *)
   let append t mailbox message mailbox_metadata =
@@ -141,6 +138,11 @@ struct
   let fetch t mailbox position =
     IrminMailbox.create t mailbox >>= fun mbox ->
     IrminMailbox.read_message mbox position
+
+  (* fetch messages from selected mailbox *)
+  let fetch_message_metadata t mailbox position =
+    IrminMailbox.create t mailbox >>= fun mbox ->
+    IrminMailbox.read_message_metadata mbox position
 
   (* store flags to selected mailbox *)
   let store t mailbox position message_metadata =

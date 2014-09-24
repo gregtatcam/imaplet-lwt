@@ -66,3 +66,5 @@ val crlf : string
 val append_regex : string
 
 val lappend_regex : string
+
+val fixregx_mbox : string -> string

@@ -14,103 +14,416 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 open Lwt
+open BatLog
 open Storage_meta
 open Imaplet_types
 open Irmin_storage
 
+exception InvalidStorageType
+
 type selection = [`Select of string | `Examine of string | `None]
 
-let factory user =
+type amailboxt = {inbox_path:string;mail_path:string;user:string option;selected:selection}
+
+let factory mailboxt =
+  let open Server_config in
   let open Storage in
-  build_strg_inst (module IrminStorage) user
+  let open Core.Std in
+  match srv_config.data_store with
+  | `Irmin -> build_strg_inst (module IrminStorage) (Option.value_exn mailboxt.user)
 
 (* inbox location * all mailboxes location * user * type of selected mailbox *)
-type t = string * string * string option * selection 
+type t = amailboxt
 
-let selected_mbox mbx =
-  let (_,_,_,s) = mbx in
-  match s with
+let selected_mbox mailboxt =
+  match mailboxt.selected with
   | `None -> None
   | `Select s -> Some s
   | `Examine s -> Some s
 
 (* create the mailbox type *)
 let create user =
-  (* choose mailbox type from configuration, i.e. irmin etc *)
-  ("","",Some user,`None)
+  let open Server_config in
+  let (inbox_path,mail_path) = 
+  match srv_config.data_store with
+  | `Irmin -> "",""
+  in
+  {inbox_path;mail_path;user=Some user;selected=`None}
 
 (* empty type *)
 let empty () =
-  ("","",None,`None)
+  {inbox_path="";mail_path="";user=None;selected=`None}
 
 (* get authenticated user *)
 let user mailboxt =
-  let (_,_,u,_) = mailboxt in
-  u
+  mailboxt.user
 
-(* list mailbox *)
-let listmbx mailboxt reference mailbox =
-  return []
+(** make directory item **)
+let dir_item item cnt =
+  (item, "\\Noselect" ::
+    if cnt = 0 then
+      ["\\HasNoChildren"]
+    else
+      ["\\HasChildren"])
 
-(* list subscribed *)
-let lsubmbx mailboxt reference mailbox =
-  return []
+(** make mailbox item **)
+let mbox_item item reference =
+  (item, "NoInferiors" ::
+  if reference = "" then 
+  (
+    if item = "Drafts" then
+      ["\\Drafts"]
+    else if item = "Deleted Messages" then
+      ["\\Deleted"]
+    else if item = "Sent Messages" then
+      ["\\Sent"] 
+    else
+      []
+  ) else
+    []
+  )
+  
+let list_ (module Mailbox : Storage.Storage_inst) subscribed reference mailbox =
+  let open Regex in
+  let open Utils in
+  let open Core.Std in
+  (* item is relative to the reference *)
+  let select_item acc reference item isdir =
+    (** fix regex for the mailbox **)
+    let regxmailbox = fixregx_mbox mailbox in
+    (** get item path relative to the relative root **)
+    let tomatch = concat_path reference item in
+    if isdir <> None then
+    (
+      if match_regex tomatch ~regx:regxmailbox then
+        ((dir_item item (Option.value_exn isdir)) :: acc)
+      else
+        acc
+    ) else if match_regex tomatch ~regx:regxmailbox then
+        ((mbox_item item reference) :: acc)
+    else
+      (acc)
+  in
+  Mailbox.MailboxStorage.exists Mailbox.this reference >>= function
+  | `No | `Folder -> return []
+  | `Mailbox ->
+    (* item has path relative to the start, i.e. root + reference *)
+    Mailbox.MailboxStorage.list Mailbox.this ~subscribed ~access:(fun _ -> true) 
+    reference mailbox ~init:[] ~f:(fun acc item ->
+      match item with
+        | `Folder (item,cnt)  -> return (select_item acc reference item (Some cnt))
+        | `Mailbox item  -> return (select_item acc reference item None)
+    )
 
-(* select mailbox : `NotExists, `NotSelectable, `Error, `Ok *)
+(** add to the calculated list the reference folder and inbox **)
+let add_list reference mailbox acc =
+  let open Regex in
+  let fixed = fixregx_mbox mailbox in
+  if match_regex reference ~regx:"[.]+" = false && match_regex "INBOX" ~regx:fixed then 
+    ("INBOX", ["\\HasNoChildren"])::acc
+  else
+    acc
+
+(** list mailbox **)
+let list_adjusted (module Mailbox : Storage.Storage_inst) subscribed reference mailbox =
+  let open Regex in
+  let open Core.Std in
+  (* match the wild cards part of the mailbox *)
+  let str = reference ^ mailbox in
+  let path,regx =
+  if match_regex str "\\([^/]*[%\\*].*$\\)" then (
+    let regx = Str.matched_string str in
+    let path = String.slice str 0 (String.length str - (String.length regx)) in
+    path,regx
+  ) else (
+    str,""
+  )
+  in
+  Easy.logf `debug "listmbx -%s- -%s- -%s- -%s-\n%!" reference mailbox path regx;
+  let fixref = replace "\"" "" reference in 
+  let fixref = replace "^/$" "" fixref in
+  let fixmbx = replace "\"" "" mailbox in
+  if reference = "\"/\"" || reference = "/" || reference = "" && mailbox = "" then
+  (
+    Easy.logf `debug "special listmbx -%s- -%s-\n%!" reference mailbox;
+    let flags = ["\\Noselect"] in
+    let file = 
+    (if mailbox = "" then
+      "/"
+    else
+      ""
+    ) in
+      return ([file, flags])
+  ) else (
+    Easy.logf `debug "regular listmbx -%s- -%s-\n%!" reference mailbox;
+    list_ (module Mailbox) subscribed fixref fixmbx >>= 
+      fun acc -> return (add_list fixref mailbox acc)
+  )
+
+(** list mailbox **)
+let list mailboxt reference mailbox =
+  let (module Mailbox) = factory mailboxt in
+  list_adjusted (module Mailbox) false reference mailbox
+
+(** lsubmbx mailbx reference mailbox, list on subscribed mailboxes 
+ * need to handle a wild card % case when foo/bar is subscribed but foo is no
+ * should return foo only in this case 
+**)
+let lsub mailboxt reference mailbox =
+  Easy.logf `debug "lsubmbx\n%!";
+  let (module Mailbox) = factory mailboxt in
+  list_adjusted (module Mailbox) true reference mailbox 
+
+let select_ mailboxt mailbox selection = 
+  let (module Mailbox) = factory mailboxt in
+  Mailbox.MailboxStorage.exists Mailbox.this mailbox >>= function
+  | `No -> return `NotExists
+  | `Folder -> return `NotSelectable
+  | `Mailbox ->
+    Mailbox.MailboxStorage.select Mailbox.this mailbox >>= fun mailbox_metadata ->
+    return (`Ok ({mailboxt with selected = selection}, mailbox_metadata))
+
+(* select mailbox *)
 let select mailboxt mailbox = 
-  let (module Mailbox) = factory "dovecot" in
-  Mailbox.MailboxStorage.select Mailbox.this mailbox >>= fun _ ->
-  return (`Ok (mailboxt, empty_mailbox_metadata ()))
+  select_ mailboxt mailbox (`Select mailbox)
 
 (* examine mailbox *)
 let examine mailboxt mailbox =
-  return (`Ok (mailboxt, empty_mailbox_metadata ()))
+  select_ mailboxt mailbox (`Examine mailbox)
 
 (* create mailbox *)
 let create_mailbox mailboxt mailbox =
-  return `Ok
+  let (module Mailbox) = factory mailboxt in
+  Mailbox.MailboxStorage.exists Mailbox.this mailbox >>= function
+  | `Mailbox -> return (`Error("Mailbox already exists"))
+  | `Folder -> return (`Error("Invalid Superior"))
+  | `No ->
+    let open Regex in
+    if match_regex mailbox ~regx:"^/" then
+      return (`Error("Invalid mailbox name: Begins with hierarchy separator"))
+    else if match_regex mailbox ~regx:"^\"?.imaplet/?\"?" then
+      return (`Error("Invalid mailbox name: Contains reserved name"))
+    else if match_regex mailbox ~regx:"^\"?./?\"?$" || match_regex mailbox ~regx:"^\"?../?\"?$" then
+      return (`Error("Invalid mailbox name: Contains . part"))
+    else 
+    (
+      Mailbox.MailboxStorage.create_mailbox Mailbox.this mailbox >> 
+      return `Ok
+    )
 
 (* delete mailbox *)
 let delete_mailbox mailboxt mailbox =
-  return `Ok
+  let (module Mailbox) = factory mailboxt in
+  Mailbox.MailboxStorage.exists Mailbox.this mailbox >>= function
+  | `No -> return (`Error("Mailbox doesn't exist"))
+  | _ ->
+    Mailbox.MailboxStorage.delete Mailbox.this mailbox >>
+    return `Ok
 
 (* rename mailbox *)
 let rename_mailbox mailboxt src dest =
-  return `Ok
+  let (module Mailbox) = factory mailboxt in
+  Mailbox.MailboxStorage.exists Mailbox.this src >>= function
+  | `No -> return (`Error("Mailbox doesn't exist"))
+  | _ ->
+    Mailbox.MailboxStorage.exists Mailbox.this dest >>= function
+    | `No ->
+      let (module Mailbox) = factory mailboxt in
+      Mailbox.MailboxStorage.rename Mailbox.this src dest >>
+      return `Ok
+    | _ -> return (`Error ("Destination mailbox exists"))
 
 (* subscribe mailbox *)
 let subscribe mailboxt mailbox =
-  return `Ok
+  let (module Mailbox) = factory mailboxt in
+  Mailbox.MailboxStorage.exists Mailbox.this mailbox >>= function
+  | `No -> return (`Error("Mailbox doesn't exist"))
+  | _ ->
+    Mailbox.MailboxStorage.subscribe Mailbox.this mailbox >>
+    return `Ok
 
 (* unsubscribe mailbox *)
 let unsubscribe mailboxt mailbox =
-  return `Ok
+  let (module Mailbox) = factory mailboxt in
+  Mailbox.MailboxStorage.exists Mailbox.this mailbox >>= function
+  | `No -> return (`Error("Mailbox doesn't exist"))
+  | _ ->
+    Mailbox.MailboxStorage.unsubscribe Mailbox.this mailbox >>
+    return `Ok
 
 (* append message to mailbox *)
-let append mailboxt mailboxt reader writer flags date literal =
-  return `Ok
+let append mailboxt mailbox reader writer flags date literal =
+  let open Core.Std in
+  let (module Mailbox) = factory mailboxt in
+  Mailbox.MailboxStorage.exists Mailbox.this  mailbox >>= function
+    | `No -> return (`NotExists)
+    | `Folder -> return (`NotSelectable)
+    | `Mailbox -> 
+      (** request the message from the client **)
+      begin
+        match literal with
+        | Literal n -> Response.write_resp writer (Resp_Cont("")) >> return n
+        | LiteralPlus n -> return n
+      end >>= fun size ->
+      let message = String.create size in
+      (* timeout and how long? what if the message fairly big? *)
+      Lwt_io.read_into_exactly reader message 0 size >>= fun () ->
+      let headers = String.slice message 0 (if size < 1024 * 5 then size else 1024 * 5) in
+      let message =
+      if Regex.match_regex headers ~regx:"^From [^\r\n]+" then ( 
+        let post = Str.matched_group 0 headers in
+        let email = Str.last_chars message (size - (String.length post)) in
+        {Email_message.Mailbox.Message.postmark=Email_message.Mailbox.Postmark.of_string post; 
+          Email_message.Mailbox.Message.email = Email_message.Email.of_string email}
+      ) else (
+        (* try to construct the postmark, since the message could be malformed,
+        * look at a slice that should include the headers
+        *)
+        let time = Time.to_float (Time.now()) in
+        let tm = Unix.gmtime time in
+        let date_time () = Printf.sprintf "%s %s %d %02d:%02d:%02d %d"
+          (Dates.day_of_week tm.Unix.tm_wday) (Dates.int_to_month
+          tm.Unix.tm_mon) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min
+          tm.Unix.tm_sec (1900+tm.Unix.tm_year)
+        in
+        let from buff =
+          if Regex.match_regex headers ~regx:"^From: \\([^<]+\\)<\\([^>]+\\)" then
+            Str.matched_group 2 buff
+          else
+            "From daemon@localhost.local"
+        in
+        let post = ("From " ^ (from headers) ^ " " ^ (date_time ()) ^ "\r\n") in
+        {Email_message.Mailbox.Message.postmark=Email_message.Mailbox.Postmark.of_string post; 
+          Email_message.Mailbox.Message.email = Email_message.Email.of_string message}
+      )
+      in 
+      let flags = Option.value flags ~default:[] in
+      let flags =
+        if List.find flags ~f:(fun f -> if f = Flags_Recent then true else false) <> None then
+         Some flags
+        else
+          Some (Flags_Recent :: flags)
+      in
+      let dt = Some (Option.value date ~default:Time.epoch) in
+      let metadata = empty_mailbox_message_metadata() in
+      let metadata = update_mailbox_message_metadata ~data:metadata
+            ?internal_date:dt ?flags ()
+      in
+      Mailbox.MailboxStorage.append Mailbox.this mailbox message metadata >>
+      return `Ok
 
 (* close selected mailbox *)
 let close mailboxt =
-  let (i,m,u,_) = mailboxt in
-  (i,m,u,`None)
+  {mailboxt with selected=`None}
 
 (* search mailbox *)
 let search mailboxt keys buid =
-  return (`Ok [])
+  match (selected_mbox mailboxt) with
+  | None -> return (`Error "Not selected")
+  | Some name ->
+  let (module Mailbox) = factory mailboxt in
+  Mailbox.MailboxStorage.exists Mailbox.this name >>= function
+  | `No -> return (`NotExists)
+  | `Folder -> return (`NotSelectable)
+  | `Mailbox -> 
+    Mailbox.MailboxStorage.search Mailbox.this name keys buid >>= fun acc -> 
+    return (`Ok acc)
+
+let get_iterator (module Mailbox: Storage.Storage_inst) name buid sequence =
+  let open Seq_iterator in
+  let open Core.Std in
+  if SequenceIterator.single sequence then
+    return (Some (SequenceIterator.create sequence 1 Int.max_value))
+  else (
+    Mailbox.MailboxStorage.status Mailbox.this name >>= fun mailbox_metadata ->
+    if buid = false then
+      return (Some (SequenceIterator.create sequence 1 mailbox_metadata.count))
+    else (
+      Mailbox.MailboxStorage.fetch_message_metadata Mailbox.this name (`Sequence 1) >>= function
+      | `Ok message_metadata ->
+        return (Some (SequenceIterator.create sequence message_metadata.uid
+          (mailbox_metadata.uidnext - 1)))
+      | _ -> return None
+    )
+  )
+
+let iter_selected_with_seq (module Mailbox: Storage.Storage_inst) mailboxt sequence buid f =
+  let open Interpreter in
+  match (selected_mbox mailboxt) with
+  | None -> return (`Error "Not selected")
+  | Some mailbox ->
+  Mailbox.MailboxStorage.exists Mailbox.this mailbox >>= function
+  | `No -> return (`NotExists)
+  | `Folder -> return (`NotSelectable)
+  | `Mailbox -> 
+    get_iterator (module Mailbox) mailbox buid sequence >>= function
+    | None -> return `Ok
+    | Some it ->
+      let open Seq_iterator in
+      let rec read = function
+        | `End -> return ()
+        | `Ok seq ->
+          let pos = if buid then (`UID seq) else (`Sequence seq) in
+          f mailbox pos seq >>= function
+          | `Eof -> return ()
+          | `Ok -> read (SequenceIterator.next it)
+      in
+      read (SequenceIterator.next it) >> return `Ok
 
 (* fetch data from mailbox *)
 let fetch mailboxt resp_writer sequence fetchattr buid =
-  return `Ok
+  let (module Mailbox) = factory mailboxt in
+  iter_selected_with_seq (module Mailbox) mailboxt sequence buid (fun mailbox pos seq ->
+    Mailbox.MailboxStorage.fetch Mailbox.this mailbox pos >>= function
+    | `Eof -> return `Eof
+    | `NotFound -> return `Ok
+    | `Ok (message,metadata) -> 
+      (* need more efficient exec_fetch since sequence is already tested
+       by the iterator *)
+      let res = Interpreter.exec_fetch seq sequence message metadata fetchattr buid in
+      match res with
+      | Some res -> resp_writer res; return `Ok
+      | None -> return `Ok
+  )
 
 (* store flags *)
 let store mailboxt resp_writer sequence storeattr flagsval buid =
-  return `Ok
+  let (module Mailbox) = factory mailboxt in
+  iter_selected_with_seq (module Mailbox) mailboxt sequence buid (fun mailbox pos seq ->
+    Mailbox.MailboxStorage.fetch_message_metadata Mailbox.this mailbox pos >>= function
+    | `Eof -> return `Eof
+    | `NotFound -> return `Ok
+    | `Ok message_metadata ->
+      match Interpreter.exec_store message_metadata seq sequence storeattr flagsval buid with
+      | `None -> return `Ok
+      | `Silent metadata -> Mailbox.MailboxStorage.store Mailbox.this mailbox pos metadata >>
+        return `Ok
+      | `Ok (metadata,res) -> 
+        resp_writer res >> 
+        Mailbox.MailboxStorage.store Mailbox.this mailbox pos metadata >>
+        return `Ok
+  )
 
 (* copy messages to mailbox *)
 let copy mailboxt dest_mbox sequence buid =
-  return `Ok
+  let (module Mailbox) = factory mailboxt in
+  match (selected_mbox mailboxt) with
+  | None -> return (`Error "Not selected")
+  | Some src_mbox ->
+  Mailbox.MailboxStorage.exists Mailbox.this dest_mbox >>= function
+  | `No -> return (`NotExists)
+  | `Folder -> return (`NotSelectable)
+  | `Mailbox -> 
+    Mailbox.MailboxStorage.copy Mailbox.this src_mbox dest_mbox sequence buid >>
+    return `Ok
 
 (* permanently remove messages with \Deleted flag *)
 let expunge mailboxt resp_writer =
-  return `Ok
+  let (module Mailbox) = factory mailboxt in
+  match (selected_mbox mailboxt) with
+  | None -> return (`Error "Not selected")
+  | Some mailbox ->
+    Mailbox.MailboxStorage.expunge Mailbox.this mailbox (fun seq ->
+      resp_writer ((string_of_int seq) ^ " EXPUNGE")
+    ) >>
+    return `Ok

@@ -124,9 +124,9 @@ let list_resp flags file =
 let handle_list context reference mailbox lsub =
   begin
   if lsub = false then
-    Amailbox.listmbx context.!mailbox reference mailbox
+    Amailbox.list context.!mailbox reference mailbox
   else
-    Amailbox.lsubmbx context.!mailbox reference mailbox
+    Amailbox.lsub context.!mailbox reference mailbox
   end >>= fun l ->
   Lwt_list.iter_s (fun (file, flags) ->
       write_resp context.!netw (list_resp flags file)
@@ -142,7 +142,6 @@ let handle_select context mailbox rw =
   ) >>= function
   | `NotExists -> response context None (Resp_No(None,"Mailbox doesn't exist:" ^ mailbox)) None
   | `NotSelectable ->  response context None (Resp_No(None,"Mailbox is not selectable :" ^ mailbox)) None
-  | `Error e -> response context None (Resp_No(None, e)) None
   | `Ok (mbx, header) ->
     let open Storage_meta in
     if header.uidvalidity = "" then (** give up TBD **)
@@ -201,7 +200,6 @@ let handle_status context mailbox optlist =
   Amailbox.examine context.!mailbox mailbox >>= function
   | `NotExists -> response context None (Resp_No(None,"Mailbox doesn't exist:" ^ mailbox)) None
   | `NotSelectable ->  response context None (Resp_No(None,"Mailbox is not selectable :" ^ mailbox)) None
-  | `Error e -> response context None (Resp_No(None, e)) None
   | `Ok (mbx, header) ->
   if header.uidvalidity = "" then (** give up TBD **)
   (

@@ -24,3 +24,7 @@ val imapd_to_date_time_exn : string -> Time.t
 val date_time_to_email : Time.t -> string
 
 val email_to_date_time_exn : string -> Time.t
+
+val day_of_week : int -> string
+
+val int_to_month : int -> string

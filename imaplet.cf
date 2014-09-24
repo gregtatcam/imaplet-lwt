@@ -40,11 +40,13 @@ ssl true
 # is starttls enabled
 starttls true
 
-# inbox location, used for building irmin from mbox
-inbox_path /var/mail
+# inbox location for the storage (irmin, mbox(/var/mail), mailbox, etc)
+# blank for irmin
+inbox_path ""
 
-# mailboxes location, used for building irmin from mbox
-mail_path /Users/@/mail
+# mailboxes location for the storage (irmin, mbox(/Users/@/mail/, mailbox, etc)
+# blank for irmin 
+mail_path ""
 
 # rebuild irminsule on start up, not enabled yet
 #rebuild_irmin false

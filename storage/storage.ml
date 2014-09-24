@@ -27,6 +27,9 @@ sig
   (* user *)
   val create : string -> t
 
+  (* check if mailbox exists *)
+  val exists : t -> string -> [`No|`Folder|`Mailbox] Lwt.t
+
   (* status *)
   val status : t -> string -> mailbox_metadata Lwt.t
 
@@ -54,14 +57,8 @@ sig
   (* list reference mailbox 
    * returns list of files/folders with list of flags 
    *)
-  val list : t -> string -> string -> init:'a -> 
-    f:('a -> [`Folder of (string*int)|`Mailbox of string] -> ('a*bool) Lwt.t) -> 'a Lwt.t
-
-  (* lsub reference mailbox - list of subscribed mailboxes
-   * returns list of files/folders with list of flags 
-   *)
-  val lsub : t -> string -> string -> init:'a -> 
-    f:('a -> [`Folder of (string*int)|`Mailbox of string] -> ('a*bool) Lwt.t) -> 'a Lwt.t
+  val list : t -> subscribed:bool -> ?access:(string->bool) -> string -> string -> init:'a -> 
+    f:('a -> [`Folder of (string*int)|`Mailbox of string] -> 'a Lwt.t) -> 'a Lwt.t
 
   (* append message(s) to selected mailbox *)
   val append : t -> string -> Mailbox.Message.t -> mailbox_message_metadata -> unit Lwt.t 
@@ -77,6 +74,10 @@ sig
   (* fetch messages from selected mailbox *)
   val fetch : t -> string -> [`Sequence of int|`UID of int] ->
     [`NotFound|`Eof|`Ok of (Mailbox.Message.t * mailbox_message_metadata)] Lwt.t
+
+  (* fetch messages from selected mailbox *)
+  val fetch_message_metadata : t -> string -> [`Sequence of int|`UID of int] ->
+    [`NotFound|`Eof|`Ok of mailbox_message_metadata] Lwt.t
 
   (* store flags to selected mailbox *)
   val store : t -> string -> [`Sequence of int|`UID of int] -> mailbox_message_metadata -> unit Lwt.t

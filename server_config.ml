@@ -73,12 +73,13 @@ let srv_config =
     let acc =
     (
     let matched = try 
-        Regex.match_regex ~regx:"^\\([^# ][^ ]+\\) \\([^ ]+$\\)" hd
+        Regex.match_regex ~regx:"^\\([^# ][^ ]+\\) \\(.+$\\)" hd
       with _ -> false
     in
     if matched then (
       let n = Str.matched_group 1 hd in
       let v = Str.matched_group 2 hd in
+      let v = BatString.strip ~chars:"\"" v in
       let log n v = BatLog.Easy.logf `debug "%s: invalid value %s\n%!" n v in
       let ival n v default = try int_of_string v with _ -> log n v; default in
       let bval n v default = try bool_of_string v with _ -> log n v; default in
