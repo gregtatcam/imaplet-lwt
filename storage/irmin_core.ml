@@ -190,12 +190,12 @@ module IrminIntf :
 
     let update_view store key view =
       Key_.assert_key key;
-      Printf.printf "------ store update_view %s\n%!" (Key_.key_to_string key);
+      (*Printf.printf "------ store update_view %s\n%!" (Key_.key_to_string * key);*)
       Store.View.update_path store (Key_.t_to_irmin_key key) view
 
     let read_view store key =
       Key_.assert_key key;
-      Printf.printf "------ reading view %s\n%!" (Key_.key_to_string key);
+      (*Printf.printf "------ reading view %s\n%!" (Key_.key_to_string key);*)
       Store.View.of_path store (Key_.t_to_irmin_key key)
 
   end
@@ -221,15 +221,15 @@ module IrminIntf_tr :
     let begin_transaction key =
       Key_.assert_key key;
       Store.create () >>= fun store ->
-      Printf.printf "------ creating view %s\n%!" (Key_.key_to_string key);
+      (*Printf.printf "------ creating view %s\n%!" (Key_.key_to_string key);*)
       Store.View.of_path store (Key_.t_to_irmin_key key) >>= fun view ->
       return (store,view,key,ref false)
 
     let end_transaction tr =
       let (store,view,key,dirty) = tr in
       if !dirty = true then (
-        Printf.printf "++++++++++++++++++ commiting %s!!!\n%!"
-        (Key_.key_to_string key);
+        (*Printf.printf "++++++++++++++++++ commiting %s!!!\n%!"
+        (Key_.key_to_string key);*)
         Store.View.update_path store (Key_.t_to_irmin_key key) view >>= fun () ->
         dirty := false;
         return ()
@@ -247,7 +247,7 @@ module IrminIntf_tr :
 
     let update tr key data =
       Key_.assert_key key;
-      Printf.printf "------ store view.update %s\n" (Key_.key_to_string key);
+      (*Printf.printf "------ store view.update %s\n" (Key_.key_to_string * key);*)
       let (_,view,_,dirty) = tr in
       Store.View.update view (Key_.t_to_irmin_key key) data >>= fun () ->
       dirty := true;
@@ -265,13 +265,13 @@ module IrminIntf_tr :
 
     let list tr key =
       Key_.assert_key key;
-      Printf.printf "------ store list %s\n%!" (Key_.key_to_string key);
+      (*Printf.printf "------ store list %s\n%!" (Key_.key_to_string key);*)
       let (_,view,_,_) = tr in
       Store.View.list view [Key_.t_to_irmin_key key]
 
     let remove tr key =
       Key_.assert_key key;
-      Printf.printf "------ store remove %s\n" (Key_.key_to_string key);
+      (*Printf.printf "------ store remove %s\n" (Key_.key_to_string key);*)
       let (_,view,_,dirty) = tr in
       Store.View.remove view (Key_.t_to_irmin_key key) >>= fun () ->
       dirty := true;
@@ -474,7 +474,7 @@ module IrminMailbox :
       return (mailbox_metadata_of_sexp sexp)
 
     let update_mailbox_metadata mbox metadata =
-      Printf.printf "updating mailbox metadata %d\n%!" metadata.uidnext;
+      (*Printf.printf "updating mailbox metadata %d\n%!" metadata.uidnext;*)
       let sexp = sexp_of_mailbox_metadata metadata in
       let key = get_key `Metamailbox in
       IrminIntf_tr.update mbox.trans key (Sexp.to_string sexp)
@@ -552,6 +552,8 @@ module IrminMailbox :
         else 
           mailbox_metadata.unseen 
       in
+      List.iter message_metadata.flags ~f:(fun f -> 
+        Printf.printf "append =========== %s\n%!" (Utils.fl_to_str f));
       let mailbox_metadata = {mailbox_metadata with uidnext;count;nunseen;recent;unseen} in
       let message_metadata = {message_metadata with uid;modseq} in
       let message_metadata_sexp = sexp_of_mailbox_message_metadata message_metadata in
@@ -578,7 +580,7 @@ module IrminMailbox :
       read_index_uid mbox >>= fun uids ->
       match position with
       | `Sequence seq -> 
-        if seq >= List.length uids then
+        if seq > List.length uids then
           return `Eof
         else
           return (`Ok (seq,(List.nth_exn uids ((List.length uids) - seq))))

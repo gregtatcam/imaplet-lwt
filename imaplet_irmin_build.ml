@@ -116,7 +116,9 @@ let populate_mailbox ist path mailbox =
     return ()
   );
   Lwt_stream.iter_s (fun message ->
-    IrminStorage.append ist mailbox message (empty_mailbox_message_metadata())
+    let metadata = empty_mailbox_message_metadata() in
+    let metadata = {metadata with flags=[Imaplet_types.Flags_Recent]} in
+    IrminStorage.append ist mailbox message metadata
   ) strm 
 
 let create_inbox user inbx =

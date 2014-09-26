@@ -37,17 +37,33 @@ type imapConfig = {
   data_store : [`Irmin]; (* type of storage, only irmin supported so far *)
 }
 
+let exists file =
+  let open Batteries in
+  let stat = BatUnix.stat file in
+  if stat.BatUnix.st_kind = BatUnix.S_REG then
+    true
+  else
+    false
+
+let config () =
+  if exists Install.config_path then
+    Install.config_path
+  else
+    "./imaplet.cf"
+
 let srv_config = 
   let open Batteries in
   let lines =
-    let en = BatFile.lines_of Install.config_path in
-    BatEnum.fold (fun acc e -> e :: acc) [] en
+    try
+      let en = BatFile.lines_of (config ()) in
+      BatEnum.fold (fun acc e -> e :: acc) [] en
+    with _ -> []
   in
   Printf.printf "##### loading configuration file #####\n%!";
   let config = {
     rebuild_irmin = false;
-    inbox_path = "/var/mail";
-    mail_path = "/Users/@/mail";
+    inbox_path = "";(*"/var/mail";*)
+    mail_path = "";(*"/Users/@/mail";*)
     irmin_path = "/tmp/irmin/test";
     max_msg_size = 0;
     imap_name = "imaplet";

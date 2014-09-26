@@ -331,15 +331,19 @@ let search mailboxt keys buid =
 let get_iterator (module Mailbox: Storage.Storage_inst) name buid sequence =
   let open Seq_iterator in
   let open Core.Std in
-  if SequenceIterator.single sequence then
+  if SequenceIterator.single sequence then (
+    Printf.printf "creating iterator with 1:%d\n%!" Int.max_value;
     return (Some (SequenceIterator.create sequence 1 Int.max_value))
-  else (
+  ) else (
     Mailbox.MailboxStorage.status Mailbox.this name >>= fun mailbox_metadata ->
-    if buid = false then
+    if buid = false then (
+      Printf.printf "creating iterator with count 1:%d\n%!" mailbox_metadata.count;
       return (Some (SequenceIterator.create sequence 1 mailbox_metadata.count))
-    else (
+    ) else (
       Mailbox.MailboxStorage.fetch_message_metadata Mailbox.this name (`Sequence 1) >>= function
       | `Ok message_metadata ->
+        Printf.printf "creating iterator with uid %d:%d\n%!"
+        message_metadata.uid (mailbox_metadata.uidnext - 1);
         return (Some (SequenceIterator.create sequence message_metadata.uid
           (mailbox_metadata.uidnext - 1)))
       | _ -> return None
@@ -373,6 +377,7 @@ let iter_selected_with_seq (module Mailbox: Storage.Storage_inst) mailboxt seque
 let fetch mailboxt resp_writer sequence fetchattr buid =
   let (module Mailbox) = factory mailboxt in
   iter_selected_with_seq (module Mailbox) mailboxt sequence buid (fun mailbox pos seq ->
+    Printf.printf "iterating with seq %d\n%!" seq;
     Mailbox.MailboxStorage.fetch Mailbox.this mailbox pos >>= function
     | `Eof -> return `Eof
     | `NotFound -> return `Ok
