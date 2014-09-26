@@ -111,7 +111,7 @@ let handle_starttls context =
 **)
 
 let quote_file file =
-  if match_regex file "[ ]" then
+  if match_regex file ~regx:"[ ]" then
     "\"" ^ file ^ "\""
   else
     file

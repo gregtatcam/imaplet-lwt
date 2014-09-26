@@ -73,7 +73,7 @@ let srv_config =
     let acc =
     (
     let matched = try 
-        Regex.match_regex ~regx:"^\\([^# ][^ ]+\\) \\(.+$\\)" hd
+        Regex.match_regex hd ~regx:"^\\([^# ][^ ]+\\) \\(.+$\\)"
       with _ -> false
     in
     if matched then (

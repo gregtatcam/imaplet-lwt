@@ -168,3 +168,10 @@ let email_to_date_time_exn date =
   let tm = Time.of_string str in
   let f = (Time.to_float tm) +. (Float.of_int (utc_sec zone)) in
   Time.of_float f
+
+let postmark_date_time () =
+  let time = Time.to_float (Time.now()) in
+  let tm = Unix.gmtime time in
+  Printf.sprintf "%s %s %d %02d:%02d:%02d %d"
+    (day_of_week tm.Unix.tm_wday) (int_to_month tm.Unix.tm_mon) tm.Unix.tm_mday
+    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec (1900+tm.Unix.tm_year)

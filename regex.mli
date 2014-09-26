@@ -13,9 +13,9 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
-val match_regex_i: ?case:bool -> regx:string -> string -> int
+val match_regex_i: ?case:bool -> string -> regx:string -> int
 
-val match_regex: ?case:bool -> regx:string -> string -> bool
+val match_regex: ?case:bool -> string -> regx:string ->  bool
 
 val replace: regx:string -> tmpl:string -> string -> string
 
@@ -68,3 +68,5 @@ val append_regex : string
 val lappend_regex : string
 
 val fixregx_mbox : string -> string
+
+val smtp_date_regex : string

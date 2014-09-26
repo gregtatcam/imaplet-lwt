@@ -28,3 +28,5 @@ val email_to_date_time_exn : string -> Time.t
 val day_of_week : int -> string
 
 val int_to_month : int -> string
+
+val postmark_date_time : unit -> string

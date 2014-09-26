@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: a66b071f4883bbd419d0b9f293d1bea5)
+# DO NOT EDIT (digest: e21a58c9b92a8c1ec54df2a1279c8843)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -28,6 +28,33 @@
 "imaplet.native": pkg_str
 "imaplet.native": pkg_threads
 "imaplet.native": pkg_tls.lwt
+# Executable imaplet_lmtp
+"imaplet_lmtp.native": pkg_batteries
+"imaplet_lmtp.native": pkg_core
+"imaplet_lmtp.native": pkg_lwt
+"imaplet_lmtp.native": pkg_lwt.syntax
+"imaplet_lmtp.native": pkg_lwt.unix
+"imaplet_lmtp.native": pkg_str
+"imaplet_lmtp.native": pkg_threads
+# Executable imaplet_irmin_read
+"imaplet_irmin_read.native": pkg_batteries
+"imaplet_irmin_read.native": pkg_email_message
+"imaplet_irmin_read.native": pkg_irmin.backend
+"imaplet_irmin_read.native": pkg_irmin.unix
+"imaplet_irmin_read.native": pkg_lwt
+"imaplet_irmin_read.native": pkg_sexplib.syntax
+"imaplet_irmin_read.native": pkg_str
+"imaplet_irmin_read.native": pkg_threads
+# Executable imaplet_irmin_build
+"imaplet_irmin_build.native": pkg_batteries
+"imaplet_irmin_build.native": pkg_email_message
+"imaplet_irmin_build.native": pkg_irmin.backend
+"imaplet_irmin_build.native": pkg_irmin.unix
+"imaplet_irmin_build.native": pkg_lwt
+"imaplet_irmin_build.native": pkg_lwt.unix
+"imaplet_irmin_build.native": pkg_sexplib.syntax
+"imaplet_irmin_build.native": pkg_str
+"imaplet_irmin_build.native": pkg_threads
 # Executable test_mailbox
 "test/test_mailbox.native": pkg_batteries
 "test/test_mailbox.native": pkg_core

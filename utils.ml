@@ -35,6 +35,27 @@ let fl_to_str fl =
   | Flags_Keyword k -> k
   | Flags_Template -> "\\Template"
 
+let str_to_fl fl =
+  if fl = "\\Answered" then
+    Flags_Answered
+  else if fl = "\\Flagged" then
+    Flags_Flagged
+  else if fl = "\\Deleted" then
+    Flags_Deleted
+  else if fl = "\\Seen" then
+    Flags_Seen
+  else if fl = "\\Recent" then
+    Flags_Recent
+  else if fl = "\\Draft" then
+    Flags_Draft
+  else if fl = "\\Template" then
+    Flags_Template
+  else if Regex.match_regex fl ~regx:"^\\\\Extention \\(.+\\)$" then
+    Flags_Extention (Str.matched_group 1 fl)
+  else 
+    Flags_Keyword (fl)
+
+
 let substr str ~start ~size =
   let len = String.length str in
   let str =

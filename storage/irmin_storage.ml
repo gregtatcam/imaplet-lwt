@@ -18,6 +18,8 @@ open Storage
 open Irmin_core
 open Storage_meta
 
+type storage = {user:string;mailbox:IrminMailbox.t}
+
 module IrminStorage : Storage_intf with type t = string =
 struct
   type t = string 
@@ -71,12 +73,12 @@ struct
     Subscriptions.create t >>= fun sub ->
     Subscriptions.unsubscribe sub mailbox
 
-  (* list reference mailbox 
+  (* list 
    * returns list of files/folders with list of flags 
    *)
-  let list t ~subscribed ?(access=(fun _ -> true)) reference mailbox ~init ~f =
-    IrminMailbox.create t reference >>= fun mbox ->
-    IrminMailbox.list mbox ~subscribed ~access mailbox ~init ~f
+  let list t ~subscribed ?(access=(fun _ -> true)) mailbox ~init ~f =
+    IrminMailbox.create t mailbox >>= fun mbox ->
+    IrminMailbox.list mbox ~subscribed ~access ~init ~f
 
   (* append message(s) to selected mailbox *)
   let append t mailbox message mailbox_metadata =

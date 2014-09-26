@@ -13,7 +13,7 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
-let match_regex_i ?(case=true) ~regx str = 
+let match_regex_i ?(case=true) str ~regx = 
   try
     let regexp =
     (
@@ -26,7 +26,7 @@ let match_regex_i ?(case=true) ~regx str =
   with _ ->
     (-1)
 
-let match_regex ?(case=true) ~regx str = 
+let match_regex ?(case=true) str ~regx = 
   let i = match_regex_i ~case str ~regx in
   (i >= 0)
 
@@ -97,6 +97,8 @@ let fixregx_mbox mailbox =
 (* date regex *)
 let mon = group "Jan\\|Feb\\|Mar\\|Apr\\|May\\|Jun\\|Jul\\|Aug\\|Sep\\|Oct\\|Nov\\|Dec"
 
+let dayofweek = group "Sun\\|Mon\\|Tue\\|Wen\\|Thu\\|Fri\\|Sat\\|Sun"
+
 let dd = group ( orx ( group "[0-9]") (group "[0-9][0-9]"))
 
 let dd_fixed = group ( orx ( group " [0-9]") (group "[0-9][0-9]"))
@@ -121,6 +123,10 @@ let date_time_dqregex =
 (**Date: Mon, 7 Feb 1994 21:52:25 -0800 (PST)**) 
 let email_date_regex =
   dd ^ " " ^ mon ^ " " ^ yyyy ^ " " ^ time ^ " " ^ zone
+
+(* Thu, 17 Jul 2014 14:53:00 +0100 (BST) *)
+let smtp_date_regex =
+  dayofweek ^ ", " ^ email_date_regex
 
 (* append regex *)
 let append_regex =

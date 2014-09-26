@@ -27,7 +27,7 @@ let () = Lwt_main.run(
     "/testF2/testF24/";
     "/testF2/testF24/testM234";] in
   IrminIntf.create () >>= fun store ->
-  IrminIntf.remove store (IrminKey.create_account "dovecot") >>= fun () ->
+  IrminIntf.remove store (Key_.create_account "dovecot") >>= fun () ->
   let rec create = function
     | hd :: tl -> 
       Printf.printf "creating %s\n%!" hd;
@@ -39,7 +39,7 @@ let () = Lwt_main.run(
   in
   create mailboxes >>= fun () ->
   IrminMailbox.create "dovecot" "" >>= fun mbox ->
-    IrminMailbox.list ~subscribed:false ~access:(fun _ -> true) mbox "" ~init:[] ~f:(
+    IrminMailbox.list ~subscribed:false ~access:(fun _ -> true) mbox ~init:[] ~f:(
       fun acc item -> return ((item::acc))
     ) >>= fun listing ->
   List.iter listing ~f:(fun i -> match i with

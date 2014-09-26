@@ -83,36 +83,36 @@ let mbox_item item reference =
     []
   )
   
-let list_ (module Mailbox : Storage.Storage_inst) subscribed reference mailbox =
+let list_ (module Mailbox : Storage.Storage_inst) subscribed mailbox pattern =
   let open Regex in
   let open Utils in
   let open Core.Std in
-  (* item is relative to the reference *)
-  let select_item acc reference item isdir =
-    (** fix regex for the mailbox **)
-    let regxmailbox = fixregx_mbox mailbox in
+  (* item is relative to the mailbox *)
+  let select_item acc mailbox item isdir =
+    (** fix regex for the pattern **)
+    let regxpattern = fixregx_mbox pattern in
     (** get item path relative to the relative root **)
-    let tomatch = concat_path reference item in
+    let tomatch = concat_path mailbox item in
     if isdir <> None then
     (
-      if match_regex tomatch ~regx:regxmailbox then
+      if match_regex tomatch ~regx:regxpattern then
         ((dir_item item (Option.value_exn isdir)) :: acc)
       else
         acc
-    ) else if match_regex tomatch ~regx:regxmailbox then
-        ((mbox_item item reference) :: acc)
+    ) else if match_regex tomatch ~regx:regxpattern then
+        ((mbox_item item mailbox) :: acc)
     else
       (acc)
   in
-  Mailbox.MailboxStorage.exists Mailbox.this reference >>= function
+  Mailbox.MailboxStorage.exists Mailbox.this mailbox >>= function
   | `No | `Folder -> return []
   | `Mailbox ->
-    (* item has path relative to the start, i.e. root + reference *)
+    (* item has path relative to the start, i.e. root + mailbox *)
     Mailbox.MailboxStorage.list Mailbox.this ~subscribed ~access:(fun _ -> true) 
-    reference mailbox ~init:[] ~f:(fun acc item ->
+    mailbox ~init:[] ~f:(fun acc item ->
       match item with
-        | `Folder (item,cnt)  -> return (select_item acc reference item (Some cnt))
-        | `Mailbox item  -> return (select_item acc reference item None)
+        | `Folder (item,cnt)  -> return (select_item acc mailbox item (Some cnt))
+        | `Mailbox item  -> return (select_item acc mailbox item None)
     )
 
 (** add to the calculated list the reference folder and inbox **)
@@ -129,9 +129,12 @@ let list_adjusted (module Mailbox : Storage.Storage_inst) subscribed reference m
   let open Regex in
   let open Core.Std in
   (* match the wild cards part of the mailbox *)
-  let str = reference ^ mailbox in
+  let fixref = replace "\"" "" reference in 
+  let fixref = replace "^/$" "" fixref in
+  let fixmbx = replace "\"" "" mailbox in
+  let str = fixref ^ fixmbx in
   let path,regx =
-  if match_regex str "\\([^/]*[%\\*].*$\\)" then (
+  if match_regex str ~regx:"\\([^/]*[%\\*].*$\\)" then (
     let regx = Str.matched_string str in
     let path = String.slice str 0 (String.length str - (String.length regx)) in
     path,regx
@@ -140,9 +143,6 @@ let list_adjusted (module Mailbox : Storage.Storage_inst) subscribed reference m
   )
   in
   Easy.logf `debug "listmbx -%s- -%s- -%s- -%s-\n%!" reference mailbox path regx;
-  let fixref = replace "\"" "" reference in 
-  let fixref = replace "^/$" "" fixref in
-  let fixmbx = replace "\"" "" mailbox in
   if reference = "\"/\"" || reference = "/" || reference = "" && mailbox = "" then
   (
     Easy.logf `debug "special listmbx -%s- -%s-\n%!" reference mailbox;
@@ -156,7 +156,7 @@ let list_adjusted (module Mailbox : Storage.Storage_inst) subscribed reference m
       return ([file, flags])
   ) else (
     Easy.logf `debug "regular listmbx -%s- -%s-\n%!" reference mailbox;
-    list_ (module Mailbox) subscribed fixref fixmbx >>= 
+    list_ (module Mailbox) subscribed path regx >>= 
       fun acc -> return (add_list fixref mailbox acc)
   )
 

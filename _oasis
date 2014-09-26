@@ -17,6 +17,33 @@ Executable imaplet
   BuildDepends	  : core,batteries,lwt,lwt.unix,lwt.syntax,tls.lwt,sexplib,sexplib.syntax,threads,str,cstruct.unix,irmin.unix,irmin.backend,email_message
   DataFiles	  : certificates/server.pem($datadir/imaplet),certificates/server.key($datadir/imaplet),imaplet.cf($datadir/imaplet),users($datadir/imaplet)
 
+Executable imaplet_lmtp
+  Build		  : true
+  Install	  : true
+  Path		  : .
+  CompiledObject  : native
+  BuildTools	  : ocamlbuild
+  MainIs	  : imaplet_lmtp.ml
+  BuildDepends	  : batteries,core,lwt,lwt.unix,lwt.syntax,str,threads
+
+Executable imaplet_irmin_read
+  Build		  : true
+  Install	  : true
+  Path		  : .
+  CompiledObject  : native
+  BuildTools	  : ocamlbuild
+  MainIs	  : imaplet_irmin_read.ml
+  BuildDepends	  : batteries,lwt,irmin.backend,irmin.unix,sexplib.syntax,str,email_message,threads
+
+Executable imaplet_irmin_build
+  Build		  : true
+  Install	  : true
+  Path		  : .
+  CompiledObject  : native
+  BuildTools	  : ocamlbuild
+  MainIs	  : imaplet_irmin_build.ml
+  BuildDepends	  : batteries,lwt,lwt.unix,email_message,str,sexplib.syntax,threads,irmin.unix,irmin.backend
+
 Executable test_mailbox
   Build		  : true
   Install	  : true

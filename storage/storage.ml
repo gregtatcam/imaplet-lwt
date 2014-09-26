@@ -57,7 +57,7 @@ sig
   (* list reference mailbox 
    * returns list of files/folders with list of flags 
    *)
-  val list : t -> subscribed:bool -> ?access:(string->bool) -> string -> string -> init:'a -> 
+  val list : t -> subscribed:bool -> ?access:(string->bool) -> string -> init:'a -> 
     f:('a -> [`Folder of (string*int)|`Mailbox of string] -> 'a Lwt.t) -> 'a Lwt.t
 
   (* append message(s) to selected mailbox *)
