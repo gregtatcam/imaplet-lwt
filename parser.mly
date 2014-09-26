@@ -125,7 +125,7 @@
 open Imaplet_types
 let debug format = 
   let open Batteries in
-  BatLog.Easy.logf `debug format (*(fun format a -> ())*)
+  Printf.printf format (*(fun format a -> ())*)
 %}
 
 %start <Imaplet_types.clientRequest> request

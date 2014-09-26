@@ -157,7 +157,6 @@ module Key_ :
 module IrminIntf :
   sig
     type store
-    type transaction
     val create : unit -> store Lwt.t
     val remove : store -> Key_.t -> unit Lwt.t
     val read_exn : store -> Key_.t -> string Lwt.t
@@ -165,20 +164,9 @@ module IrminIntf :
     val list : store -> Key_.t -> Store.key list Lwt.t
     val update_view : store -> Key_.t -> Store.View.t -> unit Lwt.t
     val read_view : store -> Key_.t -> Store.View.t Lwt.t
-    val remove_view : transaction -> unit Lwt.t
-    val move_view : transaction -> Key_.t -> unit Lwt.t
-    val begin_transaction : Key_.t -> transaction Lwt.t
-    val end_transaction : transaction -> unit Lwt.t
-    val tr_update : transaction -> Key_.t -> string -> unit Lwt.t
-    val tr_read : transaction -> Key_.t -> string option Lwt.t
-    val tr_read_exn : transaction -> Key_.t -> string Lwt.t
-    val tr_list : transaction -> Key_.t -> Store.key list Lwt.t
-    val tr_remove : transaction -> Key_.t -> unit Lwt.t
-    val tr_mem : transaction -> Key_.t -> bool Lwt.t
   end =
   struct
     type store = Store.t
-    type transaction = Store.t * Store.View.t * Key_.t * bool ref
 
 
     let create () =
@@ -202,72 +190,94 @@ module IrminIntf :
 
     let update_view store key view =
       Key_.assert_key key;
-      Easy.logf `debug "------ store update_view %s\n%!" (Key_.key_to_string key);
+      Printf.printf "------ store update_view %s\n%!" (Key_.key_to_string key);
       Store.View.update_path store (Key_.t_to_irmin_key key) view
 
     let read_view store key =
       Key_.assert_key key;
-      Easy.logf `debug "------ reading view %s\n%!" (Key_.key_to_string key);
+      Printf.printf "------ reading view %s\n%!" (Key_.key_to_string key);
       Store.View.of_path store (Key_.t_to_irmin_key key)
 
-    let remove_view tr =
-      let (store,_,key,_) = tr in
-      remove store key
+  end
+
+
+module IrminIntf_tr :
+  sig
+    type transaction
+    val remove_view : transaction -> unit Lwt.t
+    val move_view : transaction -> Key_.t -> unit Lwt.t
+    val begin_transaction : Key_.t -> transaction Lwt.t
+    val end_transaction : transaction -> unit Lwt.t
+    val update : transaction -> Key_.t -> string -> unit Lwt.t
+    val read : transaction -> Key_.t -> string option Lwt.t
+    val read_exn : transaction -> Key_.t -> string Lwt.t
+    val list : transaction -> Key_.t -> Store.key list Lwt.t
+    val remove : transaction -> Key_.t -> unit Lwt.t
+    val mem : transaction -> Key_.t -> bool Lwt.t
+  end =
+  struct
+    type transaction = Store.t * Store.View.t * Key_.t * bool ref
 
     let begin_transaction key =
       Key_.assert_key key;
       Store.create () >>= fun store ->
-      Easy.logf `debug "------ creating view %s\n%!" (Key_.key_to_string key);
+      Printf.printf "------ creating view %s\n%!" (Key_.key_to_string key);
       Store.View.of_path store (Key_.t_to_irmin_key key) >>= fun view ->
       return (store,view,key,ref false)
-
-    let move_view tr key2 =
-      let (store,view,_,_) = tr in
-      Store.View.update_path store (Key_.t_to_irmin_key key2) view
 
     let end_transaction tr =
       let (store,view,key,dirty) = tr in
       if !dirty = true then (
-        Easy.logf `debug "++++++++++++++++++ commiting!!!\n%!";
+        Printf.printf "++++++++++++++++++ commiting %s!!!\n%!"
+        (Key_.key_to_string key);
         Store.View.update_path store (Key_.t_to_irmin_key key) view >>= fun () ->
         dirty := false;
         return ()
       ) else
         return ()
 
-    let tr_update tr key data =
+    let remove_view tr =
+      let (store,_,key,_) = tr in
+      Store.remove store (Key_.t_to_irmin_key key)
+
+    let move_view tr key2 =
+      let (store,view,_,_) = tr in
+      Store.View.update_path store (Key_.t_to_irmin_key key2) view
+
+
+    let update tr key data =
       Key_.assert_key key;
-      Easy.logf `debug "------ store view.update %s\n" (Key_.key_to_string key);
+      Printf.printf "------ store view.update %s\n" (Key_.key_to_string key);
       let (_,view,_,dirty) = tr in
       Store.View.update view (Key_.t_to_irmin_key key) data >>= fun () ->
       dirty := true;
       return ()
 
-    let tr_read tr key =
+    let read tr key =
       Key_.assert_key key;
       let (_,view,_,_) = tr in
       Store.View.read view (Key_.t_to_irmin_key key)
 
-    let tr_read_exn tr key =
+    let read_exn tr key =
       Key_.assert_key key;
       let (_,view,_,_) = tr in
       Store.View.read_exn view (Key_.t_to_irmin_key key)
 
-    let tr_list tr key =
+    let list tr key =
       Key_.assert_key key;
-      Easy.logf `debug "------ store list %s\n%!" (Key_.key_to_string key);
+      Printf.printf "------ store list %s\n%!" (Key_.key_to_string key);
       let (_,view,_,_) = tr in
       Store.View.list view [Key_.t_to_irmin_key key]
 
-    let tr_remove tr key =
+    let remove tr key =
       Key_.assert_key key;
-      Easy.logf `debug "------ store remove %s\n" (Key_.key_to_string key);
+      Printf.printf "------ store remove %s\n" (Key_.key_to_string key);
       let (_,view,_,dirty) = tr in
       Store.View.remove view (Key_.t_to_irmin_key key) >>= fun () ->
       dirty := true;
       return ()
 
-    let tr_mem tr key =
+    let mem tr key =
       Key_.assert_key key;
       let (_,view,_,_) = tr in
       Store.View.mem view (Key_.t_to_irmin_key key)
@@ -290,14 +300,14 @@ module Subscriptions :
     val empty : string
   end =
   struct
-    type t = IrminIntf.transaction
+    type t = IrminIntf_tr.transaction
 
     let key_subscr = Key_.t_of_path "subscriptions"
 
     (* create type *)
     let create user =
       let key = Key_.create_account user in
-      IrminIntf.begin_transaction key
+      IrminIntf_tr.begin_transaction key
 
     (* convert the list to a string of sexp *)
     let str_sexp_of_list l =
@@ -314,15 +324,15 @@ module Subscriptions :
 
     (* update subscription list *)
     let update_exn view l =
-      IrminIntf.tr_mem view key_subscr >>= fun res ->
+      IrminIntf_tr.mem view key_subscr >>= fun res ->
       if res = false then raise KeyDoesntExist;
       let str = str_sexp_of_list l in
-      IrminIntf.tr_update view key_subscr str >>
-      IrminIntf.end_transaction view
+      IrminIntf_tr.update view key_subscr str >>
+      IrminIntf_tr.end_transaction view
 
     (* read subscription *)
     let read view =
-      IrminIntf.tr_read view key_subscr >>= function
+      IrminIntf_tr.read view key_subscr >>= function
       | Some str -> return (list_of_str_sexp str)
       | None -> return []
 
@@ -358,13 +368,13 @@ module UserAccount :
 
     (* create new account *)
     let create_account key =
-      IrminIntf.begin_transaction key >>= fun view ->
-      IrminIntf.tr_mem view Subscriptions.key_subscr >>= fun res ->
+      IrminIntf_tr.begin_transaction key >>= fun view ->
+      IrminIntf_tr.mem view Subscriptions.key_subscr >>= fun res ->
       if res then
         return `Exists
       else (
-        IrminIntf.tr_update view Subscriptions.key_subscr Subscriptions.empty >>
-        IrminIntf.end_transaction view >>
+        IrminIntf_tr.update view Subscriptions.key_subscr Subscriptions.empty >>
+        IrminIntf_tr.end_transaction view >>
         return `Ok
       )
 
@@ -374,14 +384,14 @@ module UserAccount :
       IrminIntf.remove store key
       (*
       IrminIntf.begin_transaction key >>= fun view ->
-      IrminIntf.tr_remove view Subscriptions.key_subscr >>
-      IrminIntf.tr_remove view (Key_.add_path key "mailboxes") >>
+      IrminIntf.remove view Subscriptions.key_subscr >>
+      IrminIntf.remove view (Key_.add_path key "mailboxes") >>
       IrminIntf.end_transaction view
       *)
 
   end
 
-  type mailbox = {user:string;mailbox:string;folders:bool;trans:IrminIntf.transaction;
+  type mailbox = {user:string;mailbox:string;folders:bool;trans:IrminIntf_tr.transaction;
       index:int list option ref}
 
 (* consistency TBD *)
@@ -432,11 +442,11 @@ module IrminMailbox :
      *)
     let create user path =
       let (mailbox,folders,key) = Key_.mailbox_of_path ?user:(Some user) path in
-      IrminIntf.begin_transaction key >>= fun trans ->
+      IrminIntf_tr.begin_transaction key >>= fun trans ->
         return {user;mailbox;folders;trans;index=ref None}
 
     let commit mbox =
-      IrminIntf.end_transaction mbox.trans
+      IrminIntf_tr.end_transaction mbox.trans
 
     (* create mailbox metadata and index stores *)
     let create_mailbox mbox =
@@ -444,30 +454,30 @@ module IrminMailbox :
       let metadata = empty_mailbox_metadata ~uidvalidity:(new_uidvalidity())()
         ~folders:mbox.folders in
       let sexp = sexp_of_mailbox_metadata metadata in
-      IrminIntf.tr_update mbox.trans key (Sexp.to_string sexp) >>= fun () ->
+      IrminIntf_tr.update mbox.trans key (Sexp.to_string sexp) >>= fun () ->
       let key = get_key `Index in
       let sexp = List.sexp_of_t (fun i -> Sexp.of_string i) [] in
-      IrminIntf.tr_update mbox.trans key (Sexp.to_string sexp) 
+      IrminIntf_tr.update mbox.trans key (Sexp.to_string sexp) 
 
     let delete_mailbox mbox =
-      IrminIntf.remove_view mbox.trans
+      IrminIntf_tr.remove_view mbox.trans
 
     (* how to make this the transaction? TBD *)
     let move_mailbox mbox path =
       let (_,_,key2) = Key_.mailbox_of_path ?user:(Some mbox.user) path in
-      IrminIntf.move_view mbox.trans key2 >>
-      IrminIntf.remove_view mbox.trans
+      IrminIntf_tr.move_view mbox.trans key2 >>
+      IrminIntf_tr.remove_view mbox.trans
 
     let read_mailbox_metadata mbox =
-      IrminIntf.tr_read_exn mbox.trans (get_key `Metamailbox) >>= fun sexp_str ->
+      IrminIntf_tr.read_exn mbox.trans (get_key `Metamailbox) >>= fun sexp_str ->
       let sexp = Sexp.of_string sexp_str in
       return (mailbox_metadata_of_sexp sexp)
 
     let update_mailbox_metadata mbox metadata =
-      Easy.logf `debug "updating mailbox metadata %d\n%!" metadata.uidnext;
+      Printf.printf "updating mailbox metadata %d\n%!" metadata.uidnext;
       let sexp = sexp_of_mailbox_metadata metadata in
       let key = get_key `Metamailbox in
-      IrminIntf.tr_update mbox.trans key (Sexp.to_string sexp)
+      IrminIntf_tr.update mbox.trans key (Sexp.to_string sexp)
 
     let exists mbox =
       catch (fun () ->
@@ -479,7 +489,7 @@ module IrminMailbox :
     let exists_key mbox key =
       catch (fun () ->
         let key = Key_.add_path key "meta" in
-        IrminIntf.tr_read_exn mbox.trans key >>= fun metadata_sexp_str ->
+        IrminIntf_tr.read_exn mbox.trans key >>= fun metadata_sexp_str ->
         let metadata_sexp = Sexp.of_string metadata_sexp_str in
         let metadata = mailbox_metadata_of_sexp metadata_sexp in
         return (if metadata.folders then `Folder else `Mailbox)
@@ -496,14 +506,14 @@ module IrminMailbox :
     let read_index_uid mbox =
       match mbox.!index with
       | None ->
-        IrminIntf.tr_read_exn mbox.trans (get_key `Index) >>= fun index_sexp_str ->
+        IrminIntf_tr.read_exn mbox.trans (get_key `Index) >>= fun index_sexp_str ->
         return (List.t_of_sexp (fun i -> int_of_string (Sexp.to_string i)) 
             (Sexp.of_string index_sexp_str))
       | Some uids -> return uids
 
     let update_index_uids mbox uids = 
       mbox.index := Some uids;
-      IrminIntf.tr_update mbox.trans (get_key `Index) 
+      IrminIntf_tr.update mbox.trans (get_key `Index) 
         (Sexp.to_string (List.sexp_of_t (fun i -> Sexp.of_string (string_of_int i)) (uids)))
 
     let update_index_uid mbox uid =
@@ -545,11 +555,11 @@ module IrminMailbox :
       let mailbox_metadata = {mailbox_metadata with uidnext;count;nunseen;recent;unseen} in
       let message_metadata = {message_metadata with uid;modseq} in
       let message_metadata_sexp = sexp_of_mailbox_message_metadata message_metadata in
-      IrminIntf.tr_update mbox.trans (get_key (`Metamessage uid)) 
+      IrminIntf_tr.update mbox.trans (get_key (`Metamessage uid)) 
         (Sexp.to_string message_metadata_sexp) >>
-      IrminIntf.tr_update mbox.trans (get_key (`Postmark uid)) postmark_sexp_str >>
-      IrminIntf.tr_update mbox.trans (get_key (`Email uid)) email_sexp_str >>
-      IrminIntf.tr_update mbox.trans (get_key (`Headers uid)) headers_sexp_str >>
+      IrminIntf_tr.update mbox.trans (get_key (`Postmark uid)) postmark_sexp_str >>
+      IrminIntf_tr.update mbox.trans (get_key (`Email uid)) email_sexp_str >>
+      IrminIntf_tr.update mbox.trans (get_key (`Headers uid)) headers_sexp_str >>
       return (mailbox_metadata,message_metadata)
 
     let append_message mbox message message_metadata =
@@ -587,7 +597,7 @@ module IrminMailbox :
       | `Eof -> return `Eof
       | `NotFound -> return `NotFound
       | `Ok (_,uid) ->
-        IrminIntf.tr_update mbox.trans (get_key (`Metamessage uid))
+        IrminIntf_tr.update mbox.trans (get_key (`Metamessage uid))
           (Sexp.to_string (sexp_of_mailbox_message_metadata metadata)) >>= fun () ->
         return `Ok
 
@@ -603,11 +613,11 @@ module IrminMailbox :
             ~seq ~uid (Option.value_exn filter)) = false then
           return `NotFound
         else (
-          IrminIntf.tr_read_exn mbox.trans (get_key (`Metamessage uid)) >>= fun sexp_str ->
+          IrminIntf_tr.read_exn mbox.trans (get_key (`Metamessage uid)) >>= fun sexp_str ->
           let message_metadata = mailbox_message_metadata_of_sexp (Sexp.of_string sexp_str) in
-          IrminIntf.tr_read_exn mbox.trans (get_key (`Headers uid)) >>= fun headers_sexp_str ->
-          IrminIntf.tr_read_exn mbox.trans (get_key (`Postmark uid)) >>= fun postmark_sexp_str ->
-          IrminIntf.tr_read_exn mbox.trans (get_key (`Email uid)) >>= fun email_sexp_str ->
+          IrminIntf_tr.read_exn mbox.trans (get_key (`Headers uid)) >>= fun headers_sexp_str ->
+          IrminIntf_tr.read_exn mbox.trans (get_key (`Postmark uid)) >>= fun postmark_sexp_str ->
+          IrminIntf_tr.read_exn mbox.trans (get_key (`Email uid)) >>= fun email_sexp_str ->
           if filter = None then
             return (`Ok (None,postmark_sexp_str,headers_sexp_str,email_sexp_str,message_metadata))
           else (
@@ -640,7 +650,7 @@ module IrminMailbox :
       | `Eof -> return `Eof
       | `NotFound -> return `NotFound
       | `Ok (seq,uid) -> 
-        IrminIntf.tr_read_exn mbox.trans (get_key (`Metamessage uid)) >>= fun sexp_str ->
+        IrminIntf_tr.read_exn mbox.trans (get_key (`Metamessage uid)) >>= fun sexp_str ->
         return (`Ok (mailbox_message_metadata_of_sexp (Sexp.of_string sexp_str)))
 
     let get_min_max_uid uids =
@@ -694,11 +704,11 @@ module IrminMailbox :
 
     let delete_message mbox position =
       get_uid mbox position >>= function
-      | `Ok (_,uid) -> IrminIntf.tr_remove mbox.trans (get_key (`Uid uid))
+      | `Ok (_,uid) -> IrminIntf_tr.remove mbox.trans (get_key (`Uid uid))
       |_ -> return ()
 
     let list_mailbox mbox key =
-      IrminIntf.tr_list mbox.trans (Key_.mailboxes_of_mailbox key)
+      IrminIntf_tr.list mbox.trans (Key_.mailboxes_of_mailbox key)
 
     let is_folder mbox key =
       exists_key mbox key >>= function

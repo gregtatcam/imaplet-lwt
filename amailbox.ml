@@ -14,7 +14,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 open Lwt
-open BatLog
 open Storage_meta
 open Imaplet_types
 open Irmin_storage
@@ -142,10 +141,10 @@ let list_adjusted (module Mailbox : Storage.Storage_inst) subscribed reference m
     str,""
   )
   in
-  Easy.logf `debug "listmbx -%s- -%s- -%s- -%s-\n%!" reference mailbox path regx;
+  Printf.printf "listmbx -%s- -%s- -%s- -%s-\n%!" reference mailbox path regx;
   if reference = "\"/\"" || reference = "/" || reference = "" && mailbox = "" then
   (
-    Easy.logf `debug "special listmbx -%s- -%s-\n%!" reference mailbox;
+    Printf.printf "special listmbx -%s- -%s-\n%!" reference mailbox;
     let flags = ["\\Noselect"] in
     let file = 
     (if mailbox = "" then
@@ -155,7 +154,7 @@ let list_adjusted (module Mailbox : Storage.Storage_inst) subscribed reference m
     ) in
       return ([file, flags])
   ) else (
-    Easy.logf `debug "regular listmbx -%s- -%s-\n%!" reference mailbox;
+    Printf.printf "regular listmbx -%s- -%s-\n%!" reference mailbox;
     list_ (module Mailbox) subscribed path regx >>= 
       fun acc -> return (add_list fixref mailbox acc)
   )
@@ -170,7 +169,7 @@ let list mailboxt reference mailbox =
  * should return foo only in this case 
 **)
 let lsub mailboxt reference mailbox =
-  Easy.logf `debug "lsubmbx\n%!";
+  Printf.printf "lsubmbx\n%!";
   let (module Mailbox) = factory mailboxt in
   list_adjusted (module Mailbox) true reference mailbox 
 

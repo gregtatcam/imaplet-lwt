@@ -15,10 +15,6 @@
  *)
 open Core.Std
 open Lwt
-open BatLog
-
-Easy.level := `debug;;
-Easy.output := BatIO.stderr;;
 
 let update_config net port ssl tls =
   let open Server_config in
@@ -26,7 +22,7 @@ let update_config net port ssl tls =
   srv_config.ssl := (match ssl with |None -> srv_config.!ssl|Some ssl->ssl);
   srv_config.starttls := (srv_config.!ssl && (match tls with |None -> srv_config.!starttls|Some tls->tls));
   srv_config.addr := (match net with |None -> srv_config.!addr|Some net->net);
-  Easy.logf `debug "creating imap server on %s:%d:%b:%b\n%!"
+  Printf.printf "creating imap server on %s:%d:%b:%b\n%!"
     srv_config.!addr srv_config.!port srv_config.!ssl srv_config.!starttls
 
 (**
@@ -47,7 +43,7 @@ let command =
             update_config net port ssl tls;
             Server.create ()
           )
-          (fun ex -> Easy.logf `debug "imaplet: fatal exception: %s %s"
+          (fun ex -> Printf.printf "imaplet: fatal exception: %s %s"
             (BatPrintexc.to_string ex) (BatPrintexc.get_backtrace()); return()
           )
         )
@@ -60,4 +56,4 @@ let () =
   try
     Command.run command
   with Exit -> 
-    Easy.logf `debug "imaplet terminated: %s" (BatPrintexc.get_backtrace())
+    Printf.printf "imaplet terminated: %s" (BatPrintexc.get_backtrace())

@@ -16,6 +16,7 @@
 open Lwt
 open Core.Std
 open Sexplib
+open Irmin_storage
 open Irmin_core
 open Imaplet_types
 open Utils
@@ -47,9 +48,25 @@ let prompt str =
   uinput := (String.split msg ~on:' ');
   return (arg 0)
 
+let rec tree key indent =
+  IrminIntf.create () >>= fun store ->
+  IrminIntf.list store key >>= fun l ->
+  Lwt_list.iter_s (fun i -> 
+    Printf.printf "%s%s%!" indent (Key_.key_to_string (Key_.t_of_list i));
+    IrminIntf.mem store (Key_.t_of_list i) >>= fun res ->
+    if res then (
+      IrminIntf.read_exn store (Key_.t_of_list i) >>= fun v ->
+      Printf.printf "%s\n%!" v;
+      return ()
+    ) else (
+      Printf.printf "\n%!";
+      tree (Key_.t_of_list i) (indent ^ "  ")
+    )
+  ) l
+
 let message_template from_ to_ subject_ email_ =
-  let postmark = replace ~regx:"DATE" ~tmpl:(postmark_date_time()) "From FROM DATE" in
-  let postmark = replace ~regx:"FROM" ~tmpl:from_ postmark in
+let postmark = replace ~regx:"DATE" ~tmpl:(postmark_date_time()) "From FROM DATE" in
+let postmark = replace ~regx:"FROM" ~tmpl:from_ postmark in
   let id_ = (Time.to_filename_string (Time.now())) in
   let message = 
   ("From: FROM\r\n" ^
@@ -70,26 +87,29 @@ let message_template from_ to_ subject_ email_ =
   let email = Email.of_string message in
   {Message.postmark;email}
 
-let append mbox =
+let append user mailbox =
   let open Storage_meta in
   prompt "from: " >>= fun from_ ->
   prompt "to: " >>= fun to_ ->
   prompt "subject: " >>= fun subject_ ->
   prompt "email: " >>= fun email_ ->
   let message = message_template from_ to_ subject_ email_ in
-  IrminMailbox.append_message mbox message (empty_mailbox_message_metadata()) >>
-  IrminMailbox.commit mbox
+  let str = IrminStorage.create user in
+  IrminStorage.append str mailbox message (empty_mailbox_message_metadata())
 
 let rec selected user mailbox mbox =
   let open Storage_meta in
   let open Email_message in
   try
   prompt (user ^ ":" ^ mailbox ^ ": ") >>= function 
-  | "help" -> Printf.printf "all\nexists\nhelp\nlist\nmeta\nappend\nmessage
-  #\nclose\nremove uid\nstore # +-| flags-list%!";
+  | "help" -> Printf.printf
+  "all\nexists\nhelp\nlist\nmeta\nappend\nmessage #\ntree
+  \nclose\nremove uid\nstore # +-| flags-list%!";
   selected user mailbox mbox
-  | "append" -> append mbox >>= fun () -> selected user mailbox mbox
+  | "append" -> append user mailbox >>= fun () -> selected user mailbox mbox
   | "all" -> IrminMailbox.show_all mbox >>= fun () -> selected user mailbox mbox
+  | "tree" -> let (_,_,key) = Key_.mailbox_of_path ~user mailbox in
+    tree key "" >>= fun () -> selected user mailbox mbox
   | "exists" -> IrminMailbox.exists mbox >>= fun res ->
     (
      match res with
@@ -166,29 +186,18 @@ let main () =
   let rec request user =
     try
     prompt (user ^ ": ") >>= function 
-    | "help" -> Printf.printf "help\nselect mbox\nlist\ntree\ndelete\nuser\nquit\n%!"; request user
+    | "help" -> Printf.printf "help\nselect mbox\ncrtmailbox mailbox\nlist\ntree\ndelete\ncreate\nuser\nquit\n%!"; request user
     | "user" -> prompt "user? " >>= fun user -> request user
     | "delete" -> let ac = UserAccount.create user in
       UserAccount.delete_account ac >> request user
+    | "crtmailbox" -> let mailbox = arg 1 in
+      let str = IrminStorage.create user in
+      IrminStorage.create_mailbox str mailbox >>= fun () -> request user
+    | "create" -> let ac = UserAccount.create user in
+      UserAccount.create_account ac >> request user
     | "tree" -> 
-        let key = Key_.create_account user in
-        IrminIntf.create () >>= fun store ->
-        let rec tree store key indent =
-          IrminIntf.list store key >>= fun l ->
-          Lwt_list.iter_s (fun i -> 
-            Printf.printf "%s%s%!" indent (Key_.key_to_string (Key_.t_of_list i));
-            IrminIntf.mem store (Key_.t_of_list i) >>= fun res ->
-            if res then (
-              IrminIntf.read_exn store (Key_.t_of_list i) >>= fun v ->
-              Printf.printf "%s\n%!" v;
-              return ()
-            ) else (
-              Printf.printf "\n%!";
-              tree store (Key_.t_of_list i) (indent ^ "  ")
-            )
-          ) l
-        in
-        tree store key "" >>request user
+      let key = Key_.create_account user in
+      tree key "" >> request user
     | "select" -> 
       let mailbox = Str.replace_first (Str.regexp "+") " " (arg 1) in
       IrminMailbox.create user mailbox >>= fun mbox ->

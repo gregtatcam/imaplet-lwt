@@ -43,7 +43,7 @@ let srv_config =
     let en = BatFile.lines_of Install.config_path in
     BatEnum.fold (fun acc e -> e :: acc) [] en
   in
-  BatLog.Easy.logf `debug "##### loading configuration file #####\n%!";
+  Printf.printf "##### loading configuration file #####\n%!";
   let config = {
     rebuild_irmin = false;
     inbox_path = "/var/mail";
@@ -80,7 +80,7 @@ let srv_config =
       let n = Str.matched_group 1 hd in
       let v = Str.matched_group 2 hd in
       let v = BatString.strip ~chars:"\"" v in
-      let log n v = BatLog.Easy.logf `debug "%s: invalid value %s\n%!" n v in
+      let log n v = Printf.printf "%s: invalid value %s\n%!" n v in
       let ival n v default = try int_of_string v with _ -> log n v; default in
       let bval n v default = try bool_of_string v with _ -> log n v; default in
       match n with 
@@ -105,7 +105,7 @@ let srv_config =
       | "key_name" -> {acc with key_name = v}
       | "users_path" -> {acc with users_path = v}
       | "data_store" -> {acc with data_store = `Irmin}
-      | _ -> BatLog.Easy.logf `debug "unknown configuration %s\n%!" n; acc
+      | _ -> Printf.printf "unknown configuration %s\n%!" n; acc
     ) else 
       acc
     ) in proc tl acc

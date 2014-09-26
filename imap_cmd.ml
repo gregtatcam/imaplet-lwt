@@ -15,7 +15,6 @@
  *)
 open Lwt
 open Core.Std
-open BatLog
 open Imaplet_types
 open Response
 open Regex
@@ -70,7 +69,7 @@ let handle_idle context =
   begin
   match Amailbox.user context.!mailbox with
   | Some user -> 
-    Easy.logf `debug "handle_idle ======== %s %s\n%!" (Int64.to_string context.id) user;
+    Printf.printf "handle_idle ======== %s %s\n%!" (Int64.to_string context.id) user;
     Connections.add_id context.id user context.!netw 
   | None -> ()
   end;
@@ -251,7 +250,7 @@ let idle_clients context =
         Lwt_list.iter_s (fun i ->
           let (id,u,w) = i in
           if u = user then (
-            Easy.logf `debug "=========== idle_clients %s %s\n%!" (Int64.to_string id) u;
+            Printf.printf "=========== idle_clients %s %s\n%!" (Int64.to_string id) u;
             write_resp_untagged w ("EXISTS " ^ (string_of_int status.count)) >>
             write_resp_untagged w ("RECENT " ^ (string_of_int status.recent))
           ) else (
@@ -266,7 +265,7 @@ let idle_clients context =
 
 (** handle append **)
 let handle_append context mailbox flags date literal =
-  Easy.logf `debug "handle_append\n%!";
+  Printf.printf "handle_append\n%!";
   (** is the size sane? **)
   let size = (match literal with
   | Literal n -> n
@@ -298,15 +297,15 @@ let handle_close context =
   response context (Some State_Authenticated) (Resp_Ok(None, "CLOSE completed")) (Some mbx)
 
 let rec print_search_tree t indent =
-  Easy.logf `debug "search ------\n%!";
+  Printf.printf "search ------\n%!";
   let indent = indent ^ " " in
   let open Amailbox in
   match t with
-  | Key k -> Easy.logf `debug "%s-key\n%!" indent
-  | KeyList k -> Easy.logf `debug "%s-key list %d\n%!" indent (List.length k);
+  | Key k -> Printf.printf "%s-key\n%!" indent
+  | KeyList k -> Printf.printf "%s-key list %d\n%!" indent (List.length k);
     List.iter k ~f:(fun i -> print_search_tree i indent)
-  | NotKey k -> Easy.logf `debug "%s-key not\n%!" indent; print_search_tree k indent
-  | OrKey (k1,k2) -> Easy.logf `debug "%s-key or\n%!" indent; print_search_tree k1 indent; print_search_tree k2 indent
+  | NotKey k -> Printf.printf "%s-key not\n%!" indent; print_search_tree k indent
+  | OrKey (k1,k2) -> Printf.printf "%s-key or\n%!" indent; print_search_tree k1 indent; print_search_tree k2 indent
 
 (** handle the charset TBD **)
 let handle_search context charset search buid =
@@ -326,7 +325,7 @@ let handle_search context charset search buid =
     response context None (Resp_Ok(None, "SEARCH completed")) None
 
 let handle_fetch context sequence fetchattr buid =
-  Easy.logf `debug "handle_fetch\n";
+  Printf.printf "handle_fetch\n";
   Amailbox.fetch context.!mailbox (write_resp_untagged context.!netw) sequence fetchattr buid >>= function
   | `NotExists -> response context None (Resp_No(None,"Mailbox doesn't exist")) None
   | `NotSelectable ->  response context None (Resp_No(None,"Mailbox is not selectable")) None
@@ -334,7 +333,7 @@ let handle_fetch context sequence fetchattr buid =
   | `Ok -> response context None (Resp_Ok(None, "FETCH completed")) None
 
 let handle_store context sequence flagsatt flagsval buid =
-  Easy.logf `debug "handle_store %d %d\n" (List.length sequence) (List.length flagsval);
+  Printf.printf "handle_store %d %d\n" (List.length sequence) (List.length flagsval);
   Amailbox.store context.!mailbox (write_resp_untagged context.!netw) sequence flagsatt flagsval buid >>= function
   | `NotExists -> response context None (Resp_No(None,"Mailbox doesn't exist")) None
   | `NotSelectable ->  response context None (Resp_No(None,"Mailbox is not selectable")) None
@@ -344,7 +343,7 @@ let handle_store context sequence flagsatt flagsval buid =
     response context None (Resp_Ok(None, "STORE completed")) None
 
 let handle_copy context sequence mailbox buid =
-  Easy.logf `debug "handle_copy %d %s\n" (List.length sequence) mailbox;
+  Printf.printf "handle_copy %d %s\n" (List.length sequence) mailbox;
   Amailbox.copy context.!mailbox mailbox sequence buid >>= function
   | `NotExists -> response context None (Resp_No(None,"Mailbox doesn't exist")) None
   | `NotSelectable ->  response context None (Resp_No(None,"Mailbox is not selectable")) None
@@ -352,7 +351,7 @@ let handle_copy context sequence mailbox buid =
   | `Ok -> response context None (Resp_Ok(None, "COPY completed")) None
 
 let handle_expunge context =
-  Easy.logf `debug "handle_expunge\n";
+  Printf.printf "handle_expunge\n";
   Amailbox.expunge context.!mailbox (write_resp_untagged context.!netw) >>= function
   (**
   | `NotExists -> return_resp_ctx None (Resp_No(None,"Mailbox doesn't exist")) None
@@ -409,14 +408,14 @@ let handle_command context =
   let state = context.!state in
   let command = (Stack.top_exn context.!commands).command in
   match command with
-  | Any r -> Easy.logf `debug "handling any\n%!"; handle_any context r
+  | Any r -> Printf.printf "handling any\n%!"; handle_any context r
   | Notauthenticated r when state = State_Notauthenticated-> 
-    Easy.logf `debug "handling nonauthenticated\n%!"; handle_notauthenticated context r
+    Printf.printf "handling nonauthenticated\n%!"; handle_notauthenticated context r
   | Authenticated r when state = State_Authenticated || state = State_Selected -> 
-    Easy.logf `debug "handling authenticated\n%!"; handle_authenticated context r
+    Printf.printf "handling authenticated\n%!"; handle_authenticated context r
   | Selected r when state = State_Selected -> 
-    Easy.logf `debug "handling selected\n%!"; handle_selected context r
-  | Done -> Easy.logf `debug "Done, should log out\n%!"; 
+    Printf.printf "handling selected\n%!"; handle_selected context r
+  | Done -> Printf.printf "Done, should log out\n%!"; 
     response context (Some State_Logout) (Resp_Bad(None,"")) None
   | _ -> response context None (Resp_Bad(None, "Bad Command")) None
 
@@ -425,14 +424,14 @@ let handle_command context =
  * then read N bytes, otherwise return the buffer
  *)
 let rec read_network reader writer buffer =
-  Easy.logf `debug "read_network\n%!";
+  Printf.printf "read_network\n%!";
   Lwt_io.read_line_opt reader >>= function
   | None -> return (`Ok (Buffer.contents buffer))
   | Some buff ->
   (** does command end in the literal {[0-9]+} ? **)
   let i = match_regex_i buff ~regx:"{\\([0-9]+\\)[+]?}$" in
   if i < 0 then (
-    Easy.logf `debug "line not ending in literal\n%!";
+    Printf.printf "line not ending in literal\n%!";
     Buffer.add_string buffer buff;
     Buffer.add_string buffer "\r\n";
     return (`Ok (Buffer.contents buffer))
@@ -443,18 +442,18 @@ let rec read_network reader writer buffer =
     let sub = Str.string_before buff i in
     let literal = Str.string_after buff i in
     Buffer.add_string buffer sub;
-    Easy.logf `debug "line is ending in literal %d %s --%s--\n%!" len literal sub;
+    Printf.printf "line is ending in literal %d %s --%s--\n%!" len literal sub;
     if match_regex ~case:false (Buffer.contents buffer) ~regx:append_regex ||
       match_regex ~case:false (Buffer.contents buffer) ~regx:lappend_regex then (
-      Easy.logf `debug "handling append\n%!";
+      Printf.printf "handling append\n%!";
       Buffer.add_string buffer literal;
       Buffer.add_string buffer "\r\n";
       return (`Ok (Buffer.contents buffer))
     ) else if ((Buffer.length buffer) + len) > 10240 then (
-      Easy.logf `debug "command size is too big: %s\n%!" (Buffer.contents buffer);
+      Printf.printf "command size is too big: %s\n%!" (Buffer.contents buffer);
       return (`Error "command too long")
     ) else (
-      Easy.logf `debug "handling another command with the literal\n%!";
+      Printf.printf "handling another command with the literal\n%!";
       (if match_regex literal ~regx:"[+]}$" = false then
         write_resp writer (Resp_Cont(""))
       else
@@ -469,7 +468,7 @@ let rec read_network reader writer buffer =
         Buffer.add_string buffer str;
         read_network reader writer buffer
       | `Timeout ->
-        Easy.logf `debug "network timeout\n%!";
+        Printf.printf "network timeout\n%!";
         return (`Error "timeout")
     )
   )
@@ -487,7 +486,7 @@ let get_command context =
     let current_cmd = 
     (
       let current_cmd = (Parser.request (Lex.read (ref `Tag)) lexbuff) in
-      Easy.logf `debug "get_request_context, returned from parser\n%!"; Out_channel.flush stdout;
+      Printf.printf "get_request_context, returned from parser\n%!"; Out_channel.flush stdout;
       (* if last command idle then next could only be done *)
       match Stack.top context.!commands with
       |None -> current_cmd
@@ -505,8 +504,8 @@ let get_command context =
     return (`Ok )
   )
   (function 
-  | SyntaxError e -> Easy.logf `debug "parse_command error %s\n%!" e; return (`Error (e))
-  | Parser.Error -> Easy.logf `debug "parse_command bad command\n%!"; return (`Error ("bad command, parser"))
+  | SyntaxError e -> Printf.printf "parse_command error %s\n%!" e; return (`Error (e))
+  | Parser.Error -> Printf.printf "parse_command bad command\n%!"; return (`Error ("bad command, parser"))
   | Interpreter.InvalidSequence -> return (`Error ("bad command, invalid sequence"))
   | Dates.InvalidDate -> return (`Error("bad command, invalid date"))
   | ExpectedDone -> return (`Error("Expected DONE"))

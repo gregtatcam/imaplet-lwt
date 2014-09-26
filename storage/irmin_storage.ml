@@ -81,9 +81,9 @@ struct
     IrminMailbox.list mbox ~subscribed ~access ~init ~f
 
   (* append message(s) to selected mailbox *)
-  let append t mailbox message mailbox_metadata =
+  let append t mailbox message message_metadata =
     IrminMailbox.create t mailbox >>= fun mbox ->
-    IrminMailbox.append_message mbox message mailbox_metadata >>
+    IrminMailbox.append_message mbox message message_metadata >>
     IrminMailbox.commit mbox
 
   (* expunge, permanently delete messages with \Deleted flag 

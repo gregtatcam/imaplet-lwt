@@ -14,7 +14,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 open Lwt
-open BatLog
 
 let try_close cio =
   catch (fun () -> Lwt_io.close cio)
@@ -26,7 +25,7 @@ let try_close_sock sock =
   (function _ -> return ())
 
 let init_socket addr port =
-  Easy.logf `debug "serverfe: creating socket %s %d\n%!" addr port;
+  Printf.printf "serverfe: creating socket %s %d\n%!" addr port;
   let sockaddr = Unix.ADDR_INET (Unix.inet_addr_of_string addr, port) in
   let socket = Lwt_unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
   Lwt_unix.setsockopt socket Unix.SO_REUSEADDR true;
