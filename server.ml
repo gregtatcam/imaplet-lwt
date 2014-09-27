@@ -25,7 +25,7 @@ let try_close_sock sock =
   (function _ -> return ())
 
 let init_socket addr port =
-  Printf.printf "serverfe: creating socket %s %d\n%!" addr port;
+  Printf.printf "imaplet: creating socket %s %d\n%!" addr port;
   let sockaddr = Unix.ADDR_INET (Unix.inet_addr_of_string addr, port) in
   let socket = Lwt_unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
   Lwt_unix.setsockopt socket Unix.SO_REUSEADDR true;
@@ -47,9 +47,19 @@ let accept_cmn sock =
   let oc = Lwt_io.of_fd ~close:(fun()->return()) ~mode:Lwt_io.output sock_c in
   return (Some sock_c,(ic,oc))
 
-let accept_conn sock = function
+let rec accept_conn sock cert = 
+  let open Core.Std in
+  catch (fun () ->
+  match cert with
   | Some cert -> accept_ssl sock cert
   | None -> accept_cmn sock
+  )
+  (fun ex ->
+  match ex with
+  | End_of_file -> accept_conn sock cert
+  | _ -> Printf.printf "accept_conn exception %s %s\n%!" (Exn.to_string ex) 
+    (Exn.backtrace()); accept_conn sock cert
+  )
 
 (* init local delivery *)
 let init_local_delivery () =
@@ -69,9 +79,17 @@ let init_all ssl =
     return None
 
 let init_connection w =
+  let open Core.Std in
+  Printf.printf "writing initial capability response to client\n%!";
+  catch( fun () ->
   let resp = "* OK [CAPABILITY " ^ Configuration.capability ^ "] Imaplet ready.\r\n" in
   Lwt_io.write w resp >>
   Lwt_io.flush w
+  )
+  (fun ex ->
+    Printf.printf "exception writing initial capability %s\n%!" (Exn.to_string ex);
+    return ()
+  )
 
 let starttls sock () =
   Ssl_.init_ssl() >>= fun cert ->

@@ -44,7 +44,7 @@ let command =
             Server.create ()
           )
           (fun ex -> Printf.printf "imaplet: fatal exception: %s %s"
-            (BatPrintexc.to_string ex) (BatPrintexc.get_backtrace()); return()
+            (Exn.to_string ex) (Exn.backtrace()); return()
           )
         )
       )
@@ -56,4 +56,4 @@ let () =
   try
     Command.run command
   with Exit -> 
-    Printf.printf "imaplet terminated: %s" (BatPrintexc.get_backtrace())
+    Printf.printf "imaplet terminated: %s" (Exn.backtrace())

@@ -49,13 +49,11 @@ module Key_ :
     val mailbox_of_path : ?user:string -> string -> (string*bool*t)
     val mailbox_of_list : ?user:string -> string list -> (string*bool*t)
     val mailboxes_of_mailbox : t -> t 
-    val t_to_list : t -> string list
-    val t_to_irmin_key : t -> Store.key
     val key_to_string : t -> string
     val key_to_path : t -> string
     val view_key_to_path : t -> string
     val assert_key : t -> unit
-  end =
+  end with type t = Store.key =
   struct
     type t = Store.key
 
@@ -65,10 +63,6 @@ module Key_ :
     let assert_key key =
       if List.length key = 0 || List.find key ~f:(fun i -> i = "") <> None then
         raise (InvalidKey (String.concat ~sep:"/" key))
-
-    let t_to_list key = key
-
-    let t_to_irmin_key key = key
 
     let t_of_path str =
       if str = "" then
@@ -82,10 +76,10 @@ module Key_ :
       l
 
     let add_path key str =
-      List.concat [t_to_list key;t_of_path str]
+      List.concat [key;t_of_path str]
 
     let add_list key l =
-      List.concat [t_to_list key;l]
+      List.concat [key;l]
 
     let mailbox_of_list ?user l =
       let mailbox,folder,key = List.fold_right l ~init:("",false,[]) 
@@ -174,29 +168,29 @@ module IrminIntf :
 
     let remove store key =
       Key_.assert_key key;
-      Store.remove store (Key_.t_to_irmin_key key)
+      Store.remove store key
 
     let read_exn store key =
       Key_.assert_key key;
-      Store.read_exn store (Key_.t_to_irmin_key key)
+      Store.read_exn store key
 
     let mem store key =
       Key_.assert_key key;
-      Store.mem store (Key_.t_to_irmin_key key)
+      Store.mem store key
 
     let list store key =
       Key_.assert_key key;
-      Store.list store [Key_.t_to_irmin_key key]
+      Store.list store [key]
 
     let update_view store key view =
       Key_.assert_key key;
       (*Printf.printf "------ store update_view %s\n%!" (Key_.key_to_string * key);*)
-      Store.View.update_path store (Key_.t_to_irmin_key key) view
+      Store.View.update_path store key view
 
     let read_view store key =
       Key_.assert_key key;
       (*Printf.printf "------ reading view %s\n%!" (Key_.key_to_string key);*)
-      Store.View.of_path store (Key_.t_to_irmin_key key)
+      Store.View.of_path store key
 
   end
 
@@ -222,7 +216,7 @@ module IrminIntf_tr :
       Key_.assert_key key;
       Store.create () >>= fun store ->
       (*Printf.printf "------ creating view %s\n%!" (Key_.key_to_string key);*)
-      Store.View.of_path store (Key_.t_to_irmin_key key) >>= fun view ->
+      Store.View.of_path store key >>= fun view ->
       return (store,view,key,ref false)
 
     let end_transaction tr =
@@ -230,7 +224,7 @@ module IrminIntf_tr :
       if !dirty = true then (
         (*Printf.printf "++++++++++++++++++ commiting %s!!!\n%!"
         (Key_.key_to_string key);*)
-        Store.View.update_path store (Key_.t_to_irmin_key key) view >>= fun () ->
+        Store.View.update_path store key view >>= fun () ->
         dirty := false;
         return ()
       ) else
@@ -238,49 +232,49 @@ module IrminIntf_tr :
 
     let remove_view tr =
       let (store,_,key,_) = tr in
-      Store.remove store (Key_.t_to_irmin_key key)
+      Store.remove store key
 
     let move_view tr key2 =
       let (store,view,_,_) = tr in
-      Store.View.update_path store (Key_.t_to_irmin_key key2) view
+      Store.View.update_path store key2 view
 
 
     let update tr key data =
       Key_.assert_key key;
       (*Printf.printf "------ store view.update %s\n" (Key_.key_to_string * key);*)
       let (_,view,_,dirty) = tr in
-      Store.View.update view (Key_.t_to_irmin_key key) data >>= fun () ->
+      Store.View.update view key data >>= fun () ->
       dirty := true;
       return ()
 
     let read tr key =
       Key_.assert_key key;
       let (_,view,_,_) = tr in
-      Store.View.read view (Key_.t_to_irmin_key key)
+      Store.View.read view key
 
     let read_exn tr key =
       Key_.assert_key key;
       let (_,view,_,_) = tr in
-      Store.View.read_exn view (Key_.t_to_irmin_key key)
+      Store.View.read_exn view key
 
     let list tr key =
       Key_.assert_key key;
       (*Printf.printf "------ store list %s\n%!" (Key_.key_to_string key);*)
       let (_,view,_,_) = tr in
-      Store.View.list view [Key_.t_to_irmin_key key]
+      Store.View.list view [key]
 
     let remove tr key =
       Key_.assert_key key;
       (*Printf.printf "------ store remove %s\n" (Key_.key_to_string key);*)
       let (_,view,_,dirty) = tr in
-      Store.View.remove view (Key_.t_to_irmin_key key) >>= fun () ->
+      Store.View.remove view key >>= fun () ->
       dirty := true;
       return ()
 
     let mem tr key =
       Key_.assert_key key;
       let (_,view,_,_) = tr in
-      Store.View.mem view (Key_.t_to_irmin_key key)
+      Store.View.mem view key
 
     let tr_key tr =
       let (_,_,key,_) = tr in
@@ -768,7 +762,7 @@ module IrminMailbox :
       IrminIntf.create () >>= fun store ->
       IrminIntf.list store k >>= fun l ->
       Lwt_list.fold_left_s (fun acc i ->
-        let k = Key_.t_of_list ((List.concat [Key_.t_to_list k;i])) in
+        let k = Key_.t_of_list ((List.concat [k;i])) in
         list_subtr store k >>= fun s ->
         return (((Key_.key_to_string (Key_.t_of_list i)) ^ ":" ^ s) :: acc)
       ) [] l

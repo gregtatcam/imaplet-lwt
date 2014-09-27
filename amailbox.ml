@@ -66,15 +66,15 @@ let dir_item item cnt =
       ["\\HasChildren"])
 
 (** make mailbox item **)
-let mbox_item item reference =
-  (item, "NoInferiors" ::
-  if reference = "" then 
+let mbox_item path mailbox =
+  (path, "NoInferiors" ::
+  if mailbox = "" then 
   (
-    if item = "Drafts" then
+    if path = "Drafts" then
       ["\\Drafts"]
-    else if item = "Deleted Messages" then
+    else if path = "Deleted Messages" then
       ["\\Deleted"]
-    else if item = "Sent Messages" then
+    else if path = "Sent Messages" then
       ["\\Sent"] 
     else
       []
@@ -82,81 +82,85 @@ let mbox_item item reference =
     []
   )
   
-let list_ (module Mailbox : Storage.Storage_inst) subscribed mailbox pattern =
+let list_ (module Mailbox : Storage.Storage_inst) subscribed mailbox wilcards =
   let open Regex in
   let open Utils in
   let open Core.Std in
   (* item is relative to the mailbox *)
   let select_item acc mailbox item isdir =
-    (** fix regex for the pattern **)
-    let regxpattern = fixregx_mbox pattern in
     (** get item path relative to the relative root **)
-    let tomatch = concat_path mailbox item in
+    let path = concat_path mailbox item in
+    Printf.printf "list matching %s %s\n%!" mailbox wilcards;
     if isdir <> None then
     (
-      if match_regex tomatch ~regx:regxpattern then
-        ((dir_item item (Option.value_exn isdir)) :: acc)
+      if match_regex path ~regx:wilcards then
+        ((dir_item path (Option.value_exn isdir)) :: acc)
       else
         acc
-    ) else if match_regex tomatch ~regx:regxpattern then
-        ((mbox_item item mailbox) :: acc)
+    ) else if match_regex path ~regx:wilcards then
+        ((mbox_item path mailbox) :: acc)
     else
       (acc)
   in
-  Mailbox.MailboxStorage.exists Mailbox.this mailbox >>= function
-  | `No | `Folder -> return []
-  | `Mailbox ->
-    (* item has path relative to the start, i.e. root + mailbox *)
-    Mailbox.MailboxStorage.list Mailbox.this ~subscribed ~access:(fun _ -> true) 
-    mailbox ~init:[] ~f:(fun acc item ->
-      match item with
-        | `Folder (item,cnt)  -> return (select_item acc mailbox item (Some cnt))
-        | `Mailbox item  -> return (select_item acc mailbox item None)
-    )
+  (* item has path relative to the start, i.e. root + mailbox *)
+  Mailbox.MailboxStorage.list Mailbox.this ~subscribed ~access:(fun _ -> true) 
+  mailbox ~init:[] ~f:(fun acc item ->
+    match item with
+      | `Folder (item,cnt)  -> return (select_item acc mailbox item (Some cnt))
+      | `Mailbox item  -> return (select_item acc mailbox item None)
+  )
 
 (** add to the calculated list the reference folder and inbox **)
 let add_list reference mailbox acc =
   let open Regex in
   let fixed = fixregx_mbox mailbox in
-  if match_regex reference ~regx:"[.]+" = false && match_regex "INBOX" ~regx:fixed then 
+  if dequote reference = "" && match_regex "INBOX" ~regx:fixed then 
     ("INBOX", ["\\HasNoChildren"])::acc
   else
     acc
 
-(** list mailbox **)
-let list_adjusted (module Mailbox : Storage.Storage_inst) subscribed reference mailbox =
+let get_path_and_regex reference mailbox =
   let open Regex in
   let open Core.Std in
   (* match the wild cards part of the mailbox *)
-  let fixref = replace "\"" "" reference in 
-  let fixref = replace "^/$" "" fixref in
-  let fixmbx = replace "\"" "" mailbox in
+  let fixref = dequote reference in 
+  let fixref = replace ~regx:"^/$" ~tmpl:"" fixref in
+  let fixmbx = replace ~regx:"\"" ~tmpl:"" mailbox in
   let str = fixref ^ fixmbx in
-  let path,regx =
   if match_regex str ~regx:"\\([^/]*[%\\*].*$\\)" then (
     let regx = Str.matched_string str in
-    let path = String.slice str 0 (String.length str - (String.length regx)) in
-    path,regx
+    let len = String.length str - (String.length regx) in
+    let path =
+      if len = 0 then
+        ""
+      else
+        String.slice str 0 len
+    in
+    path,(fixregx_mbox regx)
   ) else (
     str,""
   )
-  in
-  Printf.printf "listmbx -%s- -%s- -%s- -%s-\n%!" reference mailbox path regx;
-  if reference = "\"/\"" || reference = "/" || reference = "" && mailbox = "" then
-  (
+
+(** list mailbox **)
+let list_adjusted (module Mailbox : Storage.Storage_inst) subscribed reference mailbox =
+  let open Regex in
+  let flags = ["\\Noselect"] in
+  if mailbox = "" then (
     Printf.printf "special listmbx -%s- -%s-\n%!" reference mailbox;
-    let flags = ["\\Noselect"] in
-    let file = 
-    (if mailbox = "" then
-      "/"
-    else
-      ""
-    ) in
-      return ([file, flags])
+    (* reference doesn't start with / *)
+    if match_regex reference ~regx:"^\"?\\([^/]+/\\)" then
+      return ([Str.matched_group 1 reference,flags])
+    else 
+      return (["/",flags])
+  (* reference starts with / *)
+  ) else if match_regex reference ~regx:"^\"?/" then (
+    Printf.printf "special blank listmbx -%s- -%s-\n%!" reference mailbox;
+    return ([])
   ) else (
-    Printf.printf "regular listmbx -%s- -%s-\n%!" reference mailbox;
+    let (path,regx) = get_path_and_regex reference mailbox in
+    Printf.printf "regular listmbx -%s- -%s- -%s- -%s-\n%!" reference mailbox path regx;
     list_ (module Mailbox) subscribed path regx >>= 
-      fun acc -> return (add_list fixref mailbox acc)
+      fun acc -> return (add_list reference mailbox acc)
   )
 
 (** list mailbox **)
@@ -332,18 +336,14 @@ let get_iterator (module Mailbox: Storage.Storage_inst) name buid sequence =
   let open Seq_iterator in
   let open Core.Std in
   if SequenceIterator.single sequence then (
-    Printf.printf "creating iterator with 1:%d\n%!" Int.max_value;
     return (Some (SequenceIterator.create sequence 1 Int.max_value))
   ) else (
     Mailbox.MailboxStorage.status Mailbox.this name >>= fun mailbox_metadata ->
     if buid = false then (
-      Printf.printf "creating iterator with count 1:%d\n%!" mailbox_metadata.count;
       return (Some (SequenceIterator.create sequence 1 mailbox_metadata.count))
     ) else (
       Mailbox.MailboxStorage.fetch_message_metadata Mailbox.this name (`Sequence 1) >>= function
       | `Ok message_metadata ->
-        Printf.printf "creating iterator with uid %d:%d\n%!"
-        message_metadata.uid (mailbox_metadata.uidnext - 1);
         return (Some (SequenceIterator.create sequence message_metadata.uid
           (mailbox_metadata.uidnext - 1)))
       | _ -> return None
@@ -377,7 +377,6 @@ let iter_selected_with_seq (module Mailbox: Storage.Storage_inst) mailboxt seque
 let fetch mailboxt resp_writer sequence fetchattr buid =
   let (module Mailbox) = factory mailboxt in
   iter_selected_with_seq (module Mailbox) mailboxt sequence buid (fun mailbox pos seq ->
-    Printf.printf "iterating with seq %d\n%!" seq;
     Mailbox.MailboxStorage.fetch Mailbox.this mailbox pos >>= function
     | `Eof -> return `Eof
     | `NotFound -> return `Ok
@@ -403,7 +402,7 @@ let store mailboxt resp_writer sequence storeattr flagsval buid =
       | `Silent metadata -> Mailbox.MailboxStorage.store Mailbox.this mailbox pos metadata >>
         return `Ok
       | `Ok (metadata,res) -> 
-        resp_writer res >> 
+        resp_writer res >>
         Mailbox.MailboxStorage.store Mailbox.this mailbox pos metadata >>
         return `Ok
   )

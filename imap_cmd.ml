@@ -425,9 +425,20 @@ let handle_command context =
  *)
 let rec read_network reader writer buffer =
   Printf.printf "read_network\n%!";
+  begin
+  catch ( fun () ->
   Lwt_io.read_line_opt reader >>= function
-  | None -> return (`Ok (Buffer.contents buffer))
-  | Some buff ->
+  | None -> return `None
+  | Some buff -> return (`Ok buff)
+  )
+  (fun ex -> match ex with
+    | End_of_file -> return `Done
+    | _ -> raise ex
+  )
+  end >>= function
+  | `Done -> return `Done
+  | `None -> return (`Ok (Buffer.contents buffer))
+  | `Ok buff ->
   (** does command end in the literal {[0-9]+} ? **)
   let i = match_regex_i buff ~regx:"{\\([0-9]+\\)[+]?}$" in
   if i < 0 then (
@@ -480,6 +491,7 @@ let get_command context =
   catch (fun () ->
     let buffer = Buffer.create 0 in
     read_network context.!netr context.!netw buffer >>= function
+    | `Done -> return `Done
     | `Error err -> return (`Error err)
     | `Ok buff ->
     let lexbuff = Lexing.from_string buff in
@@ -515,6 +527,7 @@ let get_command context =
 let rec client_requests context =
   catch ( fun () ->
     get_command context >>= function
+    | `Done -> return `Done
     | `Error e -> write_resp context.!netw (Resp_Bad(None,e)) >> client_requests context
     | `Ok -> handle_command context >>= fun response ->
       if context.!state = State_Logout then

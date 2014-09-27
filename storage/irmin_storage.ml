@@ -150,11 +150,12 @@ struct
   let store t mailbox position message_metadata =
     IrminMailbox.create t mailbox >>= fun mbox ->
     IrminMailbox.update_message_metadata mbox position message_metadata >>= fun _ ->
-    return ()
+    IrminMailbox.commit mbox
 
   (* copy messages from selected mailbox *)
   let copy t mailbox1 mailbox2 sequence buid =
     IrminMailbox.create t mailbox1 >>= fun mbox1 ->
     IrminMailbox.create t mailbox2 >>= fun mbox2 ->
-    IrminMailbox.copy_mailbox mbox1 mbox2 sequence buid
+    IrminMailbox.copy_mailbox mbox1 mbox2 sequence buid >>
+    IrminMailbox.commit mbox2
 end

@@ -88,11 +88,10 @@ let qstring = quote ( ( group ( orx quote_spec_char quoted_char ) ) ^ "+" )
 
 (** convert imap mailbox regex to ocaml regex **)
 let fixregx_mbox mailbox =
-  let str = replace "\\*" ".+" mailbox in
-  (*let str = replace "^%$" "^[^/]+$" str in
-  let str = replace "^%" "^[^/]+" str in
-  let str = replace "%$" "[^/]+$" str in*)
-  replace "%" "[^/]+" str
+  let str = replace ~regx:"\\*" ~tmpl:".+" mailbox in
+  let str = replace ~regx:"^%$" ~tmpl:"^[^/]+$" str in
+  let str = replace ~regx:"^%" ~tmpl:"^[^/]+" str in
+  replace ~regx:"%$" ~tmpl:"[^/]+$" str
 
 (* date regex *)
 let mon = group "Jan\\|Feb\\|Mar\\|Apr\\|May\\|Jun\\|Jul\\|Aug\\|Sep\\|Oct\\|Nov\\|Dec"
