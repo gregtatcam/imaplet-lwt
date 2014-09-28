@@ -30,20 +30,6 @@ let init_socket addr port =
   Lwt_unix.bind socket sockaddr;
   socket
 
-let init_unix_socket file =
-  let open Lwt_unix in
-  Printf.printf "imaplet_lmtp creating unix socket\n%!";
-  catch (fun () -> unlink file)
-  (function _ -> return ()) >>= fun () -> 
-  let sockaddr = Unix.ADDR_UNIX file in
-  let socket = socket Unix.PF_UNIX Unix.SOCK_STREAM 0 in
-  setsockopt socket Unix.SO_REUSEADDR true;
-  bind socket sockaddr;
-  getpwnam "postfix" >>= fun (pw:Lwt_unix.passwd_entry) ->
-  chown file pw.pw_uid pw.pw_gid >>= fun () ->
-  chmod file  0o777 >>= fun () ->
-  return socket
- 
 let create_srv_socket () =
   let socket = init_socket srv_config.lmtp_addr srv_config.lmtp_port in
   Lwt_unix.listen socket Configuration.lmtp_backlog;
@@ -81,12 +67,13 @@ let add_postmark from_ msg =
  * need imap to check that the command is comming from lmtp TBD
  *)
 let send_to_imap from_ to_ msg =
+  Printf.printf "imaplet_lmtp: sending to imap\n!";
+  let open Lwt_unix in
   let msg = add_postmark from_ msg in
-  Printf.printf "%s%!" msg;
-  let socket = init_socket srv_config.lmtp_addr 0 in
-  let imapaddr = Unix.ADDR_INET (Unix.inet_addr_of_string
-    srv_config.imap_addr, srv_config.imap_port) in
-  Lwt_unix.connect socket imapaddr >>= fun () ->
+  Printf.printf "imaplet_lmtp:\n%s%!" msg;
+  let sockaddr = Unix.ADDR_UNIX "./lmtp" in
+  let socket = socket Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+  Lwt_unix.connect socket sockaddr >>= fun () ->
   let inchan = Lwt_io.of_fd ~mode:Lwt_io.input socket in
   let outchan = Lwt_io.of_fd ~mode:Lwt_io.output socket in
   let write buff =
@@ -98,12 +85,12 @@ let send_to_imap from_ to_ msg =
       Lwt_io.read_line inchan;
     ]
   in
-  read () >>= fun resp -> Printf.printf "------ imap: %s\n%!" resp; (* CAPABILITY *)
+  read () >>= fun resp -> Printf.printf "imaplet_lmtp: %s\n%!" resp; (* CAPABILITY *)
   write ("a lappend " ^ to_ ^ " INBOX {" ^ (string_of_int (String.length msg)) ^ "+}\r\n") >>= fun () ->
   write msg >>= fun () ->
-  read () >>= fun resp -> Printf.printf "------ imap: %s\n%!" resp; (* a OK APPEND completed *)
+  read () >>= fun resp -> Printf.printf "imaplet_lmtp: %s\n%!" resp; (* a OK APPEND completed *)
   write "a logout\r\n" >>= fun () ->
-  read () >>= fun resp -> Printf.printf "------ imap: %s\n%!" resp; (* * BYE *)
+  read () >>= fun resp -> Printf.printf "imaplet_lmtp: %s\n%!" resp; (* * BYE *)
   Lwt_unix.close socket >>= fun () ->
   try_close inchan >> try_close outchan >> return ()
 
@@ -177,7 +164,7 @@ let process_request outchan msg buffer what =
         send_to_imap from_ to_ (Buffer.contents buffer) >>= fun () ->
         write "250 OK\r\n" >>= fun () -> return (from_,to_,`Quit)
       with | _ ->
-        Printf.printf "failed to send to imap\n%!";
+        Printf.printf "imaplet_lmtp: failed to send to imap\n%!";
         write "451\r\n" >>= fun () -> return (from_,to_,`Done)
     ) else (
       Buffer.add_string buffer msg;
@@ -191,10 +178,9 @@ let process_request outchan msg buffer what =
   | `Done -> raise InvalidCmd
 
 let rec requests inchan outchan buffer what =
-  Printf.printf "in requests\n%!";
   try
   catch (fun () -> 
-    Lwt_io.read ~count:10240 inchan >>= fun msg -> Printf.printf "imaplet_lmtp requests\n%!";
+    Lwt_io.read ~count:10240 inchan >>= fun msg -> Printf.printf "imaplet_lmtp: requests\n%!";
     process_request outchan msg buffer what >>= fun what ->
       let (_,_,state) = what in
       match state with
@@ -205,11 +191,11 @@ let rec requests inchan outchan buffer what =
   with ex -> Printf.printf "imaplet_lmtp: exception %s\n" (Core.Exn.to_string ex); return ()
  
 let process socket =
-  Printf.printf "imaplet_lmtp processing socket\n%!";
+  Printf.printf "imaplet_lmtp: processing socket\n%!";
   let rec _process () =
     Lwt_unix.accept socket >>=
       (fun (socket_cli, _) ->
-        Printf.printf "imaplet_lmtp accepted socket\n%!";
+        Printf.printf "imaplet_lmtp: accepted socket\n%!";
         let inchan = Lwt_io.of_fd ~mode:Lwt_io.input socket_cli in
         let outchan = Lwt_io.of_fd ~mode:Lwt_io.output socket_cli in
         async (fun () -> 
@@ -224,7 +210,7 @@ let process socket =
   _process ()
  
 let _ =
-  Printf.printf "imaplet_lmtp started\n%!";
+  Printf.printf "imaplet_lmtp: started\n%!";
   let socket = create_srv_socket() in 
   Lwt_main.run (
     process socket

@@ -26,6 +26,7 @@ open Email_message
 open Email_message.Mailbox
 
 exception InvalidCmd
+exception Quit
 
 let uinput = ref []
 
@@ -104,8 +105,9 @@ let rec selected user mailbox mbox =
   prompt (user ^ ":" ^ mailbox ^ ": ") >>= function 
   | "help" -> Printf.printf
   "all\nexists\nhelp\nlist\nmeta\nappend\nmessage #\ntree
-  \nclose\nremove uid\nstore # +-| flags-list%!";
+  \nclose\nremove uid\nstore # +-| flags-list\nquit\n%!";
   selected user mailbox mbox
+  | "quit" -> raise Quit
   | "append" -> append user mailbox >>= fun () -> selected user mailbox mbox
   | "all" -> IrminMailbox.show_all mbox >>= fun () -> selected user mailbox mbox
   | "tree" -> let (_,_,key) = Key_.mailbox_of_path ~user mailbox in
@@ -184,7 +186,7 @@ let rec selected user mailbox mbox =
 let main () =
   out_line "type help for commands\n" >>= fun () ->
   let rec request user =
-    try
+    catch (fun () ->
     prompt (user ^ ": ") >>= function 
     | "help" -> Printf.printf "help\nselect mbox\ncrtmailbox mailbox\nlist\ntree\ndelete\ncreate\nuser\nquit\n%!"; request user
     | "user" -> prompt "user? " >>= fun user -> request user
@@ -212,7 +214,13 @@ let main () =
       | `Mailbox c -> Printf.printf "storage %s\n%!" c); request user
     | "quit" -> return ()
     | _ -> Printf.printf "unknown command\n%!"; request user
-    with InvalidCmd -> Printf.printf "unknown command\n%!"; request user
+    )
+    (fun ex -> 
+    match ex with
+    | InvalidCmd -> Printf.printf "unknown command\n%!"; request user
+    | Quit -> return ()
+    | _ -> Printf.printf "exception %s\n%!" (Exn.to_string ex); return ()
+    )
   in
   prompt "user? " >>= fun user ->
   request user 

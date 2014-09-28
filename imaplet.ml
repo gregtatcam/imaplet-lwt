@@ -22,7 +22,7 @@ let update_config net port ssl tls =
   srv_config.ssl := (match ssl with |None -> srv_config.!ssl|Some ssl->ssl);
   srv_config.starttls := (srv_config.!ssl && (match tls with |None -> srv_config.!starttls|Some tls->tls));
   srv_config.addr := (match net with |None -> srv_config.!addr|Some net->net);
-  Printf.printf "creating imap server on %s:%d:%b:%b\n%!"
+  Printf.printf "imaplet: creating imap server on %s:%d:%b:%b\n%!"
     srv_config.!addr srv_config.!port srv_config.!ssl srv_config.!starttls
 
 (**
@@ -56,4 +56,4 @@ let () =
   try
     Command.run command
   with Exit -> 
-    Printf.printf "imaplet terminated: %s" (Exn.backtrace())
+    Printf.printf "imaplet: terminated: %s" (Exn.backtrace())
