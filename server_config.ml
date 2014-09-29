@@ -34,7 +34,7 @@ type imapConfig = {
   pem_name : string; (* pem file name, default server.pem *)
   key_name : string; (* private key file name, default server.key *)
   users_path : string; (* users file path, default datadir/imaplet *)
-  data_store : [`Irmin]; (* type of storage, only irmin supported so far *)
+  data_store : [`Irmin|`Mailbox]; (* type of storage, only irmin supported so far *)
 }
 
 let exists file =

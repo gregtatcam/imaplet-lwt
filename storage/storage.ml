@@ -24,79 +24,90 @@ module type Storage_intf =
 sig
   type t
 
-  (* user *)
-  val create : string -> t
+  (* user,mailbox *)
+  val create : string -> string -> t Lwt.t
 
   (* check if mailbox exists *)
-  val exists : t -> string -> [`No|`Folder|`Mailbox] Lwt.t
+  val exists : t -> [`No|`Folder|`Mailbox] Lwt.t
 
   (* status *)
-  val status : t -> string -> mailbox_metadata Lwt.t
+  val status : t -> mailbox_metadata Lwt.t
 
   (* select mailbox *)
-  val select : t -> string -> mailbox_metadata Lwt.t
+  val select : t -> mailbox_metadata Lwt.t
 
   (* examine mailbox *)
-  val examine : t -> string -> mailbox_metadata Lwt.t
+  val examine : t -> mailbox_metadata Lwt.t
 
   (* create mailbox *)
-  val create_mailbox : t -> string -> unit Lwt.t
+  val create_mailbox : t -> unit Lwt.t
 
   (* delete mailbox *)
-  val delete : t -> string -> unit Lwt.t
+  val delete : t -> unit Lwt.t
 
   (* rename mailbox1 mailbox2 *)
-  val rename : t -> string -> string -> unit Lwt.t
+  val rename : t -> string -> unit Lwt.t
 
   (* subscribe mailbox *)
-  val subscribe : t -> string -> unit Lwt.t
+  val subscribe : t -> unit Lwt.t
 
   (* unsubscribe mailbox *)
-  val unsubscribe : t -> string -> unit Lwt.t
+  val unsubscribe : t -> unit Lwt.t
 
   (* list reference mailbox 
    * returns list of files/folders with list of flags 
    *)
-  val list : t -> subscribed:bool -> ?access:(string->bool) -> string -> init:'a -> 
+  val list : t -> subscribed:bool -> ?access:(string->bool) -> init:'a -> 
     f:('a -> [`Folder of (string*int)|`Mailbox of string] -> 'a Lwt.t) -> 'a Lwt.t
 
   (* append message(s) to selected mailbox *)
-  val append : t -> string -> Mailbox.Message.t -> mailbox_message_metadata -> unit Lwt.t 
+  val append : t -> Mailbox.Message.t -> mailbox_message_metadata -> unit Lwt.t 
 
   (* expunge, permanently delete messages with \Deleted flag 
    * from selected mailbox 
    *)
-  val expunge : t -> string -> (int -> unit Lwt.t) -> unit Lwt.t
+  val expunge : t -> (int -> unit Lwt.t) -> unit Lwt.t
 
   (* search selected mailbox *)
-  val search : t -> string -> (searchKey) searchKeys -> bool -> int list Lwt.t
+  val search : t -> (searchKey) searchKeys -> bool -> int list Lwt.t
 
   (* fetch messages from selected mailbox *)
-  val fetch : t -> string -> [`Sequence of int|`UID of int] ->
+  val fetch : t -> [`Sequence of int|`UID of int] ->
     [`NotFound|`Eof|`Ok of (Mailbox.Message.t * mailbox_message_metadata)] Lwt.t
 
   (* fetch messages from selected mailbox *)
-  val fetch_message_metadata : t -> string -> [`Sequence of int|`UID of int] ->
+  val fetch_message_metadata : t -> [`Sequence of int|`UID of int] ->
     [`NotFound|`Eof|`Ok of mailbox_message_metadata] Lwt.t
 
   (* store flags to selected mailbox *)
-  val store : t -> string -> [`Sequence of int|`UID of int] -> mailbox_message_metadata -> unit Lwt.t
+  val store : t -> [`Sequence of int|`UID of int] -> mailbox_message_metadata -> unit Lwt.t
 
   (* copy messages from selected mailbox *)
-  val copy : t -> string -> string -> sequence -> bool -> unit Lwt.t
-end
+  val copy : t -> t -> sequence -> bool -> unit Lwt.t
 
+  (* all operations that update the mailbox have to be completed with commit
+   *)
+  val commit : t -> unit Lwt.t
+end
 module type Storage_inst =
 sig
   module MailboxStorage : Storage_intf
   val this : MailboxStorage.t
+  val this2 : MailboxStorage.t option
 end
 
 let build_strg_inst
-(type l)
-(module S : Storage_intf with type t = l) 
-user =
+(module S : Storage_intf)
+user ?mailbox2 mailbox =
+  S.create user mailbox >>= fun this ->
+  begin
+  match mailbox2 with 
+  | None -> return None
+  | Some mailbox2 -> S.create user mailbox2 >>= fun this2 -> return (Some this2) 
+  end >>= fun this2 ->
+  return
   (module struct
     module MailboxStorage = S
-    let this = S.create user
+    let this = this
+    let this2 = this2
   end : Storage_inst)

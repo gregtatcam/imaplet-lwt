@@ -385,7 +385,7 @@ module UserAccount :
 
   end
 
-  type mailbox = {user:string;mailbox:string;folders:bool;trans:IrminIntf_tr.transaction;
+  type mailbox_ = {user:string;mailbox:string;folders:bool;trans:IrminIntf_tr.transaction;
       index:int list option ref}
 
 (* consistency TBD *)
@@ -416,10 +416,10 @@ module IrminMailbox :
       f:('a -> [`Folder of string*int|`Mailbox of string] -> 'a Lwt.t) -> 'a Lwt.t
     val read_index_uid : t -> int list Lwt.t
     val show_all : t -> unit Lwt.t
-  end with type t = mailbox = 
+  end with type t = mailbox_ = 
   struct 
     (* user * mailbox * is-folder * irmin key including the mailbox *)
-    type t = mailbox
+    type t = mailbox_
 
     let get_key = function
     | `Metamailbox -> Key_.t_of_path "meta"
@@ -546,8 +546,6 @@ module IrminMailbox :
         else 
           mailbox_metadata.unseen 
       in
-      List.iter message_metadata.flags ~f:(fun f -> 
-        Printf.printf "append =========== %s\n%!" (Utils.fl_to_str f));
       let mailbox_metadata = {mailbox_metadata with uidnext;count;nunseen;recent;unseen} in
       let message_metadata = {message_metadata with uid;modseq} in
       let message_metadata_sexp = sexp_of_mailbox_message_metadata message_metadata in

@@ -64,8 +64,8 @@ let rec listdir path mailbox f =
   ) strm 
 
 let create_mailbox user mailbox =
-  let ist = IrminStorage.create user in
-  IrminStorage.create_mailbox ist mailbox >>
+  IrminStorage.create user mailbox >>= fun ist ->
+  IrminStorage.create_mailbox ist >>
   return ist
 
 let populate_mailbox ist path mailbox =
@@ -118,13 +118,14 @@ let populate_mailbox ist path mailbox =
   Lwt_stream.iter_s (fun message ->
     let metadata = empty_mailbox_message_metadata() in
     let metadata = {metadata with flags=[Imaplet_types.Flags_Recent]} in
-    IrminStorage.append ist mailbox message metadata
-  ) strm 
+    IrminStorage.append ist message metadata
+  ) strm
 
 let create_inbox user inbx =
+  Printf.printf "creating mailbox: INBOX\n%!";
   create_mailbox user "INBOX" >>= fun ist ->
   populate_mailbox ist inbx "INBOX" >>
-  return ()
+  IrminStorage.commit ist
 
 let () =
   let open Core.Std in
@@ -139,12 +140,13 @@ let () =
         listdir mbx "/" (fun is_dir path mailbox ->
           if is_dir then (
             Printf.printf "creating mailbox folder: %s\n%!" mailbox;
-            create_mailbox user (mailbox ^ "/") >>= fun _ -> return ()
+            create_mailbox user (mailbox ^ "/") >>= fun ist ->
+            IrminStorage.commit ist
           ) else (
             Printf.printf "creating mailbox: %s\n%!" mailbox;
             create_mailbox user mailbox >>= fun ist ->
             populate_mailbox ist path mailbox >>
-            return ()
+            IrminStorage.commit ist
           )
         )
       )

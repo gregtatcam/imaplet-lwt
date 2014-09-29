@@ -16,6 +16,4 @@
 open Storage
 open Irmin_core
 
-type storage_ = {user:string;mailbox:IrminMailbox.t}
-
-module IrminStorage : Storage_intf with type t = storage_
+module MailboxStorage : Storage_intf with type t = string

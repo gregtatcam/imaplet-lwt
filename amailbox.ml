@@ -24,12 +24,18 @@ type selection = [`Select of string | `Examine of string | `None]
 
 type amailboxt = {inbox_path:string;mail_path:string;user:string option;selected:selection}
 
-let factory mailboxt =
+let factory mailboxt ?mailbox2 mailbox =
   let open Server_config in
   let open Storage in
+  let open Mailbox_storage in
   let open Core.Std in
   match srv_config.data_store with
-  | `Irmin -> build_strg_inst (module IrminStorage) (Option.value_exn mailboxt.user)
+  | `Irmin -> 
+    build_strg_inst (module IrminStorage) (Option.value_exn mailboxt.user)
+    ?mailbox2 mailbox
+  | `Mailbox ->
+    build_strg_inst (module MailboxStorage) (Option.value_exn mailboxt.user)
+    ?mailbox2 mailbox
 
 (* inbox location * all mailboxes location * user * type of selected mailbox *)
 type t = amailboxt
@@ -46,6 +52,7 @@ let create user =
   let (inbox_path,mail_path) = 
   match srv_config.data_store with
   | `Irmin -> "",""
+  | `Mailbox -> srv_config.inbox_path,srv_config.mail_path
   in
   {inbox_path;mail_path;user=Some user;selected=`None}
 
@@ -82,7 +89,7 @@ let mbox_item path mailbox =
     []
   )
   
-let list_ (module Mailbox : Storage.Storage_inst) subscribed mailbox wilcards =
+let list_ mailboxt subscribed mailbox wilcards =
   let open Regex in
   let open Utils in
   let open Core.Std in
@@ -103,8 +110,9 @@ let list_ (module Mailbox : Storage.Storage_inst) subscribed mailbox wilcards =
       (acc)
   in
   (* item has path relative to the start, i.e. root + mailbox *)
+  factory mailboxt mailbox >>= fun (module Mailbox) ->
   Mailbox.MailboxStorage.list Mailbox.this ~subscribed ~access:(fun _ -> true) 
-  mailbox ~init:[] ~f:(fun acc item ->
+  ~init:[] ~f:(fun acc item ->
     match item with
       | `Folder (item,cnt)  -> return (select_item acc mailbox item (Some cnt))
       | `Mailbox item  -> return (select_item acc mailbox item None)
@@ -142,7 +150,7 @@ let get_path_and_regex reference mailbox =
   )
 
 (** list mailbox **)
-let list_adjusted (module Mailbox : Storage.Storage_inst) subscribed reference mailbox =
+let list_adjusted mailboxt subscribed reference mailbox =
   let open Regex in
   let flags = ["\\Noselect"] in
   if mailbox = "" then (
@@ -159,31 +167,28 @@ let list_adjusted (module Mailbox : Storage.Storage_inst) subscribed reference m
   ) else (
     let (path,regx) = get_path_and_regex reference mailbox in
     Printf.printf "regular listmbx -%s- -%s- -%s- -%s-\n%!" reference mailbox path regx;
-    list_ (module Mailbox) subscribed path regx >>= 
+    list_ mailboxt subscribed path regx >>= 
       fun acc -> return (add_list reference mailbox acc)
   )
 
 (** list mailbox **)
 let list mailboxt reference mailbox =
-  let (module Mailbox) = factory mailboxt in
-  list_adjusted (module Mailbox) false reference mailbox
+  list_adjusted mailboxt false reference mailbox
 
 (** lsubmbx mailbx reference mailbox, list on subscribed mailboxes 
  * need to handle a wild card % case when foo/bar is subscribed but foo is no
  * should return foo only in this case 
 **)
 let lsub mailboxt reference mailbox =
-  Printf.printf "lsubmbx\n%!";
-  let (module Mailbox) = factory mailboxt in
-  list_adjusted (module Mailbox) true reference mailbox 
+  list_adjusted mailboxt true reference mailbox 
 
 let select_ mailboxt mailbox selection = 
-  let (module Mailbox) = factory mailboxt in
-  Mailbox.MailboxStorage.exists Mailbox.this mailbox >>= function
+  factory mailboxt mailbox >>= fun (module Mailbox) ->
+  Mailbox.MailboxStorage.exists Mailbox.this >>= function
   | `No -> return `NotExists
   | `Folder -> return `NotSelectable
   | `Mailbox ->
-    Mailbox.MailboxStorage.select Mailbox.this mailbox >>= fun mailbox_metadata ->
+    Mailbox.MailboxStorage.select Mailbox.this >>= fun mailbox_metadata ->
     return (`Ok ({mailboxt with selected = selection}, mailbox_metadata))
 
 (* select mailbox *)
@@ -196,8 +201,8 @@ let examine mailboxt mailbox =
 
 (* create mailbox *)
 let create_mailbox mailboxt mailbox =
-  let (module Mailbox) = factory mailboxt in
-  Mailbox.MailboxStorage.exists Mailbox.this mailbox >>= function
+  factory mailboxt mailbox >>= fun (module Mailbox) ->
+  Mailbox.MailboxStorage.exists Mailbox.this >>= function
   | `Mailbox -> return (`Error("Mailbox already exists"))
   | `Folder -> return (`Error("Invalid Superior"))
   | `No ->
@@ -210,55 +215,61 @@ let create_mailbox mailboxt mailbox =
       return (`Error("Invalid mailbox name: Contains . part"))
     else 
     (
-      Mailbox.MailboxStorage.create_mailbox Mailbox.this mailbox >> 
+      Mailbox.MailboxStorage.create_mailbox Mailbox.this >> 
+      Mailbox.MailboxStorage.commit Mailbox.this >>
       return `Ok
     )
 
 (* delete mailbox *)
 let delete_mailbox mailboxt mailbox =
-  let (module Mailbox) = factory mailboxt in
-  Mailbox.MailboxStorage.exists Mailbox.this mailbox >>= function
+  factory mailboxt mailbox >>= fun (module Mailbox) ->
+  Mailbox.MailboxStorage.exists Mailbox.this >>= function
   | `No -> return (`Error("Mailbox doesn't exist"))
   | _ ->
-    Mailbox.MailboxStorage.delete Mailbox.this mailbox >>
+    Mailbox.MailboxStorage.delete Mailbox.this >>
+    Mailbox.MailboxStorage.commit Mailbox.this >>
     return `Ok
 
 (* rename mailbox *)
 let rename_mailbox mailboxt src dest =
-  let (module Mailbox) = factory mailboxt in
-  Mailbox.MailboxStorage.exists Mailbox.this src >>= function
+  let open Core.Std in
+  factory mailboxt ?mailbox2:(Some dest) src >>= fun (module Mailbox) ->
+  Mailbox.MailboxStorage.exists Mailbox.this >>= function
   | `No -> return (`Error("Mailbox doesn't exist"))
   | _ ->
-    Mailbox.MailboxStorage.exists Mailbox.this dest >>= function
+    Mailbox.MailboxStorage.exists (Option.value_exn Mailbox.this2) >>= function
     | `No ->
-      let (module Mailbox) = factory mailboxt in
-      Mailbox.MailboxStorage.rename Mailbox.this src dest >>
+      Mailbox.MailboxStorage.rename Mailbox.this dest >>
+      Mailbox.MailboxStorage.commit Mailbox.this >>
+      Mailbox.MailboxStorage.commit (Option.value_exn Mailbox.this2) >>
       return `Ok
     | _ -> return (`Error ("Destination mailbox exists"))
 
 (* subscribe mailbox *)
 let subscribe mailboxt mailbox =
-  let (module Mailbox) = factory mailboxt in
-  Mailbox.MailboxStorage.exists Mailbox.this mailbox >>= function
+  factory mailboxt mailbox >>= fun (module Mailbox) ->
+  Mailbox.MailboxStorage.exists Mailbox.this >>= function
   | `No -> return (`Error("Mailbox doesn't exist"))
   | _ ->
-    Mailbox.MailboxStorage.subscribe Mailbox.this mailbox >>
+    Mailbox.MailboxStorage.subscribe Mailbox.this >>
+    Mailbox.MailboxStorage.commit Mailbox.this >>
     return `Ok
 
 (* unsubscribe mailbox *)
 let unsubscribe mailboxt mailbox =
-  let (module Mailbox) = factory mailboxt in
-  Mailbox.MailboxStorage.exists Mailbox.this mailbox >>= function
+  factory mailboxt mailbox >>= fun (module Mailbox) ->
+  Mailbox.MailboxStorage.exists Mailbox.this >>= function
   | `No -> return (`Error("Mailbox doesn't exist"))
   | _ ->
-    Mailbox.MailboxStorage.unsubscribe Mailbox.this mailbox >>
+    Mailbox.MailboxStorage.unsubscribe Mailbox.this >>
+    Mailbox.MailboxStorage.commit Mailbox.this >>
     return `Ok
 
 (* append message to mailbox *)
 let append mailboxt mailbox reader writer flags date literal =
   let open Core.Std in
-  let (module Mailbox) = factory mailboxt in
-  Mailbox.MailboxStorage.exists Mailbox.this  mailbox >>= function
+  factory mailboxt mailbox >>= fun (module Mailbox) ->
+  Mailbox.MailboxStorage.exists Mailbox.this >>= function
     | `No -> return (`NotExists)
     | `Folder -> return (`NotSelectable)
     | `Mailbox -> 
@@ -312,7 +323,8 @@ let append mailboxt mailbox reader writer flags date literal =
       let metadata = update_mailbox_message_metadata ~data:metadata
             ?internal_date:dt ?flags ()
       in
-      Mailbox.MailboxStorage.append Mailbox.this mailbox message metadata >>
+      Mailbox.MailboxStorage.append Mailbox.this message metadata >>
+      Mailbox.MailboxStorage.commit Mailbox.this >>
       return `Ok
 
 (* close selected mailbox *)
@@ -324,25 +336,25 @@ let search mailboxt keys buid =
   match (selected_mbox mailboxt) with
   | None -> return (`Error "Not selected")
   | Some name ->
-  let (module Mailbox) = factory mailboxt in
-  Mailbox.MailboxStorage.exists Mailbox.this name >>= function
+  factory mailboxt name >>= fun (module Mailbox) ->
+  Mailbox.MailboxStorage.exists Mailbox.this >>= function
   | `No -> return (`NotExists)
   | `Folder -> return (`NotSelectable)
   | `Mailbox -> 
-    Mailbox.MailboxStorage.search Mailbox.this name keys buid >>= fun acc -> 
+    Mailbox.MailboxStorage.search Mailbox.this keys buid >>= fun acc -> 
     return (`Ok acc)
 
-let get_iterator (module Mailbox: Storage.Storage_inst) name buid sequence =
+let get_iterator (module Mailbox: Storage.Storage_inst) buid sequence =
   let open Seq_iterator in
   let open Core.Std in
   if SequenceIterator.single sequence then (
     return (Some (SequenceIterator.create sequence 1 Int.max_value))
   ) else (
-    Mailbox.MailboxStorage.status Mailbox.this name >>= fun mailbox_metadata ->
+    Mailbox.MailboxStorage.status Mailbox.this >>= fun mailbox_metadata ->
     if buid = false then (
       return (Some (SequenceIterator.create sequence 1 mailbox_metadata.count))
     ) else (
-      Mailbox.MailboxStorage.fetch_message_metadata Mailbox.this name (`Sequence 1) >>= function
+      Mailbox.MailboxStorage.fetch_message_metadata Mailbox.this (`Sequence 1) >>= function
       | `Ok message_metadata ->
         return (Some (SequenceIterator.create sequence message_metadata.uid
           (mailbox_metadata.uidnext - 1)))
@@ -350,16 +362,17 @@ let get_iterator (module Mailbox: Storage.Storage_inst) name buid sequence =
     )
   )
 
-let iter_selected_with_seq (module Mailbox: Storage.Storage_inst) mailboxt sequence buid f =
+let iter_selected_with_seq mailboxt sequence buid f =
   let open Interpreter in
   match (selected_mbox mailboxt) with
   | None -> return (`Error "Not selected")
   | Some mailbox ->
-  Mailbox.MailboxStorage.exists Mailbox.this mailbox >>= function
+  factory mailboxt mailbox >>= fun (module Mailbox) ->
+  Mailbox.MailboxStorage.exists Mailbox.this >>= function
   | `No -> return (`NotExists)
   | `Folder -> return (`NotSelectable)
   | `Mailbox -> 
-    get_iterator (module Mailbox) mailbox buid sequence >>= function
+    get_iterator (module Mailbox) buid sequence >>= function
     | None -> return `Ok
     | Some it ->
       let open Seq_iterator in
@@ -367,7 +380,7 @@ let iter_selected_with_seq (module Mailbox: Storage.Storage_inst) mailboxt seque
         | `End -> return ()
         | `Ok seq ->
           let pos = if buid then (`UID seq) else (`Sequence seq) in
-          f mailbox pos seq >>= function
+          f (module Mailbox : Storage.Storage_inst) pos seq >>= function
           | `Eof -> return ()
           | `Ok -> read (SequenceIterator.next it)
       in
@@ -375,9 +388,8 @@ let iter_selected_with_seq (module Mailbox: Storage.Storage_inst) mailboxt seque
 
 (* fetch data from mailbox *)
 let fetch mailboxt resp_writer sequence fetchattr buid =
-  let (module Mailbox) = factory mailboxt in
-  iter_selected_with_seq (module Mailbox) mailboxt sequence buid (fun mailbox pos seq ->
-    Mailbox.MailboxStorage.fetch Mailbox.this mailbox pos >>= function
+  iter_selected_with_seq mailboxt sequence buid (fun (module Mailbox) pos seq ->
+    Mailbox.MailboxStorage.fetch Mailbox.this pos >>= function
     | `Eof -> return `Eof
     | `NotFound -> return `Ok
     | `Ok (message,metadata) -> 
@@ -391,42 +403,48 @@ let fetch mailboxt resp_writer sequence fetchattr buid =
 
 (* store flags *)
 let store mailboxt resp_writer sequence storeattr flagsval buid =
-  let (module Mailbox) = factory mailboxt in
-  iter_selected_with_seq (module Mailbox) mailboxt sequence buid (fun mailbox pos seq ->
-    Mailbox.MailboxStorage.fetch_message_metadata Mailbox.this mailbox pos >>= function
+  iter_selected_with_seq mailboxt sequence buid (fun (module Mailbox) pos seq ->
+    Mailbox.MailboxStorage.fetch_message_metadata Mailbox.this pos >>= function
     | `Eof -> return `Eof
     | `NotFound -> return `Ok
     | `Ok message_metadata ->
       match Interpreter.exec_store message_metadata seq sequence storeattr flagsval buid with
       | `None -> return `Ok
-      | `Silent metadata -> Mailbox.MailboxStorage.store Mailbox.this mailbox pos metadata >>
+      | `Silent metadata -> 
+        Mailbox.MailboxStorage.store Mailbox.this pos metadata >>
+        Mailbox.MailboxStorage.commit Mailbox.this >>
         return `Ok
       | `Ok (metadata,res) -> 
         resp_writer res >>
-        Mailbox.MailboxStorage.store Mailbox.this mailbox pos metadata >>
+        Mailbox.MailboxStorage.store Mailbox.this pos metadata >>
+        Mailbox.MailboxStorage.commit Mailbox.this >>
         return `Ok
   )
 
 (* copy messages to mailbox *)
 let copy mailboxt dest_mbox sequence buid =
-  let (module Mailbox) = factory mailboxt in
+  let open Core.Std in
   match (selected_mbox mailboxt) with
   | None -> return (`Error "Not selected")
   | Some src_mbox ->
-  Mailbox.MailboxStorage.exists Mailbox.this dest_mbox >>= function
+  factory mailboxt ?mailbox2:(Some dest_mbox) src_mbox >>= fun (module Mailbox) ->
+  Mailbox.MailboxStorage.exists (Option.value_exn Mailbox.this2) >>= function
   | `No -> return (`NotExists)
   | `Folder -> return (`NotSelectable)
   | `Mailbox -> 
-    Mailbox.MailboxStorage.copy Mailbox.this src_mbox dest_mbox sequence buid >>
+    Mailbox.MailboxStorage.copy Mailbox.this (Option.value_exn Mailbox.this2) sequence buid >>
+    Mailbox.MailboxStorage.commit Mailbox.this >>
+    Mailbox.MailboxStorage.commit (Option.value_exn Mailbox.this2) >>
     return `Ok
 
 (* permanently remove messages with \Deleted flag *)
 let expunge mailboxt resp_writer =
-  let (module Mailbox) = factory mailboxt in
   match (selected_mbox mailboxt) with
   | None -> return (`Error "Not selected")
   | Some mailbox ->
-    Mailbox.MailboxStorage.expunge Mailbox.this mailbox (fun seq ->
+    factory mailboxt mailbox >>= fun (module Mailbox) ->
+    Mailbox.MailboxStorage.expunge Mailbox.this (fun seq ->
       resp_writer ((string_of_int seq) ^ " EXPUNGE")
     ) >>
+    Mailbox.MailboxStorage.commit Mailbox.this >>
     return `Ok

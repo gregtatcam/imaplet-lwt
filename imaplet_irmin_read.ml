@@ -95,8 +95,8 @@ let append user mailbox =
   prompt "subject: " >>= fun subject_ ->
   prompt "email: " >>= fun email_ ->
   let message = message_template from_ to_ subject_ email_ in
-  let str = IrminStorage.create user in
-  IrminStorage.append str mailbox message (empty_mailbox_message_metadata())
+  IrminStorage.create user mailbox >>= fun str ->
+  IrminStorage.append str message (empty_mailbox_message_metadata())
 
 let rec selected user mailbox mbox =
   let open Storage_meta in
@@ -193,8 +193,8 @@ let main () =
     | "delete" -> let ac = UserAccount.create user in
       UserAccount.delete_account ac >> request user
     | "crtmailbox" -> let mailbox = arg 1 in
-      let str = IrminStorage.create user in
-      IrminStorage.create_mailbox str mailbox >>= fun () -> request user
+      IrminStorage.create user mailbox >>= fun str ->
+      IrminStorage.create_mailbox str >>= fun () -> request user
     | "create" -> let ac = UserAccount.create user in
       UserAccount.create_account ac >> request user
     | "tree" -> 

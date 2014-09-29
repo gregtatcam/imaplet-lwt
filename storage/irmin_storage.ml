@@ -18,89 +18,80 @@ open Storage
 open Irmin_core
 open Storage_meta
 
-type storage = {user:string;mailbox:IrminMailbox.t}
+type storage_ = {user:string;mailbox:IrminMailbox.t}
 
-module IrminStorage : Storage_intf with type t = string =
+module IrminStorage : Storage_intf with type t = storage_ =
 struct
-  type t = string 
+  type t = storage_
 
   (* user *)
-  let create user =
-    user
+  let create user mailbox =
+    IrminMailbox.create user mailbox >>= fun mailbox ->
+    return {user;mailbox}
 
-  let exists t mailbox = 
-    IrminMailbox.create t mailbox >>= fun mbox ->
-    IrminMailbox.exists mbox
+  let exists t = 
+    IrminMailbox.exists t.mailbox
 
   (* status *)
-  let status t mailbox =
-    IrminMailbox.create t mailbox >>= fun mbox ->
-    IrminMailbox.read_mailbox_metadata mbox
+  let status t =
+    IrminMailbox.read_mailbox_metadata t.mailbox
 
   (* select mailbox *)
-  let select t mailbox =
-    status t mailbox
+  let select t =
+    status t 
 
   (* examine mailbox *)
-  let examine t mailbox =
-    status t mailbox
+  let examine t =
+    status t 
 
   (* create mailbox *)
-  let create_mailbox t mailbox  =
-    IrminMailbox.create t mailbox >>= fun mbox ->
-    IrminMailbox.create_mailbox mbox >>
-    IrminMailbox.commit mbox
+  let create_mailbox t =
+    IrminMailbox.create_mailbox t.mailbox
 
   (* delete mailbox *)
-  let delete t mailbox = 
-    IrminMailbox.create t mailbox >>= fun mbox ->
-    IrminMailbox.delete_mailbox mbox >>
-    IrminMailbox.commit mbox
+  let delete t = 
+    IrminMailbox.delete_mailbox t.mailbox
 
   (* rename mailbox1 mailbox2 *)
-  let rename t mailbox1 mailbox2 =
-    IrminMailbox.create t mailbox1 >>= fun mbox ->
-    IrminMailbox.move_mailbox mbox mailbox2 >>
-    IrminMailbox.commit mbox
+  let rename t mailbox2 =
+    IrminMailbox.move_mailbox t.mailbox mailbox2
 
-  (* subscribe mailbox *)
-  let subscribe t mailbox =
-    Subscriptions.create t >>= fun sub ->
-    Subscriptions.subscribe sub mailbox
+  (* subscribe mailbox.
+   * subscribe and unsubscribe should be in a separate module TBD 
+   *)
+  let subscribe t =
+    Subscriptions.create t.user >>= fun sub ->
+    Subscriptions.subscribe sub t.mailbox.mailbox
 
   (* unsubscribe mailbox *)
-  let unsubscribe t mailbox =
-    Subscriptions.create t >>= fun sub ->
-    Subscriptions.unsubscribe sub mailbox
+  let unsubscribe t =
+    Subscriptions.create t.user >>= fun sub ->
+    Subscriptions.unsubscribe sub t.mailbox.mailbox
 
   (* list 
    * returns list of files/folders with list of flags 
    *)
-  let list t ~subscribed ?(access=(fun _ -> true)) mailbox ~init ~f =
-    IrminMailbox.create t mailbox >>= fun mbox ->
-    IrminMailbox.list mbox ~subscribed ~access ~init ~f
+  let list t ~subscribed ?(access=(fun _ -> true)) ~init ~f =
+    IrminMailbox.list t.mailbox ~subscribed ~access ~init ~f
 
   (* append message(s) to selected mailbox *)
-  let append t mailbox message message_metadata =
-    IrminMailbox.create t mailbox >>= fun mbox ->
-    IrminMailbox.append_message mbox message message_metadata >>
-    IrminMailbox.commit mbox
+  let append t message message_metadata =
+    IrminMailbox.append_message t.mailbox message message_metadata
 
   (* expunge, permanently delete messages with \Deleted flag 
    * from selected mailbox 
    *)
-  let expunge t mailbox f =
+  let expunge t f =
     let open Core.Std in
     let open Imaplet_types in
-    IrminMailbox.create t mailbox >>= fun mbox ->
-    IrminMailbox.read_index_uid mbox >>= fun uids ->
-    IrminMailbox.read_mailbox_metadata mbox >>= fun mailbox_metadata ->
+    IrminMailbox.read_index_uid t.mailbox >>= fun uids ->
+    IrminMailbox.read_mailbox_metadata t.mailbox >>= fun mailbox_metadata ->
     Lwt_list.fold_left_s (fun (count,nunseen,recent,unseen) uid ->
-      IrminMailbox.read_message_metadata mbox (`UID uid) >>= function
+      IrminMailbox.read_message_metadata t.mailbox (`UID uid) >>= function
       | `Ok message_metadata ->
         let find_flag fl = List.find message_metadata.flags ~f:(fun f -> f = fl) <> None in
         if find_flag Flags_Deleted then (
-          IrminMailbox.delete_message mbox (`UID uid) >>
+          IrminMailbox.delete_message t.mailbox (`UID uid) >>
           f uid >>
           return (count,nunseen,recent,unseen)
         ) else (
@@ -122,40 +113,35 @@ struct
     ) (0,0,0,0) uids >>= fun (count,nunseen,recent,unseen) ->
     let modseq = Int64.(+) mailbox_metadata.modseq Int64.one in
     let mailbox_metadata = {mailbox_metadata with count;nunseen;recent;unseen;modseq} in
-    IrminMailbox.update_mailbox_metadata mbox mailbox_metadata >>
-    IrminMailbox.commit mbox
+    IrminMailbox.update_mailbox_metadata t.mailbox mailbox_metadata
 
   (* search selected mailbox *)
-  let search t mailbox keys buid =
-    IrminMailbox.create t mailbox >>= fun mbox ->
-    IrminMailbox.read_index_uid mbox >>= fun uids ->
-    IrminMailbox.read_mailbox_metadata mbox >>= fun mailbox_metadata ->
+  let search t keys buid =
+    IrminMailbox.read_index_uid t.mailbox >>= fun uids ->
+    IrminMailbox.read_mailbox_metadata t.mailbox >>= fun mailbox_metadata ->
     Lwt_list.fold_left_s (fun (seq,acc) uid ->
-      IrminMailbox.read_message mbox (`UID uid)?filter:(Some keys) >>= function
+      IrminMailbox.read_message t.mailbox (`UID uid)?filter:(Some keys) >>= function
       | `Ok _ -> return (if buid then (seq+1,uid :: acc) else (seq+1, seq :: acc))
       | _ -> return (seq+1,acc)
     ) (1,[]) uids >>= fun (_,acc) -> return acc
 
   (* fetch messages from selected mailbox *)
-  let fetch t mailbox position =
-    IrminMailbox.create t mailbox >>= fun mbox ->
-    IrminMailbox.read_message mbox position
+  let fetch t position =
+    IrminMailbox.read_message t.mailbox position
 
   (* fetch messages from selected mailbox *)
-  let fetch_message_metadata t mailbox position =
-    IrminMailbox.create t mailbox >>= fun mbox ->
-    IrminMailbox.read_message_metadata mbox position
+  let fetch_message_metadata t position =
+    IrminMailbox.read_message_metadata t.mailbox position
 
   (* store flags to selected mailbox *)
-  let store t mailbox position message_metadata =
-    IrminMailbox.create t mailbox >>= fun mbox ->
-    IrminMailbox.update_message_metadata mbox position message_metadata >>= fun _ ->
-    IrminMailbox.commit mbox
+  let store t position message_metadata =
+    IrminMailbox.update_message_metadata t.mailbox position message_metadata >>= fun _ ->
+    return ()
 
   (* copy messages from selected mailbox *)
-  let copy t mailbox1 mailbox2 sequence buid =
-    IrminMailbox.create t mailbox1 >>= fun mbox1 ->
-    IrminMailbox.create t mailbox2 >>= fun mbox2 ->
-    IrminMailbox.copy_mailbox mbox1 mbox2 sequence buid >>
-    IrminMailbox.commit mbox2
+  let copy t t2 sequence buid =
+    IrminMailbox.copy_mailbox t.mailbox t2.mailbox sequence buid
+
+  let commit t =
+    IrminMailbox.commit t.mailbox
 end
