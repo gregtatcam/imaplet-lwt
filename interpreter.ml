@@ -276,6 +276,10 @@ let exec_fetch_flags (flags:mailboxFlags list) : (string) =
 let exec_fetch_internaldate (date:Time.t): (string) =
   "INTERNALDATE" ^ space ^ (quote (date_time_to_email date))
 
+(** fetch internal date **)
+let exec_fetch_modseq (modseq:int64): (string) =
+  "MODSEQ" ^ space ^ (to_plist (Int64.to_string modseq))
+
 (** fetch rfc822 message **)
 let exec_fetch_rfc822 (email:Email.t) : string =
   printf "%s\n%!" (Email.to_string email);
@@ -419,6 +423,7 @@ let exec_one_search_key headers content (record:mailbox_message_metadata) seq ke
   | Search_Header (header, name) -> exec_hdr headers header name
   | Search_Keyword k -> exec_flag record.flags (Common (Flags_Keyword k))
   | Search_Larger size -> record.size > size
+  | Search_Modseq (_,modseq) -> Int64.(>) record.modseq modseq (* ignoring entry and type *)
   | Search_New -> exec_flag record.flags (New)
   | Search_Old -> exec_flag record.flags (Old)
   | Search_On date -> exec_date record.internal_date date (=)
@@ -474,6 +479,26 @@ let rec _exec_search_all search_one keys =
 
 let exec_search_all headers content keys record seq =
   _exec_search_all (exec_one_search_key headers content record seq) keys
+
+(* traverse the keys for a key *)
+let rec has_key keys f =
+  try
+  match keys with
+  | Key k -> f k
+  | KeyList kl ->
+    List.fold kl ~init:false ~f:(fun acc k ->
+      if has_key k f then
+        raise ExecDone
+      else
+        false
+    )
+  | OrKey (k1,k2) -> 
+    if has_key k1 f || has_key k2 f then
+      raise ExecDone
+    else
+      false
+  | NotKey k -> has_key k f
+  with ExecDone -> true
 
 (* check if search fails just because of sequence of uid -
  * don't need to read the record then
@@ -861,6 +886,7 @@ let exec_fetch_att (seq:int) (sequence:sequence) (email:Email.t)
     | Fetch_Bodystructure -> exec_fetch_bodystructure email
     | Fetch_Envelope -> exec_fetch_envelope headers
     | Fetch_Flags -> exec_fetch_flags record.flags
+    | Fetch_Modseq -> exec_fetch_modseq record.modseq
     | Fetch_Internaldate -> exec_fetch_internaldate record.internal_date
     | Fetch_Rfc822 -> exec_fetch_rfc822 email
     | Fetch_Rfc822Header -> exec_fetch_rfc822header email
@@ -889,21 +915,20 @@ let exec_fetch_all (seq:int) (sequence:sequence)
   let open Email_message.Mailbox.Message in
   match fetchattr with
   | FetchMacro macro -> exec_fetch_macro seq sequence email record macro
-  | FetchAtt att -> 
-      let att = if buid then (Fetch_Uid :: att) else att in
-      exec_fetch_att seq sequence email record att
+  | FetchAtt att -> exec_fetch_att seq sequence email record att
 
 (** need to trim based on seq TBD **)
 let exec_fetch (seq:int) (sequence:sequence) (message:Mailbox.Message.t)
-(record:mailbox_message_metadata) (attr:fetch) (buid:bool) : string option =
+(record:mailbox_message_metadata) (attr:fetch) (changedsince:int64 option) (buid:bool) : string option =
   let open Email_message.Mailbox.Message in
   if should_include message.email record = false then
     None
-  else if buid = false && exec_seq sequence seq || buid = true && (exec_seq sequence record.uid)  then
-    let str = exec_fetch_all seq sequence message.email record attr buid in
-    let seq = string_of_int (if buid then record.uid else seq) in
-    Some (seq ^ space ^ "FETCH" ^ space ^ (list_of str))
-  else
+  else if (buid = false && exec_seq sequence seq || buid = true && (exec_seq sequence record.uid))  &&
+    (changedsince = None || Int64.(>) record.modseq (Option.value_exn changedsince)) then (
+      let str = exec_fetch_all seq sequence message.email record attr buid in
+      let seq = string_of_int seq in
+      Some (seq ^ space ^ "FETCH" ^ space ^ (list_of str))
+  ) else
     None
 
 let join_flags (flags1:mailboxFlags list) (flags2:mailboxFlags list) : (mailboxFlags list) =
@@ -913,28 +938,94 @@ let join_flags (flags1:mailboxFlags list) (flags2:mailboxFlags list) : (mailboxF
 let rem_flags (flags:mailboxFlags list) (rem:mailboxFlags list) : (mailboxFlags list) =
   List.filter flags ~f:(fun fl -> (List.find rem ~f:(fun fl1 -> fl1 = fl)) = None)
 
-let get_flags seq buid (record:mailbox_message_metadata) =
+(*
+ * * 19 FETCH (UID 128 FLAGS (\Seen $NotJunk NotJunk))
+ * * 20 FETCH (UID 129 FLAGS (\Seen $NotJunk NotJunk))
+ * a OK Fetch completed.
+ * a fetch 1:* flags
+ * * 1 FETCH (FLAGS (\Seen unchangedsince 10000000000))
+ * * 2 FETCH (FLAGS (\Seen $NotJunk NotJunk))
+ * * 3 FETCH (FLAGS (\Seen $NotJunk NotJunk))
+ *
+ * * OK [HIGHESTMODSEQ 491] Highest
+ * * 1 FETCH (UID 47 MODSEQ (494) FLAGS ($NotJunk NotJunk))
+ * * 2 FETCH (UID 48 MODSEQ (494) FLAGS ($NotJunk NotJunk))
+ * * 3 FETCH (UID 49 MODSEQ (494) FLAGS ($NotJunk NotJunk))
+ *
+ * * 1 FETCH (MODSEQ (496) FLAGS (\Seen $NotJunk NotJunk))
+ * * 2 FETCH (MODSEQ (496) FLAGS (\Seen $NotJunk NotJunk))
+ * * 3 FETCH (MODSEQ (496) FLAGS (\Seen $NotJunk NotJunk))
+ *)
+let format_flags seq modseq buid (record:mailbox_message_metadata) =
   let flags = flags_to_string record.flags in
-  let seq = string_of_int (if buid then record.uid else seq) in
-    seq ^ space ^ "FETCH (FLAGS (" ^ flags ^ ")"
+  let seq = string_of_int seq in
+  let uid = 
+    if buid then 
+      "UID " ^ (string_of_int record.uid) ^ space
+    else
+      ""
+  in
+  let modseq = 
+    if modseq then
+      "MODSEQ (" ^ (Int64.to_string record.modseq) ^ ") " 
+    else
+      ""
+  in
+  seq ^ space ^ "FETCH (" ^ uid ^ modseq ^ "FLAGS (" ^ flags ^ ")"
+
+(* send response for silent if modseq is on
+ * don't send response if the flag update
+ * doesn't change the original set of flags
+ *)
+let get_flags seq modseq buid flags record =
+  let flags_eq flags record =
+    if List.length flags <> List.length record.flags then
+      false
+    else (
+      let cmp f1 f2 = if f1 > f2 then 1 else if f1 < f2 then -1 else 0 in
+      let flags1 = List.sort ~cmp flags in
+      let flags2 = List.sort ~cmp record.flags in
+      (List.compare ~cmp flags1 flags2) = 0
+    )
+  in
+  match flags with
+  | `Silent flags -> 
+    if flags_eq flags record = true then
+      `None
+    else if modseq then (
+      let record = {record with flags} in
+      `Ok (record, format_flags seq modseq buid record)
+    ) else
+      `Silent record
+  | `Ok flags -> 
+    if flags_eq flags record = true then
+      `None
+    else (
+      let record = {record with flags} in
+      `Ok (record, format_flags seq modseq buid record)
+    )
 
 let exec_store_flags (record:mailbox_message_metadata) (seq:int) (storeattr:storeFlags)
- (flagsval:mailboxFlags list) (buid:bool): 
-   [> `Ok of mailbox_message_metadata*string|`Silent of mailbox_message_metadata] =
+ (flagsval:mailboxFlags list) (modeseq:bool) (buid:bool): 
+   [> `Ok of mailbox_message_metadata*string|`Silent of mailbox_message_metadata|`None] =
+  let flags =
   match storeattr with
-  | Store_Flags -> let record = {record with flags = flagsval} in `Ok (record, get_flags seq buid record)
-  | Store_FlagsSilent -> `Silent ({record with flags = flagsval})
-  | Store_PlusFlags -> let record =
-    {record with flags = join_flags record.flags flagsval} in `Ok (record, get_flags seq buid record)
-  | Store_PlusFlagsSilent ->`Silent ({record with flags = join_flags record.flags flagsval})
-  | Store_MinusFlags ->  let record =
-    {record with flags = rem_flags record.flags flagsval} in `Ok (record, get_flags seq buid record)
-  | Store_MinusFlagsSilent -> `Silent ({record with flags = rem_flags record.flags flagsval})
+  | Store_Flags -> `Ok flagsval 
+  | Store_FlagsSilent -> `Silent flagsval
+  | Store_PlusFlags -> `Ok (join_flags record.flags flagsval)
+  | Store_PlusFlagsSilent ->`Silent (join_flags record.flags flagsval)
+  | Store_MinusFlags -> `Ok (rem_flags record.flags flagsval)
+  | Store_MinusFlagsSilent -> `Silent (rem_flags record.flags flagsval)
+  in
+  get_flags seq modeseq buid flags record
 
 let exec_store (record:mailbox_message_metadata) (seq:int) (sequence:sequence)
-(storeattr:storeFlags) (flagsval:mailboxFlags list) (buid:bool) :
-  [`Ok of mailbox_message_metadata*string|`Silent of mailbox_message_metadata|`None] =
-  if buid = false && exec_seq sequence seq || buid = true && (exec_seq sequence record.uid)  then 
-    exec_store_flags record seq storeattr flagsval buid
-  else 
+(storeattr:storeFlags) (flagsval:mailboxFlags list) (unchangedsince:Int64.t option) (buid:bool) :
+  [`Ok of mailbox_message_metadata*string|`Silent of mailbox_message_metadata|`Modseqfailed of int|`None] =
+  if buid = false && exec_seq sequence seq || buid = true && (exec_seq sequence record.uid)  then (
+    if unchangedsince = None || Int64.(<=) record.modseq (Option.value_exn unchangedsince) then
+      exec_store_flags record seq storeattr flagsval (unchangedsince <> None) buid
+    else
+      `Modseqfailed (if buid then record.uid else seq)
+  ) else 
     `None

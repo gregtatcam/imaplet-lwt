@@ -71,10 +71,8 @@ struct
   let append t message message_metadata =
     return ()
 
-  (* expunge, permanently delete messages with \Deleted flag 
-   * from selected mailbox 
-   *)
-  let expunge t f =
+  (* delete a message *)
+  let delete_message t position =
     return ()
 
   (* search selected mailbox *)
@@ -93,10 +91,17 @@ struct
   let store t position message_metadata =
     return ()
 
+  (* store mailbox metadata *)
+  let store_mailbox_metadata t mailbox_metadata =
+    return ()
+
   (* copy messages from selected mailbox *)
-  let copy t mailbox2 sequence buid =
+  let copy t pos t2 message_metadata =
     return ()
 
   let commit t =
     return ()
+
+  let uid_to_seq t uid =
+    return None
 end

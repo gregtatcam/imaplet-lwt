@@ -47,7 +47,8 @@ end = struct
       | RespCode_Trycreate ->  "[TRYCREATE"
       | RespCode_Uidnext ->  "[UIDNEXT"
       | RespCode_Uidvalidity ->  "[UIDVALIDITY"
-      | RespCode_Unseen ->  "[UNSEEN")
+      | RespCode_Unseen ->  "[UNSEEN"
+      | RespCode_Highestmodseq ->  "[HIGHESTMODSEQ")
     | None ->  ""
 
   let get_rtype = function

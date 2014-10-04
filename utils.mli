@@ -13,25 +13,18 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
-open Email_message
-open Imaplet_types
-open Storage_meta
+val formated_capability : string -> string
 
-exception InvalidSequence
+val formated_id : string -> string
 
-val exec_search : Email.t -> (searchKey) searchKeys -> mailbox_message_metadata -> int -> bool
+val to_plist : string -> string
 
-val get_sequence : string -> (seq_set list)
+val fl_to_str : Imaplet_types.mailboxFlags -> string
 
-val exec_fetch : int -> sequence -> Mailbox.Message.t ->
-  mailbox_message_metadata -> fetch -> int64 option -> bool -> string option
+val str_to_fl : string -> Imaplet_types.mailboxFlags
 
-val exec_store : mailbox_message_metadata->int -> sequence ->
-  storeFlags -> mailboxFlags list -> Core.Std.Int64.t option -> bool -> 
-  [`Ok of mailbox_message_metadata*string|`Silent of mailbox_message_metadata|`Modseqfailed of int |`None]
+val substr : string -> start:int -> size:(int option)-> string
 
-val exec_seq : sequence -> int -> bool
+val concat_path : string -> string -> string
 
-val check_search_seq : (searchKey) searchKeys -> seq:int -> uid:int -> bool
-
-val has_key : (searchKey) searchKeys -> (searchKey -> bool) -> bool
+val make_email_message : string -> Email_message.Mailbox.Message.t

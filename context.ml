@@ -23,5 +23,6 @@ type context = {
   netw : Lwt_io.output_channel ref;
   state : Imaplet_types.state ref;
   mailbox : Amailbox.t ref;
-  starttls : unit -> (Lwt_io.input_channel * Lwt_io.output_channel) Lwt.t 
+  starttls : unit -> (Lwt_io.input_channel * Lwt_io.output_channel) Lwt.t;
+  highestmodseq : [`None|`Sessionstart of int64|`Highestmodseq] ref
 }

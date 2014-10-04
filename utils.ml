@@ -80,3 +80,32 @@ let concat_path a1 a2 =
     a1
   else 
     a2
+
+let message_of_string postmark email =
+  let open Email_message in
+  let open Email_message.Mailbox in
+  {Message.postmark=Postmark.of_string postmark; 
+   Message.email = Email.of_string email}
+
+let make_email_message message =
+  let open Core.Std in
+  let size = String.length message in
+  let headers = String.slice message 0 (if size < 1024 * 5 then size else 1024 * 5) in
+  if Regex.match_regex headers ~regx:"^\\(From [^\r\n]+\\)[\r\n]+?" then ( 
+    let post = Str.matched_group 1 headers in
+    let email = Str.last_chars message (size - (String.length
+      (Str.matched_string headers))) in
+    (message_of_string post email)
+  ) else (
+    (* try to construct the postmark, since the message could be malformed,
+    * look at a slice that should include the headers
+    *)
+    let from buff =
+      if Regex.match_regex headers ~regx:"^From: \\([^<]+\\)<\\([^>]+\\)" then
+        Str.matched_group 2 buff
+      else
+        "From daemon@localhost.local"
+    in
+    let post = ("From " ^ (from headers) ^ " " ^ (Dates.postmark_date_time ())) in
+    (message_of_string post message)
+  )

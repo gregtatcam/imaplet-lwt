@@ -68,57 +68,54 @@ let create_mailbox user mailbox =
   IrminStorage.create_mailbox ist >>
   return ist
 
+let append ist message size =
+  let open Core.Std in
+  let open Storage_meta in
+  IrminStorage.status ist >>= fun mailbox_metadata ->
+  let modseq = Int64.(+) mailbox_metadata.modseq Int64.one in
+  let message_metadata = {
+    uid = mailbox_metadata.uidnext;
+    modseq;
+    size;
+    internal_date = Time.epoch;
+    flags=[Imaplet_types.Flags_Recent];
+  } in
+  let mailbox_metadata = { mailbox_metadata with
+    uidnext = mailbox_metadata.uidnext + 1;
+    count = mailbox_metadata.count + 1;
+    recent = mailbox_metadata.recent + 1;
+    unseen = 
+      if mailbox_metadata.unseen = 0 then
+        mailbox_metadata.count + 1  
+      else
+        mailbox_metadata.unseen
+    ;
+    nunseen = mailbox_metadata.nunseen + 1 ;
+    modseq
+  } in
+  IrminStorage.store_mailbox_metadata ist mailbox_metadata >>
+  IrminStorage.append ist message message_metadata
+
 let populate_mailbox ist path mailbox =
   let open Core.Std in
-  let open Regex in
-  let open Storage_meta in
-  let open Email_message in
   let open Email_message.Mailbox in
   let (strm,strm_push) = Lwt_stream.create () in
   async ( fun () ->
     let wseq = With_seq.t_of_file path in
     With_seq.iter_string wseq (fun message ->
-      let substr = 
-        if String.length message > 1024 then
-          String.slice message 0 1024
-        else
-          message
-      in
-      if match_regex substr ~regx:"^From[ ]+MAILER_DAEMON" then (
+      if Regex.match_regex message ~regx:"^From[ ]+MAILER_DAEMON" then 
         ()
-      ) else ( 
-        let (postmark,email) =
-        if match_regex substr ~regx:"^\\(From [^\r\n]+\\)\r?\n" then ( 
-          let postmark = Str.matched_group 1 message in
-          let email = Str.last_chars message ((String.length message) - 
-            (String.length (Str.matched_string message))) in
-          (postmark,email)
-        ) else (
-          let from =
-          if match_regex substr ~regx:"^From: \\([^<]+\\)<\\([^>]+\\)" then
-            Str.matched_group 2 substr
-          else
-            "From daemon@localhost.local"
-          in
-          let postmark = replace ~regx:"DATE" 
-              ~tmpl:(Dates.postmark_date_time()) "From FROM DATE" in
-          let postmark = replace ~regx:"FROM" 
-              ~tmpl:from postmark in
-          (postmark,message)
-        )
-        in
-        let message = {Message.postmark=Mailbox.Postmark.of_string
-          postmark;email=Email.of_string email} in
-        strm_push (Some message)
+      else (
+        let size = String.length message in
+        let message = Utils.make_email_message message in
+        strm_push (Some (message,size))
       )
     );
     strm_push None;
     return ()
   );
-  Lwt_stream.iter_s (fun message ->
-    let metadata = empty_mailbox_message_metadata() in
-    let metadata = {metadata with flags=[Imaplet_types.Flags_Recent]} in
-    IrminStorage.append ist message metadata
+  Lwt_stream.iter_s (fun (message,size) ->
+    append ist message size
   ) strm
 
 let create_inbox user inbx =

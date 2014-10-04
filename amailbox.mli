@@ -67,19 +67,19 @@ val append : t -> string -> Lwt_io.input_channel -> Lwt_io.output_channel ->
   literal -> ([`NotExists|`NotSelectable|`Eof of int|`Error of string|`Ok] Lwt.t)
 
 (** sarch messages for the matching criteria **)
-val search : t -> (searchKey) searchKeys -> bool ->
-  [`NotExists|`NotSelectable|`Error of string|`Ok of int list] Lwt.t
+val search : t -> (unit -> unit Lwt.t) -> (searchKey) searchKeys -> bool ->
+  [`NotExists|`NotSelectable|`Error of string|`Ok of (int64 option * int list)] Lwt.t
 
-val fetch : t -> (string->unit Lwt.t) -> sequence -> fetch -> bool ->
-  [`NotExists|`NotSelectable|`Error of string|`Ok] Lwt.t
+val fetch : t -> (unit -> unit Lwt.t) -> (string->unit Lwt.t) -> sequence ->
+  fetch -> int64 option -> bool -> [`NotExists|`NotSelectable|`Error of string|`Ok] Lwt.t
 
-val store : t -> (string->unit Lwt.t) -> sequence -> storeFlags -> mailboxFlags
-list -> bool -> [`NotExists|`NotSelectable|`Error of string|`Ok ] Lwt.t
+val store : t -> (unit -> unit Lwt.t) -> (string->unit Lwt.t) -> sequence -> storeFlags -> mailboxFlags list -> 
+  Int64.t option -> bool -> [`NotExists|`NotSelectable|`Error of string|`Ok of string list] Lwt.t
 
 val copy : t -> string -> sequence -> bool -> 
 [`NotExists|`NotSelectable|`Error of string|`Ok ] Lwt.t 
 
-val expunge : t -> (string->unit Lwt.t) -> [`Error of string|`Ok] Lwt.t 
+val expunge : t -> (string->unit Lwt.t) -> [`NotExists|`NotSelectable|`Error of string|`Ok] Lwt.t 
 
 val user : t -> string option
 

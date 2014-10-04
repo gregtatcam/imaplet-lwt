@@ -63,10 +63,9 @@ sig
   (* append message(s) to selected mailbox *)
   val append : t -> Mailbox.Message.t -> mailbox_message_metadata -> unit Lwt.t 
 
-  (* expunge, permanently delete messages with \Deleted flag 
-   * from selected mailbox 
+  (* delete a message
    *)
-  val expunge : t -> (int -> unit Lwt.t) -> unit Lwt.t
+  val delete_message : t -> [`Sequence of int|`UID of int] -> unit Lwt.t
 
   (* search selected mailbox *)
   val search : t -> (searchKey) searchKeys -> bool -> int list Lwt.t
@@ -82,12 +81,24 @@ sig
   (* store flags to selected mailbox *)
   val store : t -> [`Sequence of int|`UID of int] -> mailbox_message_metadata -> unit Lwt.t
 
+  (* store flags to selected mailbox *)
+  val store_mailbox_metadata : t -> mailbox_metadata -> unit Lwt.t
+
   (* copy messages from selected mailbox *)
   val copy : t -> t -> sequence -> bool -> unit Lwt.t
+
+  (* copy message from the source mailbox at the given position 
+   * to the destination mailbox
+   *)
+  val copy : t -> [`Sequence of int | `UID of int] -> t ->
+    mailbox_message_metadata -> unit Lwt.t
 
   (* all operations that update the mailbox have to be completed with commit
    *)
   val commit : t -> unit Lwt.t
+
+  (* get sequence # for the given uid *)
+  val uid_to_seq : t -> int -> int option Lwt.t
 end
 module type Storage_inst =
 sig

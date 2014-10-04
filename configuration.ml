@@ -57,7 +57,7 @@ let auth_cap = [revision;literal; sasl; login'ref; id; enable; idle;starttls;aut
   list'extended; i18nlevel; condstore; qresync; esearch; esort; searches;
   within; context'search; list'status; binary; move
 ]
-let auth_cap = notauth_cap
+let auth_cap = List.concat [notauth_cap;[condstore]]
 
 let capability = String.concat ~sep:" " notauth_cap
 

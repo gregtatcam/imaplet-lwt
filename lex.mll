@@ -50,10 +50,15 @@ let flags_table = String.Table.create()
     let _ = List.iter 
   [
    "Deleted"            ,FLDELETED;
+   "deleted"            ,FLDELETED;
    "Answered"           ,FLANSWERED;
+   "answered"           ,FLANSWERED;
    "Draft"              ,FLDRAFT;
+   "draft"              ,FLDRAFT;
    "Flagged"            ,FLFLAGGED;
+   "flagged"            ,FLFLAGGED;
    "Seen"               ,FLSEEN;
+   "seen"               ,FLSEEN;
   ] (fun (kwd, tok) -> Hashtbl.add_exn flags_table kwd tok)
 
 
@@ -73,6 +78,7 @@ let keyword_table = String.Table.create()
    "BODYSTRUCTURE"	,BODYSTRUCTURE;
    "CAPABILITY"		,CAPABILITY;
    "CC"			,CC;
+   "CHANGEDSINCE"	,CHANGEDSINCE;
    "CHARSET"		,CHARSET;
    "CHECK"		,CHECK;
    "CLOSE"		,CLOSE;
@@ -107,6 +113,7 @@ let keyword_table = String.Table.create()
    "LOGIN"		,LOGIN;
    "LOGOUT"		,LOGOUT;
    "MESSAGES"		,MESSAGES;
+   "MODSEQ"		,MODSEQ;
    "NEW"		,NEW;
    "NOT"		,NOT;
    "NOOP"		,NOOP;
@@ -114,6 +121,7 @@ let keyword_table = String.Table.create()
    "ON"			,ON;
    "OR"			,OR;
    "PLAIN"		,PLAIN;
+   "PRIV"		,PRIV;
    "RECENT"		,RECENT;
    "RENAME"		,RENAME;
    "RFC822"		,RFC822;
@@ -135,11 +143,13 @@ let keyword_table = String.Table.create()
    "SUBJECT"		,SUBJECT;
    "TEXT"		,TEXT;
    "TO"			,TO;
+   "SHARED"		,SHARED;
    "SUBSCRIBE"		,SUBSCRIBE;
    "UID"		,UID;
    "UIDNEXT"		,UIDNEXT;
    "UIDVALIDITY"	,UIDVALIDITY;
    "UNANSWERED"		,UNANSWERED;
+   "UNCHANGEDSINCE"	,UNCHANGEDSINCE;
    "UNDELETED"		,UNDELETED;
    "UNDRAFT"		,UNDRAFT;
    "UNFLAGGED"		,UNFLAGGED;
@@ -181,11 +191,15 @@ rule read context =
                                     QUOTED_STRING (qs) }
   | done                        { debug "l:DONE\n%!"; DONE }
   | anychar as cmd              { debug "l:maybe cmd %s\n%!" cmd;
-                                if !context <> `Tag then 
-                                  (try Hashtbl.find_exn keyword_table (String.uppercase cmd) 
-                                  with Not_found -> debug "l:command not found %s\n%!" cmd; ATOM_CHARS (cmd))
-                                else 
-                                  (debug "l:tag %s\n" cmd; context := `Any; TAG (cmd))
+                                if !context <> `Tag then (
+                                  try 
+                                    Hashtbl.find_exn keyword_table (String.uppercase cmd) 
+                                  with Not_found -> 
+                                    debug "l:command not found %s\n%!" cmd; 
+                                    ATOM_CHARS (cmd)
+                                ) else (
+                                  debug "l:tag %s\n" cmd; context := `Any; TAG (cmd)
+                                )
                                 }
   | '\\' (atom_chars as fl)       { debug "l:flag %s\n%!" fl; try Hashtbl.find_exn flags_table fl
                                   with Not_found -> 

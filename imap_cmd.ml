@@ -28,7 +28,8 @@ let response context state resp mailbox =
   begin
   match state with
   |None -> ()
-  |Some state -> context.state := state
+  |Some state -> 
+    context.state := state
   end;
   begin
   match mailbox with
@@ -36,6 +37,16 @@ let response context state resp mailbox =
   |Some mailbox -> context.mailbox := mailbox
   end;
   return resp
+
+let resp_highestmodseq is_modseq context () =
+  if is_modseq then
+    match context.!highestmodseq with
+    | `Sessionstart modseq ->
+      context.highestmodseq := `Highestmodseq;
+      write_resp context.!netw (Resp_Ok (Some RespCode_Highestmodseq, Int64.to_string modseq))
+    | _ -> return ()
+  else
+    return ()
 
 (* handle all commands
  * return either Ok, Bad, No, Preauth, Bye, or Continue response
@@ -147,6 +158,10 @@ let handle_select context mailbox rw =
       response context None (Resp_No(None,"Uidvalidity failed")) None
     else
     (
+      (* might be tricky, it is probably shared by all clients which select this
+       * mailbox
+       *)
+      context.highestmodseq := `Sessionstart header.modseq;
       let (flags,prmnt_flags) = Configuration.get_mbox_flags in
       let flags = to_plist (String.concat ~sep:" " flags) in
       let pflags = to_plist (String.concat ~sep:" " prmnt_flags) in
@@ -156,6 +171,7 @@ let handle_select context mailbox rw =
       write_resp context.!netw (Resp_Untagged ((string_of_int header.recent) ^ " RECENT")) >>
       write_resp context.!netw (Resp_Ok (Some RespCode_Uidvalidity, header.uidvalidity)) >>
       write_resp context.!netw (Resp_Ok (Some RespCode_Uidnext, string_of_int header.uidnext)) >>
+      write_resp context.!netw (Resp_Ok (Some RespCode_Highestmodseq, Int64.to_string header.modseq)) >>
       begin
       if rw then
         response context (Some State_Selected) (Resp_Ok(Some RespCode_Read_write, "")) (Some mbx)
@@ -293,6 +309,7 @@ let handle_append context mailbox flags date literal =
 **)
 
 let handle_close context =
+  context.highestmodseq := `None;
   let mbx = Amailbox.close context.!mailbox in
   response context (Some State_Authenticated) (Resp_Ok(None, "CLOSE completed")) (Some mbx)
 
@@ -309,38 +326,55 @@ let rec print_search_tree t indent =
 
 (** handle the charset TBD **)
 let handle_search context charset search buid =
-  Amailbox.search context.!mailbox search buid >>= function 
+  let resp_prefix = resp_highestmodseq false context in
+  Amailbox.search context.!mailbox resp_prefix search buid >>= function 
     (** what do these two states mean in this contex? TBD **)
   | `NotExists -> response context None (Resp_No(None,"Mailbox doesn't exist")) None
   | `NotSelectable ->  response context None (Resp_No(None,"Mailbox is not selectable")) None
   | `Error e -> response context None (Resp_No(None,e)) None
-  | `Ok r -> 
-    write_resp context.!netw (Resp_Untagged (List.fold r ~init:""  ~f:(fun acc i ->
+  | `Ok (modseq,r) -> 
+    let modseq =
+      match modseq with
+      |None -> ""
+      |Some modseq -> " (MODSEQ " ^ (Int64.to_string modseq) ^ ")"
+    in
+    write_resp context.!netw (Resp_Untagged ((List.fold r ~init:""  ~f:(fun acc i ->
       let s = string_of_int i in
       if acc = "" then 
         s 
       else 
         s ^ " " ^ acc)
-    )) >>
+    ) ^ modseq)) >>
     response context None (Resp_Ok(None, "SEARCH completed")) None
 
-let handle_fetch context sequence fetchattr buid =
+let handle_fetch context sequence fetchattr changedsince buid =
   Printf.printf "handle_fetch\n";
-  Amailbox.fetch context.!mailbox (write_resp_untagged context.!netw) sequence fetchattr buid >>= function
+  let resp_prefix = resp_highestmodseq (changedsince <> None) context in
+  Amailbox.fetch context.!mailbox resp_prefix (write_resp_untagged
+      context.!netw) sequence fetchattr changedsince buid >>= function
   | `NotExists -> response context None (Resp_No(None,"Mailbox doesn't exist")) None
   | `NotSelectable ->  response context None (Resp_No(None,"Mailbox is not selectable")) None
   | `Error e -> response context None (Resp_No(None,e)) None
-  | `Ok -> response context None (Resp_Ok(None, "FETCH completed")) None
+  | `Ok -> 
+    response context None (Resp_Ok(None, "FETCH completed")) None
 
-let handle_store context sequence flagsatt flagsval buid =
+let handle_store context sequence flagsatt flagsval changedsince buid =
   Printf.printf "handle_store %d %d\n" (List.length sequence) (List.length flagsval);
-  Amailbox.store context.!mailbox (write_resp_untagged context.!netw) sequence flagsatt flagsval buid >>= function
+  let resp_prefix = resp_highestmodseq (changedsince <> None) context in
+  Amailbox.store context.!mailbox resp_prefix (write_resp_untagged context.!netw) sequence
+      flagsatt flagsval changedsince buid >>= function
   | `NotExists -> response context None (Resp_No(None,"Mailbox doesn't exist")) None
   | `NotSelectable ->  response context None (Resp_No(None,"Mailbox is not selectable")) None
   | `Error e -> response context None (Resp_No(None,e)) None
-  | `Ok ->
+  | `Ok modified ->
+    let conditional = if changedsince = None then "" else "conditional " in
+    let (success,modified) = 
+      if List.length modified = 0 then
+        "completed",""
+      else
+        "failed","[MODIFIED " ^ (String.concat ~sep:"," modified) ^ "] " in
     idle_clients context >>= fun () ->
-    response context None (Resp_Ok(None, "STORE completed")) None
+    response context None (Resp_Ok(None, modified ^ conditional ^ "STORE " ^ success)) None
 
 let handle_copy context sequence mailbox buid =
   Printf.printf "handle_copy %d %s\n" (List.length sequence) mailbox;
@@ -353,10 +387,8 @@ let handle_copy context sequence mailbox buid =
 let handle_expunge context =
   Printf.printf "handle_expunge\n";
   Amailbox.expunge context.!mailbox (write_resp_untagged context.!netw) >>= function
-  (**
-  | `NotExists -> return_resp_ctx None (Resp_No(None,"Mailbox doesn't exist")) None
-  | `NotSelectable ->  return_resp_ctx None (Resp_No(None,"Mailbox is not selectable")) None
-  **)
+  | `NotExists -> response context  None (Resp_No(None,"Mailbox doesn't exist")) None
+  | `NotSelectable ->  response context  None (Resp_No(None,"Mailbox is not selectable")) None
   | `Error e -> response context None (Resp_No(None,e)) None
   | `Ok -> response context None (Resp_Ok(None, "EXPUNGE completed")) None
 
@@ -399,9 +431,9 @@ let handle_selected context = function
   | Cmd_Close -> handle_close context
   | Cmd_Expunge -> handle_expunge context
   | Cmd_Search (charset,search, buid) -> handle_search context charset search buid
-  | Cmd_Fetch (sequence,fetchattr, buid) -> handle_fetch context sequence fetchattr buid 
-  | Cmd_Store (sequence,flagsatt,flagsval, buid) -> 
-      handle_store context sequence flagsatt flagsval buid 
+  | Cmd_Fetch (sequence,fetchattr, changedsince, buid) -> handle_fetch context sequence fetchattr changedsince buid 
+  | Cmd_Store (sequence,flagsatt,flagsval, unchanged, buid) -> 
+      handle_store context sequence flagsatt flagsval unchanged buid 
   | Cmd_Copy (sequence,mailbox, buid) -> handle_copy context sequence mailbox buid 
 
 let handle_command context =

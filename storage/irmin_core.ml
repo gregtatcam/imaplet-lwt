@@ -333,7 +333,7 @@ module Subscriptions :
     (* subscribe *)
     let subscribe t mailbox =
       read t >>= fun l ->
-      if (List.find l ~f:(fun i -> if i = mailbox then true else false) <> None) then 
+      if (List.find l ~f:(fun i -> i = mailbox) <> None) then 
         return ()
       else
         update_exn t (mailbox :: l) 
@@ -400,7 +400,8 @@ module IrminMailbox :
     val create_mailbox : t -> unit Lwt.t
     val delete_mailbox : t -> unit Lwt.t
     val move_mailbox : t -> string -> unit Lwt.t
-    val copy_mailbox : t -> t -> sequence -> bool -> unit Lwt.t
+    val copy_mailbox : t -> [`Sequence of int|`UID of int] -> t ->
+      mailbox_message_metadata -> unit Lwt.t
     val read_mailbox_metadata : t -> mailbox_metadata Lwt.t
     val append_message : t -> Mailbox.Message.t -> mailbox_message_metadata -> unit Lwt.t
     val update_mailbox_metadata : t -> mailbox_metadata -> unit Lwt.t
@@ -409,6 +410,9 @@ module IrminMailbox :
     val read_message : t -> ?filter:(searchKey) searchKeys -> 
       [`Sequence of int|`UID of int] ->
       [`NotFound|`Eof|`Ok of (Mailbox.Message.t * mailbox_message_metadata)] Lwt.t
+    val read_message_raw : t -> ?filter:(searchKey) searchKeys -> 
+      [`Sequence of int|`UID of int] ->
+      [`NotFound|`Eof|`Ok of (Mailbox.Message.t option * string * string * string * mailbox_message_metadata)] Lwt.t
     val read_message_metadata : t -> [`Sequence of int|`UID of int] -> 
       [`NotFound|`Eof|`Ok of mailbox_message_metadata] Lwt.t
     val delete_message : t -> [`Sequence of int|`UID of int] -> unit Lwt.t
@@ -416,6 +420,7 @@ module IrminMailbox :
       f:('a -> [`Folder of string*int|`Mailbox of string] -> 'a Lwt.t) -> 'a Lwt.t
     val read_index_uid : t -> int list Lwt.t
     val show_all : t -> unit Lwt.t
+    val uid_to_seq : t -> int -> int option Lwt.t
   end with type t = mailbox_ = 
   struct 
     (* user * mailbox * is-folder * irmin key including the mailbox *)
@@ -495,14 +500,16 @@ module IrminMailbox :
       exists_key mbox key
 
     let find_flag l fl =
-      List.find l ~f:(fun f -> if f = fl then true else false) <> None
+      List.find l ~f:(fun f -> f = fl) <> None
 
     let read_index_uid mbox =
       match mbox.!index with
       | None ->
         IrminIntf_tr.read_exn mbox.trans (get_key `Index) >>= fun index_sexp_str ->
-        return (List.t_of_sexp (fun i -> int_of_string (Sexp.to_string i)) 
-            (Sexp.of_string index_sexp_str))
+        let uids = (List.t_of_sexp (fun i -> int_of_string (Sexp.to_string i)) 
+            (Sexp.of_string index_sexp_str)) in
+        mbox.index := Some uids;
+        return uids
       | Some uids -> return uids
 
     let update_index_uids mbox uids = 
@@ -512,7 +519,7 @@ module IrminMailbox :
 
     let update_index_uid mbox uid =
       read_index_uid mbox >>= fun uids ->
-      if List.find uids ~f:(fun u -> if u = uid then true else false) <> None then
+      if List.find uids ~f:(fun u -> u = uid) <> None then
         raise DuplicateUID
       else (
         (* reverse index *)
@@ -520,53 +527,29 @@ module IrminMailbox :
         update_index_uids mbox uids
       )
 
+    let uid_to_seq mbox uid =
+      read_index_uid mbox >>= fun uids ->
+      match (List.findi uids ~f:(fun i u -> u = uid)) with
+      | None -> return None
+      | Some (i,_) -> return (Some ((List.length uids) - i))
+
     let append_message_raw mbox ~postmark_sexp_str ~headers_sexp_str ~email_sexp_str 
-        mailbox_metadata message_metadata =
-      let count = mailbox_metadata.count + 1 in
-      let uid = mailbox_metadata.uidnext in
-      let uidnext = uid + 1 in
-      let modseq = Int64.(+) mailbox_metadata.modseq Int64.one in 
-      let seen = find_flag message_metadata.flags Flags_Seen in
-      let recent = find_flag message_metadata.flags Flags_Recent in
-      let nunseen = 
-        if seen = false then 
-          mailbox_metadata.nunseen + 1 
-        else
-          mailbox_metadata.nunseen 
-      in
-      let recent = 
-        if recent = true then 
-          mailbox_metadata.recent + 1 
-        else
-          mailbox_metadata.recent 
-      in
-      let unseen = 
-        if mailbox_metadata.unseen = 0 && seen = false then 
-          count
-        else 
-          mailbox_metadata.unseen 
-      in
-      let mailbox_metadata = {mailbox_metadata with uidnext;count;nunseen;recent;unseen} in
-      let message_metadata = {message_metadata with uid;modseq} in
-      let message_metadata_sexp = sexp_of_mailbox_message_metadata message_metadata in
+        message_metadata =
+      let uid = message_metadata.uid in
       IrminIntf_tr.update mbox.trans (get_key (`Metamessage uid)) 
-        (Sexp.to_string message_metadata_sexp) >>
+        (Sexp.to_string (sexp_of_mailbox_message_metadata message_metadata)) >>
       IrminIntf_tr.update mbox.trans (get_key (`Postmark uid)) postmark_sexp_str >>
       IrminIntf_tr.update mbox.trans (get_key (`Email uid)) email_sexp_str >>
       IrminIntf_tr.update mbox.trans (get_key (`Headers uid)) headers_sexp_str >>
-      return (mailbox_metadata,message_metadata)
+      update_index_uid mbox message_metadata.uid >>
+      return ()
 
     let append_message mbox message message_metadata =
-      let size = String.length (Mailbox.Message.to_string message) in
       let postmark_sexp_str = Sexp.to_string (Mailbox.Postmark.sexp_of_t message.postmark) in
       let email_sexp_str = Sexp.to_string (Email.sexp_of_t message.email) in
       let headers_sexp_str = Sexp.to_string (Header.sexp_of_t (Email.header message.email)) in
-      read_mailbox_metadata mbox >>= fun mailbox_metadata ->
-      let message_metadata = {message_metadata with size} in
       append_message_raw mbox ~postmark_sexp_str ~headers_sexp_str ~email_sexp_str 
-          mailbox_metadata message_metadata >>= fun (mailbox_metadata,message_metadata) ->
-      update_mailbox_metadata mbox mailbox_metadata >>
-      update_index_uid mbox message_metadata.uid
+          message_metadata
 
     let get_uid mbox position = 
       read_index_uid mbox >>= fun uids ->
@@ -574,6 +557,8 @@ module IrminMailbox :
       | `Sequence seq -> 
         if seq > List.length uids then
           return `Eof
+        else if seq = 0 then
+          return `NotFound
         else
           return (`Ok (seq,(List.nth_exn uids ((List.length uids) - seq))))
       | `UID uid -> 
@@ -584,7 +569,7 @@ module IrminMailbox :
           else
             return `NotFound
         | Some (seq,uid) ->
-            return (`Ok (seq,uid))
+            return (`Ok ((List.length uids) - seq,uid))
 
     let update_message_metadata mbox position metadata =
       get_uid mbox position >>= function
@@ -594,6 +579,12 @@ module IrminMailbox :
         IrminIntf_tr.update mbox.trans (get_key (`Metamessage uid))
           (Sexp.to_string (sexp_of_mailbox_message_metadata metadata)) >>= fun () ->
         return `Ok
+
+    let get_message_only_raw mbox uid =
+      IrminIntf_tr.read_exn mbox.trans (get_key (`Headers uid)) >>= fun headers_sexp_str ->
+      IrminIntf_tr.read_exn mbox.trans (get_key (`Postmark uid)) >>= fun postmark_sexp_str ->
+      IrminIntf_tr.read_exn mbox.trans (get_key (`Email uid)) >>= fun email_sexp_str ->
+      return (postmark_sexp_str, headers_sexp_str, email_sexp_str)
 
     let read_message_raw mbox ?filter position =
       get_uid mbox position >>= function
@@ -609,9 +600,8 @@ module IrminMailbox :
         else (
           IrminIntf_tr.read_exn mbox.trans (get_key (`Metamessage uid)) >>= fun sexp_str ->
           let message_metadata = mailbox_message_metadata_of_sexp (Sexp.of_string sexp_str) in
-          IrminIntf_tr.read_exn mbox.trans (get_key (`Headers uid)) >>= fun headers_sexp_str ->
-          IrminIntf_tr.read_exn mbox.trans (get_key (`Postmark uid)) >>= fun postmark_sexp_str ->
-          IrminIntf_tr.read_exn mbox.trans (get_key (`Email uid)) >>= fun email_sexp_str ->
+          get_message_only_raw mbox uid >>=
+          fun (postmark_sexp_str, headers_sexp_str, email_sexp_str) ->
           if filter = None then
             return (`Ok (None,postmark_sexp_str,headers_sexp_str,email_sexp_str,message_metadata))
           else (
@@ -662,43 +652,32 @@ module IrminMailbox :
       else
         get_min_max_seq mailbox_metadata
 
-    let copy_mailbox mbox1 mbox2 sequence buid =
-      let open Seq_iterator in
-      read_mailbox_metadata mbox1 >>= fun mailbox_metadata1 ->
-      read_index_uid mbox1 >>= fun uids1 ->
-      read_mailbox_metadata mbox2 >>= fun mailbox_metadata2 ->
-      read_index_uid mbox2 >>= fun uids2 ->
-      let (min,max) = get_min_max mailbox_metadata1 uids1 buid in
-      let iterator = SequenceIterator.create sequence min max in
-      let rec copy mailbox_metadata2 uids2 = function
-        | `End -> return (mailbox_metadata2,uids2) (* and of iteration *)
-        | `Ok seq ->
-          let position = if buid then (`UID seq) else (`Sequence seq) in
-          read_message_raw mbox1 position >>= function
-          | `Eof -> return (mailbox_metadata2, uids2)
-          | `NotFound -> copy mailbox_metadata2 uids2 (SequenceIterator.next iterator)
-          | `Ok (_,postmark_sexp_str,headers_sexp_str,email_sexp_str,message_metadata) ->
-            let flags = 
-              if List.find message_metadata.flags ~f:(fun f -> f = Flags_Recent) <> None then
-                message_metadata.flags
-              else
-                Flags_Recent :: message_metadata.flags
-            in
-            let message_metadata = {message_metadata with flags} in
-            append_message_raw mbox2 ~postmark_sexp_str ~headers_sexp_str
-              ~email_sexp_str mailbox_metadata2 message_metadata >>= 
-            fun (mailbox_metadata2,message_metadata2) ->
-            let uids2 = message_metadata2.uid :: uids2 in
-            copy mailbox_metadata2 uids2 (SequenceIterator.next iterator)
-      in
-      copy mailbox_metadata2 uids2 (SequenceIterator.next iterator) >>= 
-      fun (mailbox_metadata2,uids2) ->
-      update_mailbox_metadata mbox2 mailbox_metadata2 >>
-      update_index_uids mbox2 uids2
+    let copy_mailbox mbox1 pos mbox2 message_metadata =
+      get_uid mbox1 pos >>= function
+      | `Eof -> return ()
+      | `NotFound -> return ()
+      | `Ok (seq,uid) ->
+        get_message_only_raw mbox1 uid >>=
+        fun (postmark_sexp_str,headers_sexp_str,email_sexp_str) ->
+        append_message_raw mbox2 ~postmark_sexp_str ~headers_sexp_str
+        ~email_sexp_str message_metadata 
 
     let delete_message mbox position =
       get_uid mbox position >>= function
-      | `Ok (_,uid) -> IrminIntf_tr.remove mbox.trans (get_key (`Uid uid))
+      | `Ok (_,uid) -> 
+        IrminIntf_tr.remove mbox.trans (get_key (`Postmark uid)) >>
+        IrminIntf_tr.remove mbox.trans (get_key (`Headers uid)) >>
+        IrminIntf_tr.remove mbox.trans (get_key (`Email uid)) >>
+        IrminIntf_tr.remove mbox.trans (get_key (`Metamessage uid)) >>
+        IrminIntf_tr.remove mbox.trans (get_key (`Uid uid)) >>
+        read_index_uid mbox >>= fun uids ->
+        let uids = List.fold_right uids ~init:[] ~f:(fun u uids ->
+          if u = uid then
+            uids
+          else
+            u :: uids
+        ) in
+        update_index_uids mbox uids
       |_ -> return ()
 
     let list_mailbox mbox key =

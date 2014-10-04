@@ -29,6 +29,7 @@
 %token BODYSTRUCTURE
 %token CAPABILITY
 %token CC
+%token CHANGEDSINCE
 %token CHARSET
 %token CHECK
 %token CLOSE
@@ -77,6 +78,7 @@
 %token LOGIN
 %token LOGOUT
 %token MESSAGES
+%token MODSEQ
 %token NEW
 %token NOT
 %token NOOP
@@ -84,6 +86,7 @@
 %token ON
 %token OR
 %token PLAIN
+%token PRIV
 %token <string> QUOTED_STRING
 %token RECENT
 %token RENAME
@@ -98,6 +101,7 @@
 %token SENTBEFORE
 %token SENTON
 %token SENTSINCE
+%token SHARED
 %token SINCE
 %token SKEY
 %token SMALLER
@@ -114,6 +118,7 @@
 %token UIDNEXT
 %token UIDVALIDITY
 %token UNANSWERED
+%token UNCHANGEDSINCE
 %token UNDELETED
 %token UNDRAFT
 %token UNFLAGGED
@@ -124,7 +129,6 @@
 %{
 open Imaplet_types
 let debug format = 
-  let open Batteries in
   Printf.printf format (*(fun format a -> ())*)
 %}
 
@@ -294,8 +298,14 @@ c_copy:
   | UID; SP; COPY; SP; seq = ATOM_CHARS; SP; m = mailbox {Cmd_Copy(Interpreter.get_sequence seq,m,true) }
 
 c_store:
-  | STORE; SP; seq = ATOM_CHARS; SP; f = s_flags; SP; v = s_flags_value { debug "p:store\n%!"; Cmd_Store (Interpreter.get_sequence seq,f,v,false) }
-  | UID; SP; STORE; SP; seq = ATOM_CHARS; SP; f = s_flags; SP; v = s_flags_value { debug "p:store\n%!"; Cmd_Store (Interpreter.get_sequence seq,f,v, true) }
+  | STORE; SP; seq = ATOM_CHARS; SP; un = unchangedsince_sp; f = s_flags; SP; v = s_flags_value 
+    { debug "p:store\n%!"; Cmd_Store (Interpreter.get_sequence seq, f, v, un, false) }
+  | UID; SP; STORE; SP; seq = ATOM_CHARS; SP; un = unchangedsince_sp; f = s_flags; SP; v = s_flags_value 
+    { debug "p:store\n%!"; Cmd_Store (Interpreter.get_sequence seq, f, v, un, true) }
+
+unchangedsince_sp:
+  | {None}
+  | LP; UNCHANGEDSINCE; SP; modseq = ATOM_CHARS; RP; SP {debug "p:unchangedsince %s\n%!" modseq; Some (Int64.of_string modseq)}
 
 s_flags_value:
   | l = flag_list {l}
@@ -310,8 +320,12 @@ s_flags:
   | FLAGSSILENTMIN {Store_MinusFlagsSilent}
 
 c_fetch:
-  | FETCH; SP; seq = ATOM_CHARS; SP; a = fetch_args {Cmd_Fetch(Interpreter.get_sequence seq,a,false)}
-  | UID; SP; FETCH; SP; seq = ATOM_CHARS; SP; a = fetch_args {Cmd_Fetch(Interpreter.get_sequence seq,a,true)}
+  | FETCH; SP; seq = ATOM_CHARS; SP; a = fetch_args; c = changedsince_sp {Cmd_Fetch(Interpreter.get_sequence seq,a,c,false)}
+  | UID; SP; FETCH; SP; seq = ATOM_CHARS; SP; a = fetch_args; c = changedsince_sp {Cmd_Fetch(Interpreter.get_sequence seq,a,c,true)}
+
+changedsince_sp:
+  | {None}
+  | SP; LP; CHANGEDSINCE; SP; modseq = ATOM_CHARS; RP; {debug "p:changedsince %s\n%!" modseq; Some (Int64.of_string modseq)}
 
 fetch_args:
   | s = fetch_macro {FetchMacro(s)}
@@ -330,6 +344,7 @@ fetch_att:
   | ENVELOPE {Fetch_Envelope}
   | FLAGS {Fetch_Flags}
   | INTERNALDATE {Fetch_Internaldate}
+  | MODSEQ {Fetch_Modseq}
   | RFC822 {Fetch_Rfc822}
   | RFC822HEADER {Fetch_Rfc822Header}
   | RFC822SIZE {Fetch_Rfc822Size}
@@ -376,6 +391,7 @@ search_key:
   | FLAGGED {Search_Flagged} 
   | FROM; SP; s = ATOM_CHARS {Search_From (s) }
   | KEYWORD; s = ATOM_CHARS {Search_Keyword (s) } (** flag-keyword **) 
+  | m = modseq { debug "p: search_key modseq\n%!"; m }
   | NEW {Search_New}
   | OLD {Search_Old} 
   | ON; SP; s= s_date {Search_On(s)}
@@ -401,6 +417,16 @@ search_key:
   | UID; SP; s = ATOM_CHARS {Search_UID (Interpreter.get_sequence s)} 
   | UNDRAFT {Search_Undraft} 
   | s = ATOM_CHARS {Search_SeqSet (Interpreter.get_sequence s)} 
+
+modseq:
+  | MODSEQ; SP; n = ATOM_CHARS {debug "p: search modseq %s\n%!" n; Search_Modseq (None, Int64.of_string n)}
+  | MODSEQ; SP; s = astring; SP; t = modseq_entry_type; SP; n = ATOM_CHARS 
+    { debug "p: search modseq %s\n%!" n; Search_Modseq (Some (s,t), Int64.of_string n)}
+
+modseq_entry_type:
+  | SHARED {debug "p: modseq entry shared\n%!"; Entry_Shared}
+  | PRIV {debug "p: modseq entry priv\n%!"; Entry_Priv}
+  | ALL {debug "p: modseq entry all\n%!"; Entry_All}
 
 s_header:
   | HEADER; SP; SUBJECT; SP; s2 = ATOM_CHARS {Search_Header ("SUBJECT",s2)} (** header-fld-name **)

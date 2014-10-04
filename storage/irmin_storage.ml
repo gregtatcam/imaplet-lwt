@@ -78,52 +78,19 @@ struct
   let append t message message_metadata =
     IrminMailbox.append_message t.mailbox message message_metadata
 
-  (* expunge, permanently delete messages with \Deleted flag 
-   * from selected mailbox 
-   *)
-  let expunge t f =
-    let open Core.Std in
-    let open Imaplet_types in
-    IrminMailbox.read_index_uid t.mailbox >>= fun uids ->
-    IrminMailbox.read_mailbox_metadata t.mailbox >>= fun mailbox_metadata ->
-    Lwt_list.fold_left_s (fun (count,nunseen,recent,unseen) uid ->
-      IrminMailbox.read_message_metadata t.mailbox (`UID uid) >>= function
-      | `Ok message_metadata ->
-        let find_flag fl = List.find message_metadata.flags ~f:(fun f -> f = fl) <> None in
-        if find_flag Flags_Deleted then (
-          IrminMailbox.delete_message t.mailbox (`UID uid) >>
-          f uid >>
-          return (count,nunseen,recent,unseen)
-        ) else (
-          let count = count + 1 in
-          let recent = if find_flag Flags_Recent then recent + 1 else recent in
-          let (nunseen,unseen) =
-            if find_flag Flags_Seen = false then (
-              if unseen = 0 then
-                (nunseen + 1, count)
-              else
-                (nunseen + 1, unseen)
-            ) else (
-              (nunseen, unseen)
-            )
-          in
-          return (count, nunseen, recent, unseen)
-        )
-      | _ -> return (count,nunseen,recent,unseen)
-    ) (0,0,0,0) uids >>= fun (count,nunseen,recent,unseen) ->
-    let modseq = Int64.(+) mailbox_metadata.modseq Int64.one in
-    let mailbox_metadata = {mailbox_metadata with count;nunseen;recent;unseen;modseq} in
-    IrminMailbox.update_mailbox_metadata t.mailbox mailbox_metadata
+  (* delete a message *)
+  let delete_message t position = 
+    IrminMailbox.delete_message t.mailbox position
 
   (* search selected mailbox *)
   let search t keys buid =
     IrminMailbox.read_index_uid t.mailbox >>= fun uids ->
     IrminMailbox.read_mailbox_metadata t.mailbox >>= fun mailbox_metadata ->
-    Lwt_list.fold_left_s (fun (seq,acc) uid ->
-      IrminMailbox.read_message t.mailbox (`UID uid)?filter:(Some keys) >>= function
+    Lwt_list.fold_right_s (fun uid (seq,acc) ->
+      IrminMailbox.read_message t.mailbox (`UID uid) ?filter:(Some keys) >>= function
       | `Ok _ -> return (if buid then (seq+1,uid :: acc) else (seq+1, seq :: acc))
       | _ -> return (seq+1,acc)
-    ) (1,[]) uids >>= fun (_,acc) -> return acc
+    ) uids (1,[]) >>= fun (_,acc) -> return acc
 
   (* fetch messages from selected mailbox *)
   let fetch t position =
@@ -138,10 +105,18 @@ struct
     IrminMailbox.update_message_metadata t.mailbox position message_metadata >>= fun _ ->
     return ()
 
-  (* copy messages from selected mailbox *)
-  let copy t t2 sequence buid =
-    IrminMailbox.copy_mailbox t.mailbox t2.mailbox sequence buid
+  (* store mailbox metadata *)
+  let store_mailbox_metadata t mailbox_metadata =
+    IrminMailbox.update_mailbox_metadata t.mailbox mailbox_metadata
 
+  (* copy messages from selected mailbox *)
+  let copy t pos t2 message_metadata =
+    IrminMailbox.copy_mailbox t.mailbox pos t2.mailbox message_metadata
+
+  (* commit all updates to the mailbox *)
   let commit t =
     IrminMailbox.commit t.mailbox
+
+  let uid_to_seq t uid =
+    IrminMailbox.uid_to_seq t.mailbox uid
 end

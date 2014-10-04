@@ -49,6 +49,7 @@ type responseCode =
   | RespCode_Uidnext
   | RespCode_Uidvalidity
   | RespCode_Unseen
+  | RespCode_Highestmodseq
 
 type state = 
  | State_Notauthenticated
@@ -69,6 +70,12 @@ type authtype =
   | Auth_Skey
   | Auth_External
   | Auth_Plain
+
+type entryType =
+  | Entry_Shared
+  | Entry_Priv
+  | Entry_All
+  with sexp
   
 type searchKey = 
   | Search_All (** all messages in the mailbox; the default initial key for ANDing **)
@@ -85,6 +92,7 @@ type searchKey =
   | Search_Keyword of string (** messages with the keyword flag set **)
   | Search_Larger of int (** messages with the size larger than specified **) 
   | Search_New (** messages with \Recent set but not \Seen **)
+  | Search_Modseq of (string * entryType) option * int64 (** modseq higher than for specific metadata **)
   | Search_Old (** message with no \Recent flag set **) 
   | Search_On of Date.t (** messages with internal date within the specified date **)
   | Search_Recent (** messages with \Recent flag set **)
@@ -98,7 +106,7 @@ type searchKey =
   | Search_Subject of string (** messages with envelope structure's SUBJECT field **)
   | Search_Text of string (** messages with the string in the header or body, could be literal **) 
   | Search_To of string (** messages with the envelope structure's TO field **)
-  | Search_UID of sequence (** messages with unique identifier; is it a number? **)
+  | Search_UID of sequence (** messages with unique identifier **)
   | Search_Unanswered (** messages with \Answered flag not set **)
   | Search_Undeleted (** messages with \Deleted flag not set **)
   | Search_Undraft (** messages with \Draft flag not set **)
@@ -145,6 +153,7 @@ type fetchAtt =
   | Fetch_Envelope 
   | Fetch_Flags
   | Fetch_Internaldate
+  | Fetch_Modseq
   | Fetch_Rfc822
   | Fetch_Rfc822Header 
   | Fetch_Rfc822Size
@@ -201,8 +210,8 @@ type selectedCmd =
   | Cmd_Close (** transition to authenticated state **)
   | Cmd_Expunge (** permanently remove all messages with \Deleted flag **)
   | Cmd_Search of string option * (searchKey) searchKeys * bool (** optional charset * searching criteria; charset and criteria need more grammar definition TBD **)
-  | Cmd_Fetch of sequence *  fetch * bool (** more work is needed TBD **)
-  | Cmd_Store of sequence * storeFlags * mailboxFlags list * bool 
+  | Cmd_Fetch of sequence *  fetch * int64 option * bool (** more work is needed TBD **)
+  | Cmd_Store of sequence * storeFlags * mailboxFlags list * int64 option * bool 
   | Cmd_Copy of sequence * string * bool (** sequence * mailbox name **)
 
 type fromClient = 

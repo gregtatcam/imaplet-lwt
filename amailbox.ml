@@ -265,6 +265,25 @@ let unsubscribe mailboxt mailbox =
     Mailbox.MailboxStorage.commit Mailbox.this >>
     return `Ok
 
+let get_message_from_client reader writer literal =
+  let open Core.Std in
+  let open Email_message in
+  let open Email_message.Mailbox in
+  (** request the message from the client **)
+  begin
+    match literal with
+    | Literal n -> Response.write_resp writer (Resp_Cont("")) >> return n
+    | LiteralPlus n -> return n
+  end >>= fun size ->
+  let message = String.create size in
+  (* timeout and how long? what if the message fairly big? *)
+  Lwt_io.read_into_exactly reader message 0 size >>= fun () ->
+  let message = Utils.make_email_message message in
+  return (message,size)
+
+let find_fl flags fl =
+  Core.Std.List.find flags ~f:(fun f -> f = fl) <> None
+
 (* append message to mailbox *)
 let append mailboxt mailbox reader writer flags date literal =
   let open Core.Std in
@@ -273,57 +292,42 @@ let append mailboxt mailbox reader writer flags date literal =
     | `No -> return (`NotExists)
     | `Folder -> return (`NotSelectable)
     | `Mailbox -> 
-      (** request the message from the client **)
-      begin
-        match literal with
-        | Literal n -> Response.write_resp writer (Resp_Cont("")) >> return n
-        | LiteralPlus n -> return n
-      end >>= fun size ->
-      let message = String.create size in
-      (* timeout and how long? what if the message fairly big? *)
-      Lwt_io.read_into_exactly reader message 0 size >>= fun () ->
-      let headers = String.slice message 0 (if size < 1024 * 5 then size else 1024 * 5) in
-      let message =
-      if Regex.match_regex headers ~regx:"^From [^\r\n]+" then ( 
-        let post = Str.matched_group 0 headers in
-        let email = Str.last_chars message (size - (String.length post)) in
-        {Email_message.Mailbox.Message.postmark=Email_message.Mailbox.Postmark.of_string post; 
-          Email_message.Mailbox.Message.email = Email_message.Email.of_string email}
-      ) else (
-        (* try to construct the postmark, since the message could be malformed,
-        * look at a slice that should include the headers
-        *)
-        let time = Time.to_float (Time.now()) in
-        let tm = Unix.gmtime time in
-        let date_time () = Printf.sprintf "%s %s %d %02d:%02d:%02d %d"
-          (Dates.day_of_week tm.Unix.tm_wday) (Dates.int_to_month
-          tm.Unix.tm_mon) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min
-          tm.Unix.tm_sec (1900+tm.Unix.tm_year)
-        in
-        let from buff =
-          if Regex.match_regex headers ~regx:"^From: \\([^<]+\\)<\\([^>]+\\)" then
-            Str.matched_group 2 buff
+      get_message_from_client reader writer literal >>= fun (message,size) ->
+      let flags = 
+      match flags with
+      | None -> [Flags_Recent]
+      | Some flags -> (Flags_Recent :: flags)
+      in
+      Mailbox.MailboxStorage.status Mailbox.this >>= fun mailbox_metadata ->
+      let modseq = Int64.(+) mailbox_metadata.modseq Int64.one in
+      let message_metadata = {
+        uid = mailbox_metadata.uidnext;
+        modseq;
+        size;
+        internal_date = Option.value date ~default:Time.epoch;
+        flags;
+      } in
+      let seen = find_fl flags Flags_Seen in
+      let mailbox_metadata = { mailbox_metadata with
+        uidnext = mailbox_metadata.uidnext + 1;
+        count = mailbox_metadata.count + 1;
+        recent = mailbox_metadata.recent + 1;
+        unseen = 
+          if seen = false && mailbox_metadata.unseen = 0 then
+            mailbox_metadata.count + 1  
           else
-            "From daemon@localhost.local"
-        in
-        let post = ("From " ^ (from headers) ^ " " ^ (date_time ()) ^ "\r\n") in
-        {Email_message.Mailbox.Message.postmark=Email_message.Mailbox.Postmark.of_string post; 
-          Email_message.Mailbox.Message.email = Email_message.Email.of_string message}
-      )
-      in 
-      let flags = Option.value flags ~default:[] in
-      let flags =
-        if List.find flags ~f:(fun f -> if f = Flags_Recent then true else false) <> None then
-         Some flags
-        else
-          Some (Flags_Recent :: flags)
-      in
-      let dt = Some (Option.value date ~default:Time.epoch) in
-      let metadata = empty_mailbox_message_metadata() in
-      let metadata = update_mailbox_message_metadata ~data:metadata
-            ?internal_date:dt ?flags ()
-      in
-      Mailbox.MailboxStorage.append Mailbox.this message metadata >>
+            mailbox_metadata.unseen
+        ;
+        nunseen = 
+          if seen = false then
+            mailbox_metadata.nunseen + 1
+          else
+            mailbox_metadata.unseen
+        ;
+        modseq
+      } in
+      Mailbox.MailboxStorage.store_mailbox_metadata Mailbox.this mailbox_metadata >>
+      Mailbox.MailboxStorage.append Mailbox.this message message_metadata >>
       Mailbox.MailboxStorage.commit Mailbox.this >>
       return `Ok
 
@@ -331,19 +335,7 @@ let append mailboxt mailbox reader writer flags date literal =
 let close mailboxt =
   {mailboxt with selected=`None}
 
-(* search mailbox *)
-let search mailboxt keys buid =
-  match (selected_mbox mailboxt) with
-  | None -> return (`Error "Not selected")
-  | Some name ->
-  factory mailboxt name >>= fun (module Mailbox) ->
-  Mailbox.MailboxStorage.exists Mailbox.this >>= function
-  | `No -> return (`NotExists)
-  | `Folder -> return (`NotSelectable)
-  | `Mailbox -> 
-    Mailbox.MailboxStorage.search Mailbox.this keys buid >>= fun acc -> 
-    return (`Ok acc)
-
+(* iterator for message number or uid sequence *)
 let get_iterator (module Mailbox: Storage.Storage_inst) buid sequence =
   let open Seq_iterator in
   let open Core.Std in
@@ -362,89 +354,302 @@ let get_iterator (module Mailbox: Storage.Storage_inst) buid sequence =
     )
   )
 
-let iter_selected_with_seq mailboxt sequence buid f =
+(* iterate over the sequence, call f for each position *)
+let iter_selected_with_seq (module Mailbox:Storage.Storage_inst) sequence buid f acc =
   let open Interpreter in
+  get_iterator (module Mailbox) buid sequence >>= function
+  | None -> return acc
+  | Some it ->
+    let open Seq_iterator in
+    let rec read acc = function
+      | `End -> return acc
+      | `Ok seq ->
+        let pos = (if buid then (`UID seq) else (`Sequence seq)) in
+        begin 
+          if buid then Mailbox.MailboxStorage.uid_to_seq Mailbox.this seq else return (Some seq) 
+        end >>= function
+        | None -> read acc (SequenceIterator.next it)
+        | Some seq ->
+          f acc pos seq >>= function
+          | `Eof acc -> return acc
+          | `Ok acc -> read acc (SequenceIterator.next it)
+    in
+    read acc (SequenceIterator.next it) >>= fun acc ->
+    return acc
+
+(* get storage for selected mailbox *)
+let get_selected_mailbox ?mailbox2 mailboxt =
   match (selected_mbox mailboxt) with
   | None -> return (`Error "Not selected")
   | Some mailbox ->
-  factory mailboxt mailbox >>= fun (module Mailbox) ->
+  factory mailboxt ?mailbox2 mailbox >>= fun (module Mailbox) ->
+  Mailbox.MailboxStorage.exists Mailbox.this >>= function
+  | `No -> return (`NotExists)
+  | `Folder -> return (`NotSelectable)
+  | `Mailbox -> return (`Ok (mailbox,(module Mailbox:Storage.Storage_inst)))
+
+(* search mailbox *)
+let search mailboxt resp_prefix keys buid =
+  match (selected_mbox mailboxt) with
+  | None -> return (`Error "Not selected")
+  | Some name ->
+  factory mailboxt name >>= fun (module Mailbox) ->
   Mailbox.MailboxStorage.exists Mailbox.this >>= function
   | `No -> return (`NotExists)
   | `Folder -> return (`NotSelectable)
   | `Mailbox -> 
-    get_iterator (module Mailbox) buid sequence >>= function
-    | None -> return `Ok
-    | Some it ->
-      let open Seq_iterator in
-      let rec read = function
-        | `End -> return ()
-        | `Ok seq ->
-          let pos = if buid then (`UID seq) else (`Sequence seq) in
-          f (module Mailbox : Storage.Storage_inst) pos seq >>= function
-          | `Eof -> return ()
-          | `Ok -> read (SequenceIterator.next it)
-      in
-      read (SequenceIterator.next it) >> return `Ok
+    resp_prefix () >>
+    Mailbox.MailboxStorage.search Mailbox.this keys buid >>= fun acc -> 
+    return (`Ok acc)
+    
+let search mailboxt resp_prefix keys buid =
+  let open Email_message.Mailbox.Message in
+  let open Core.Std in
+  get_selected_mailbox mailboxt >>= function 
+  | `NotExists -> return `NotExists
+  | `NotSelectable -> return `NotSelectable
+  | `Error e -> return (`Error e)
+  | `Ok (_,(module Mailbox)) ->
+    resp_prefix () >>
+    let sequence = [SeqRange (Number 1,Wild)] in
+    iter_selected_with_seq (module Mailbox) sequence buid (fun (modseq,acc) pos seq ->
+      Mailbox.MailboxStorage.fetch Mailbox.this pos >>= function
+      | `Eof -> return (`Eof (modseq,acc))
+      | `NotFound -> return (`Ok (modseq,acc))
+      | `Ok (message,metadata) -> 
+        if Interpreter.exec_search message.email keys metadata seq = true then (
+          let modseq = if Int64.(>) metadata.modseq modseq then metadata.modseq else modseq in
+          return (`Ok (modseq,(if buid then metadata.uid else seq) :: acc))
+        ) else
+          return (`Ok (modseq,acc))
+    ) (Int64.zero,[]) >>= fun (modseq,acc) -> 
+      if Interpreter.has_key keys (function
+        | Search_Modseq _ -> true
+        | _ -> false) then
+        return (`Ok (Some modseq, acc))
+      else
+        return (`Ok (None, acc))
+
+let update_fetch_attr fetchattr changedsince buid =
+  let open Core.Std in
+  match fetchattr with
+    | FetchMacro macro -> fetchattr
+    | FetchAtt att -> 
+      let (is_uid,is_modseq) = List.fold_right ~f:(fun i (is_uid,is_modseq) -> 
+        if i = Fetch_Uid then (
+          true, is_modseq
+        ) else if i = Fetch_Modseq then (
+          is_uid, true
+        ) else
+          is_uid, is_modseq
+      ) ~init:(false,false) att in
+      let att = if changedsince <> None && is_modseq = false then Fetch_Modseq :: att else att in
+      let att = if buid && is_uid = false then Fetch_Uid :: att else att in
+      FetchAtt att
 
 (* fetch data from mailbox *)
-let fetch mailboxt resp_writer sequence fetchattr buid =
-  iter_selected_with_seq mailboxt sequence buid (fun (module Mailbox) pos seq ->
-    Mailbox.MailboxStorage.fetch Mailbox.this pos >>= function
-    | `Eof -> return `Eof
-    | `NotFound -> return `Ok
-    | `Ok (message,metadata) -> 
-      (* need more efficient exec_fetch since sequence is already tested
-       by the iterator *)
-      let res = Interpreter.exec_fetch seq sequence message metadata fetchattr buid in
-      match res with
-      | Some res -> resp_writer res; return `Ok
-      | None -> return `Ok
-  )
+let fetch mailboxt resp_prefix resp_writer sequence fetchattr changedsince buid =
+  get_selected_mailbox mailboxt >>= function 
+  | `NotExists -> return `NotExists
+  | `NotSelectable -> return `NotSelectable
+  | `Error e -> return (`Error e)
+  | `Ok (_,(module Mailbox)) ->
+    let fetchattr = update_fetch_attr fetchattr changedsince buid in
+    resp_prefix () >>
+    iter_selected_with_seq (module Mailbox) sequence buid (fun acc pos seq ->
+      Mailbox.MailboxStorage.fetch Mailbox.this pos >>= function
+      | `Eof -> return (`Eof acc)
+      | `NotFound -> return (`Ok acc)
+      | `Ok (message,metadata) -> 
+        (* need more efficient exec_fetch since sequence is already tested
+         by the iterator *)
+        let res = Interpreter.exec_fetch seq sequence message metadata fetchattr changedsince buid in
+        match res with
+        | Some res -> resp_writer res; return (`Ok acc)
+        | None -> return (`Ok acc)
+    ) () >>= fun _ -> return `Ok
+
+(* get mailbox_metadata flag status 
+ * based on the original and updated flag value
+ *)
+let get_update_flag orig_message_metadata upd_message_metadata flag =
+  let orig = find_fl orig_message_metadata.flags flag in
+  let upd = find_fl upd_message_metadata.flags flag in
+  if orig = upd then
+    0
+  else if orig && upd = false then
+    -1
+  else
+    1
+
+(* update seen,unseen,recent mailbox metadata flags *)
+let update_mailbox_metadata_flags seq mailbox_metadata orig_message_metadata
+    upd_message_metadata =
+  let seen = get_update_flag orig_message_metadata upd_message_metadata Flags_Seen in
+  let recent = get_update_flag orig_message_metadata upd_message_metadata Flags_Recent in
+  {mailbox_metadata with
+    recent = mailbox_metadata.recent + recent;
+    nunseen = mailbox_metadata.nunseen - seen;
+    unseen = 
+      if mailbox_metadata.unseen = 0 && seen = -1 then
+        seq
+      else if mailbox_metadata.unseen <> 0 && 
+            mailbox_metadata.unseen = seq && seen = 1 then
+        0
+      else
+        mailbox_metadata.unseen
+    ;
+  }
 
 (* store flags *)
-let store mailboxt resp_writer sequence storeattr flagsval buid =
-  iter_selected_with_seq mailboxt sequence buid (fun (module Mailbox) pos seq ->
+let store mailboxt resp_prefix resp_writer sequence storeattr flagsval unchangedsince buid =
+  let open Core.Std in
+  get_selected_mailbox mailboxt >>= function 
+  | `NotExists -> return `NotExists
+  | `NotSelectable -> return `NotSelectable
+  | `Error e -> return (`Error e)
+  | `Ok (_,(module Mailbox)) ->
+  resp_prefix () >>
+  Mailbox.MailboxStorage.status Mailbox.this >>= fun mailbox_metadata ->
+  iter_selected_with_seq (module Mailbox) sequence buid (fun (modified,mailbox_metadata) pos seq ->
     Mailbox.MailboxStorage.fetch_message_metadata Mailbox.this pos >>= function
-    | `Eof -> return `Eof
-    | `NotFound -> return `Ok
+    | `Eof -> return (`Eof (modified,mailbox_metadata))
+    | `NotFound -> return (`Ok (modified,mailbox_metadata))
     | `Ok message_metadata ->
-      match Interpreter.exec_store message_metadata seq sequence storeattr flagsval buid with
-      | `None -> return `Ok
+      let update_metadata mailbox_metadata orig_message_metadata upd_message_metadata =
+        let mailbox_metadata = update_mailbox_metadata_flags seq mailbox_metadata
+            orig_message_metadata upd_message_metadata
+        in
+        let modseq = Int64.(+) mailbox_metadata.modseq Int64.one in
+        let mailbox_metadata = {
+          mailbox_metadata with modseq
+        } in
+        let message_metadata = {upd_message_metadata with modseq} in
+        Mailbox.MailboxStorage.store Mailbox.this pos message_metadata >>
+        return mailbox_metadata
+      in
+      match Interpreter.exec_store message_metadata seq sequence storeattr flagsval unchangedsince buid with
+      | `Modseqfailed pos -> return (`Ok ((string_of_int pos) :: modified,mailbox_metadata))
+      | `None -> return (`Ok (modified,mailbox_metadata))
       | `Silent metadata -> 
-        Mailbox.MailboxStorage.store Mailbox.this pos metadata >>
-        Mailbox.MailboxStorage.commit Mailbox.this >>
-        return `Ok
+        update_metadata mailbox_metadata message_metadata metadata >>= 
+        fun mailbox_metadata -> return (`Ok (modified,mailbox_metadata))
       | `Ok (metadata,res) -> 
         resp_writer res >>
-        Mailbox.MailboxStorage.store Mailbox.this pos metadata >>
-        Mailbox.MailboxStorage.commit Mailbox.this >>
-        return `Ok
-  )
+        update_metadata mailbox_metadata message_metadata metadata >>=
+        fun mailbox_metadata -> return (`Ok (modified,mailbox_metadata))
+  ) ([],mailbox_metadata) >>= fun (modified,mailbox_metadata) ->
+  Mailbox.MailboxStorage.store_mailbox_metadata Mailbox.this mailbox_metadata >>
+  Mailbox.MailboxStorage.commit Mailbox.this >>
+  return (`Ok modified)
 
 (* copy messages to mailbox *)
 let copy mailboxt dest_mbox sequence buid =
   let open Core.Std in
-  match (selected_mbox mailboxt) with
-  | None -> return (`Error "Not selected")
-  | Some src_mbox ->
-  factory mailboxt ?mailbox2:(Some dest_mbox) src_mbox >>= fun (module Mailbox) ->
-  Mailbox.MailboxStorage.exists (Option.value_exn Mailbox.this2) >>= function
+  get_selected_mailbox ?mailbox2:(Some dest_mbox) mailboxt >>= function 
+  | `NotExists -> return `NotExists
+  | `NotSelectable -> return `NotSelectable
+  | `Error e -> return (`Error e)
+  | `Ok (_,(module Mailbox)) ->
+  let mbox2 = Option.value_exn Mailbox.this2 in
+  Mailbox.MailboxStorage.exists mbox2 >>= function
   | `No -> return (`NotExists)
   | `Folder -> return (`NotSelectable)
   | `Mailbox -> 
-    Mailbox.MailboxStorage.copy Mailbox.this (Option.value_exn Mailbox.this2) sequence buid >>
-    Mailbox.MailboxStorage.commit Mailbox.this >>
-    Mailbox.MailboxStorage.commit (Option.value_exn Mailbox.this2) >>
-    return `Ok
+  Mailbox.MailboxStorage.status mbox2 >>= fun mailbox_metadata2 ->
+  iter_selected_with_seq (module Mailbox) sequence buid (fun mailbox_metadata2 pos seq ->
+    (* fetch message from the source mailbox *)
+    Mailbox.MailboxStorage.fetch_message_metadata Mailbox.this pos >>= function
+    | `Eof -> return (`Eof mailbox_metadata2)
+    | `NotFound -> return (`Ok mailbox_metadata2)
+    | `Ok message_metadata ->
+      let uidnext = mailbox_metadata2.uidnext in
+      let modseq = Int64.(+) mailbox_metadata2.modseq Int64.one in
+      let message_metadata = {message_metadata with 
+        uid = uidnext;
+        flags =
+        if find_fl message_metadata.flags Flags_Recent then
+          message_metadata.flags
+        else
+          Flags_Recent :: message_metadata.flags
+        ;
+        modseq
+      }
+      in
+      let seen = find_fl message_metadata.flags Flags_Seen in
+      let mailbox_metadata2 = {mailbox_metadata2 with
+        uidnext = uidnext + 1;
+        count = mailbox_metadata2.count + 1;
+        recent = mailbox_metadata2.recent + 1;
+        nunseen = 
+          if seen then
+            mailbox_metadata2.nunseen
+          else
+            mailbox_metadata2.nunseen + 1
+        ;
+        unseen =
+          if mailbox_metadata2.unseen <> 0 then
+            mailbox_metadata2.unseen
+          else
+            mailbox_metadata2.count + 1
+        ;
+        modseq
+      }
+      in
+      (* copy message to the destination mailbox *)
+      Mailbox.MailboxStorage.copy Mailbox.this pos mbox2 message_metadata >>
+      return (`Ok mailbox_metadata2)
+  ) mailbox_metadata2 >>= fun mailbox_metadata2 ->
+  Mailbox.MailboxStorage.store_mailbox_metadata mbox2 mailbox_metadata2 >>
+  Mailbox.MailboxStorage.commit mbox2 >>
+  return `Ok
 
 (* permanently remove messages with \Deleted flag *)
 let expunge mailboxt resp_writer =
-  match (selected_mbox mailboxt) with
-  | None -> return (`Error "Not selected")
-  | Some mailbox ->
-    factory mailboxt mailbox >>= fun (module Mailbox) ->
-    Mailbox.MailboxStorage.expunge Mailbox.this (fun seq ->
-      resp_writer ((string_of_int seq) ^ " EXPUNGE")
-    ) >>
+  let sequence = [SeqRange (Number 1, Wild)] in
+  get_selected_mailbox mailboxt >>= function 
+  | `NotExists -> return `NotExists
+  | `NotSelectable -> return `NotSelectable
+  | `Error e -> return (`Error e)
+  | `Ok (_,(module Mailbox)) ->
+  Mailbox.MailboxStorage.status Mailbox.this >>= fun mailbox_metadata ->
+  iter_selected_with_seq (module Mailbox) sequence true (fun mailbox_metadata pos seq ->
+    Mailbox.MailboxStorage.fetch_message_metadata Mailbox.this pos >>= function
+    | `Eof -> return (`Eof mailbox_metadata)
+    | `NotFound -> return (`Ok mailbox_metadata)
+    | `Ok message_metadata ->
+    let deleted = find_fl message_metadata.flags Flags_Deleted in
+    if deleted = false then
+      let seen = find_fl message_metadata.flags Flags_Seen in
+      let recent = find_fl message_metadata.flags Flags_Recent in
+      let mailbox_metadata = {mailbox_metadata with
+        count = mailbox_metadata.count + 1;
+        recent = 
+          if recent then
+            mailbox_metadata.recent + 1
+          else
+            mailbox_metadata.recent
+        ;
+        nunseen =
+          if seen = false then
+            mailbox_metadata.nunseen + 1
+          else
+            mailbox_metadata.nunseen
+        ;
+        unseen =
+          if seen = false && mailbox_metadata.unseen = 0 then
+            mailbox_metadata.count + 1
+          else
+            mailbox_metadata.unseen
+        ;
+      } in
+      return (`Ok mailbox_metadata)
+    else (
+      Mailbox.MailboxStorage.delete_message Mailbox.this pos >>
+      resp_writer (string_of_int seq) >>
+      return (`Ok mailbox_metadata)
+    )
+  ) {mailbox_metadata with count=0;recent=0;nunseen=0;unseen=0} >>= fun mailbox_metadata ->
+    Mailbox.MailboxStorage.store_mailbox_metadata Mailbox.this mailbox_metadata >>
     Mailbox.MailboxStorage.commit Mailbox.this >>
     return `Ok
