@@ -144,7 +144,7 @@ let handle_list context reference mailbox lsub =
   response context None (Resp_Ok(None, "LIST completed")) None
 
 (** review - where the flags are coming from TBD **)
-let handle_select context mailbox rw =
+let handle_select context mailbox condstore rw =
   (if rw then
     Amailbox.select context.!mailbox mailbox
   else
@@ -412,8 +412,8 @@ let handle_notauthenticated context = function
       handle_append context mailbox None None literal 
 
 let handle_authenticated context = function
-  | Cmd_Select mailbox -> handle_select context mailbox true
-  | Cmd_Examine mailbox -> handle_select context mailbox false
+  | Cmd_Select (mailbox,condstore) -> handle_select context mailbox condstore true
+  | Cmd_Examine (mailbox,condstore) -> handle_select context mailbox condstore false
   | Cmd_Create mailbox -> handle_create context mailbox 
   | Cmd_Delete mailbox -> handle_delete context mailbox 
   | Cmd_Rename (mailbox,to_mailbox) -> handle_rename context mailbox to_mailbox 

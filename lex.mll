@@ -82,6 +82,7 @@ let keyword_table = String.Table.create()
    "CHARSET"		,CHARSET;
    "CHECK"		,CHECK;
    "CLOSE"		,CLOSE;
+   "CONDSTORE"		,CONDSTORE;
    "COPY"		,COPY;
    "CREATE"		,CREATE;
    "DELETE"		,DELETE;

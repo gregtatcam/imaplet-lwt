@@ -191,8 +191,8 @@ type notAuthenticatedCmd =
   | Cmd_Lappend of string * string * literal (** user * password **)
   
 type authenticatedCmd =  
-  | Cmd_Select of string (** mailbox name **) 
-  | Cmd_Examine of string (** mailbox name **) 
+  | Cmd_Select of string * bool (** mailbox name * condstore **) 
+  | Cmd_Examine of string * bool (** mailbox name * condstore **) 
   | Cmd_Create of string (** mailbox name **)
   | Cmd_Delete of string (** mailbox name **)
   | Cmd_Rename of string * string (** existing mailbox name * new mailbox name **)

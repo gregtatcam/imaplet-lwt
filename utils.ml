@@ -16,7 +16,7 @@
 open Imaplet_types
 
 let formated_capability capability =
-  "[CAPABILITY " ^ capability ^ "]"
+  "CAPABILITY " ^ capability
 
 let formated_id id =
   "ID (" ^ id ^ ")"

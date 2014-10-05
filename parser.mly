@@ -34,6 +34,7 @@
 %token CHECK
 %token CLOSE
 %token COPY
+%token CONDSTORE
 %token CREATE
 %token CRLF
 %token <string>DATE
@@ -215,7 +216,7 @@ c_done:
   | DONE { Authenticated(Cmd_Done) }
 
 c_examine:
-  | EXAMINE; SP; m = mailbox { Cmd_Examine m }
+  | EXAMINE; SP; m = mailbox; c = e_condstore { Cmd_Examine (m,c <> None) }
 
 (** second argument should be list-mailbox **)
 c_list:
@@ -228,7 +229,11 @@ c_rename:
   | RENAME; SP; m = mailbox; SP; m1 = mailbox { Cmd_Rename (m, m1)}
 
 c_select:
-  | SELECT; SP; m = mailbox { Cmd_Select m }
+  | SELECT; SP; m = mailbox; c = e_condstore { Cmd_Select (m, c <> None) }
+
+e_condstore:
+  | {None}
+  | SP; LP; CONDSTORE; RP {Some ()}
 
 c_status:
   | STATUS; SP; m = mailbox ; SP; l = status_list { Cmd_Status (m, l)}
@@ -264,10 +269,10 @@ login:
   | LOGIN; SP; u = user; SP; p = password { Cmd_Login (u, p) }
 
 user:
-  | a = astring { a }
+  | a = astring { Regex.dequote a }
 
 password:
-  | a = astring { a }
+  | a = astring { Regex.dequote a }
 
 astring:
   | s = ATOM_CHARS { debug "p:astring\n%!"; s }
