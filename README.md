@@ -1,4 +1,4 @@
-iimaplet
+imaplet
 =======
 This is a prototype of IMAP server.
 Grammar for all base RFC3501rev4 commands is supported, but not all functionality.  
