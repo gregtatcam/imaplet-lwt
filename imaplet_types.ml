@@ -179,6 +179,7 @@ type storeFlags =
   | Store_MinusFlagsSilent
   
 type anyCmd = 
+  | Cmd_Enable of string
   | Cmd_Id of string list
   | Cmd_Capability
   | Cmd_Noop

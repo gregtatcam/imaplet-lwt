@@ -141,7 +141,8 @@ let create () =
       {id;connections=ref [];commands=ref (Stack.create());
         netr=ref netr;netw=ref netw;state=ref
         Imaplet_types.State_Notauthenticated;mailbox=ref (Amailbox.empty());
-        starttls=starttls sock_c;highestmodseq=ref `None} in
+        starttls=starttls sock_c;highestmodseq=ref `None;
+        capability=ref []} in
     async(
       fun () ->
       catch(

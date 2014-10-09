@@ -88,6 +88,7 @@ let keyword_table = String.Table.create()
    "DELETE"		,DELETE;
    "DELETED"		,DELETED;
    "DRAFT"		,DRAFT;
+   "ENABLE"		,ENABLE;
    "ENVELOPE"		,ENVELOPE;
    "FAST"		,FAST;
    "FETCH"		,FETCH;

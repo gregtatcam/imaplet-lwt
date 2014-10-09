@@ -14,8 +14,10 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 open Core.Std
+open Context
 
-let connections:(Int64.t*string*Lwt_io.output_channel) list ref = ref []
+(* synchronization, is it needed ? *)
+let connections: client_context list ref = ref []
 let connid = ref Int64.zero
 
 let next_id () =
@@ -24,13 +26,22 @@ let next_id () =
 
 let rem_id id =
   let open Core.Std in
-  connections := List.fold !connections ~init:[] ~f:(fun acc i ->
-  let (cid,_,_) = i in
-  if Int64.equal cid id then
+  connections := List.fold !connections ~init:[] ~f:(fun acc (i:client_context) ->
+  if Int64.equal id i.id then
     acc
   else
     i :: acc
   )
 
-let add_id id user w =
-  connections := (id,user,w) :: !connections
+let add_id id user outch capability =
+  connections := {id;user;outch;capability = ref []} :: !connections
+
+let add_capability id cap =
+  let open Core.Std in
+  connections := List.fold !connections ~init:[] ~f:(fun acc (i:client_context) ->
+  if Int64.equal id i.id then (
+    let capability = cap :: i.!capability in
+    {i with capability = ref capability} :: acc
+  ) else
+    i :: acc
+  )

@@ -19,6 +19,7 @@
 %token LAPPEND
 %token <string> ATOM_CHARS
 %token AUTHENTICATE
+%token ENABLE
 %token EXAMINE
 %token EXPUNGE
 %token BCC
@@ -169,6 +170,7 @@ command_any:
   | CAPABILITY { Cmd_Capability }
   | LOGOUT { Cmd_Logout }
   | NOOP { Cmd_Noop }
+  | ENABLE; SP; e = astring { Cmd_Enable e }
   | i = id { i }
 
 id:

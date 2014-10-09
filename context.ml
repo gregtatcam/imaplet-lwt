@@ -15,14 +15,22 @@
  *)
 open Core.Std
 
+type client_context = {
+  id: Int64.t;
+  user: string;
+  outch: Lwt_io.output_channel;
+  capability: string list ref;
+}
+
 type context = {
   id : Int64.t;
-  connections : (Int64.t*string*Lwt_io.output_channel) list ref;
+  connections : client_context list ref;
   commands : Imaplet_types.clientRequest Stack.t ref;
   netr : Lwt_io.input_channel ref;
   netw : Lwt_io.output_channel ref;
   state : Imaplet_types.state ref;
   mailbox : Amailbox.t ref;
   starttls : unit -> (Lwt_io.input_channel * Lwt_io.output_channel) Lwt.t;
-  highestmodseq : [`None|`Sessionstart of int64|`Highestmodseq] ref
+  highestmodseq : [`None|`Sessionstart of int64|`Highestmodseq] ref;
+  capability: string list ref;
 }

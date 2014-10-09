@@ -72,6 +72,19 @@ let handle_logout context =
   write_resp context.!netw (Resp_Bye(None,"")) >>
   response context (Some State_Logout) (Resp_Ok (None, "LOGOUT completed")) None
 
+let handle_enable capability context =
+  begin
+  if context.!state = State_Notauthenticated then
+    write_resp context.!netw (Resp_Untagged ("ENABLED")) >>
+    return "ENABLE ignored in non-authenticated state."
+  else (
+    context.capability := capability :: context.!capability;
+    Connections.add_capability context.id capability;
+    return "ENABLED"
+  )
+  end >>= fun msg ->
+  response context None (Resp_Ok (None, msg)) None
+
 (** TBD should have a hook into the maintenance to recet inactivity **)
 let handle_noop context =
   response context None (Resp_Ok (None, "NOOP completed")) None
@@ -81,7 +94,7 @@ let handle_idle context =
   match Amailbox.user context.!mailbox with
   | Some user -> 
     Printf.printf "handle_idle ======== %s %s\n%!" (Int64.to_string context.id) user;
-    Connections.add_id context.id user context.!netw 
+    Connections.add_id context.id user context.!netw context.!capability
   | None -> ()
   end;
   response context None (Resp_Any ("+ idling")) None
@@ -253,9 +266,8 @@ let idle_clients context =
   in
   match Amailbox.user context.!mailbox with
   |Some user ->
-    let idle = List.fold context.!connections ~init:[] ~f:(fun acc i ->
-      let (_,u,_) = i in
-      if u = user then 
+    let idle = List.foldi context.!connections ~init:[] ~f:(fun i acc (ctx:client_context) ->
+      if ctx.user = user then 
         i :: acc
       else
         acc
@@ -264,14 +276,10 @@ let idle_clients context =
       get_status () >>= function
       | Some status ->
         Lwt_list.iter_s (fun i ->
-          let (id,u,w) = i in
-          if u = user then (
-            Printf.printf "=========== idle_clients %s %s\n%!" (Int64.to_string id) u;
-            write_resp_untagged w ("EXISTS " ^ (string_of_int status.count)) >>
-            write_resp_untagged w ("RECENT " ^ (string_of_int status.recent))
-          ) else (
-            return()
-          )
+          let ctx = List.nth_exn context.!connections i in
+          Printf.printf "=========== idle_clients %s %s\n%!" (Int64.to_string ctx.id) ctx.user;
+          write_resp_untagged ctx.outch ("EXISTS " ^ (string_of_int status.count)) >>
+          write_resp_untagged ctx.outch ("RECENT " ^ (string_of_int status.recent))
         ) idle
       | None -> return ()
     ) else (
@@ -401,6 +409,7 @@ let handle_any context = function
   | Cmd_Capability -> handle_capability context
   | Cmd_Noop -> handle_noop context
   | Cmd_Logout -> handle_logout  context
+  | Cmd_Enable capability -> handle_enable capability context
 
 let handle_notauthenticated context = function
   | Cmd_Authenticate (a,s) -> handle_authenticate context a s 
