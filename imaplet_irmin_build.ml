@@ -21,7 +21,7 @@ exception InvalidCommand
 
 let rec args i user inbx mbx =
   let open Core.Std in
-  if Array.length Sys.argv <> 7 || i >= 7 then
+  if i >= Array.length Sys.argv then
     user,inbx,mbx
   else
     match Sys.argv.(i) with 
@@ -31,17 +31,18 @@ let rec args i user inbx mbx =
     | _ -> raise InvalidCommand
 
 let usage () =
-  Printf.printf "usage: imaplet_irmin_build -u [user] -i [inbox location] -m [mailboxes location]"
+  Printf.printf "usage: imaplet_irmin_build -u [user] -i [inbox location] -m [mailboxes location]\n%!"
 
 let commands f =
   let open Core.Std in
   try 
     let user,inbx,mbx = args 1 None None None in
-    if inbx = None || mbx = None || user = None then
+    if user = None && (mbx <> None || inbx <> None) ||
+        inbx = None && mbx = None && user = None then (
       usage ()
-    else
+    ) else
       try 
-        f (Option.value_exn user) (Option.value_exn inbx) (Option.value_exn mbx)
+        f (Option.value_exn user) inbx mbx
       with ex -> Printf.printf "%s\n%!" (Exn.to_string ex)
   with _ -> usage ()
 
@@ -121,8 +122,12 @@ let populate_mailbox ist path mailbox =
 let create_inbox user inbx =
   Printf.printf "creating mailbox: INBOX\n%!";
   create_mailbox user "INBOX" >>= fun ist ->
-  populate_mailbox ist inbx "INBOX" >>
-  IrminStorage.commit ist
+  match inbx with
+  | Some inbx ->
+    populate_mailbox ist inbx "INBOX" >>
+    IrminStorage.commit ist
+  | None ->
+    IrminStorage.commit ist
 
 let () =
   let open Core.Std in
@@ -134,18 +139,22 @@ let () =
         UserAccount.delete_account ac >>= fun _ ->
         UserAccount.create_account ac >>= fun _ ->
         create_inbox user inbx >>
-        listdir mbx "/" (fun is_dir path mailbox ->
-          if is_dir then (
-            Printf.printf "creating mailbox folder: %s\n%!" mailbox;
-            create_mailbox user (mailbox ^ "/") >>= fun ist ->
-            IrminStorage.commit ist
-          ) else (
-            Printf.printf "creating mailbox: %s\n%!" mailbox;
-            create_mailbox user mailbox >>= fun ist ->
-            populate_mailbox ist path mailbox >>
-            IrminStorage.commit ist
+        if inbx <> None then (
+          let mbx = Option.value_exn mbx in
+          listdir mbx "/" (fun is_dir path mailbox ->
+            if is_dir then (
+              Printf.printf "creating mailbox folder: %s\n%!" mailbox;
+              create_mailbox user (mailbox ^ "/") >>= fun ist ->
+              IrminStorage.commit ist
+            ) else (
+              Printf.printf "creating mailbox: %s\n%!" mailbox;
+              create_mailbox user mailbox >>= fun ist ->
+              populate_mailbox ist path mailbox >>
+              IrminStorage.commit ist
+            )
           )
-        )
+        ) else
+          return ()
       )
       (fun ex -> Printf.printf "exception %s %s\n%!" (Exn.to_string ex) (Exn.backtrace());return())
     )
