@@ -14,35 +14,52 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 open Lwt
+open Core.Std
+open Imaplet_types
+open Regex
+open Storage_meta
 open Irmin_core
 open Irmin_storage
 
 exception InvalidCommand
+exception InvalidInput
+exception Done
 
-let rec args i user inbx mbx =
-  let open Core.Std in
+let get_mailbox_structure str =
+  if match_regex str ~regx:"^mbox:\\([^:]+\\):\\(.+\\)$" then
+    `Mbox (Str.matched_group 1 str,Str.matched_group 2 str)
+  else if match_regex str ~regx:"^maildir:\\([^:]+\\)\\(:fs\\)?$" then (
+    let dir = (Str.matched_group 1 str) in
+    let fs = try let _ = Str.matched_group 2 str in true with _ -> false in
+    `Maildir (dir,fs)
+  ) else
+    raise InvalidCommand
+
+(* -u : user
+ * -m : mailbox structure
+ *      mbox:inbox-path:mailboxes-path
+ *      maildir:maildir-path
+ *)
+let rec args i user mailbox =
   if i >= Array.length Sys.argv then
-    user,inbx,mbx
+    user,mailbox
   else
     match Sys.argv.(i) with 
-    | "-i" -> args (i+2) user (Some Sys.argv.(i+1)) mbx
-    | "-m" -> args (i+2) user inbx (Some Sys.argv.(i+1))
-    | "-u" -> args (i+2) (Some Sys.argv.(i+1)) inbx mbx
+    | "-m" -> args (i+2) user (Some (get_mailbox_structure Sys.argv.(i+1)))
+    | "-u" -> args (i+2) (Some Sys.argv.(i+1)) mailbox
     | _ -> raise InvalidCommand
 
 let usage () =
-  Printf.printf "usage: imaplet_irmin_build -u [user] -i [inbox location] -m [mailboxes location]\n%!"
+  Printf.printf "usage: imaplet_irmin_build -u [user] -m [mbox:inbox-path:mailboxes-path|maildir:mailboxes-path]\n%!"
 
 let commands f =
-  let open Core.Std in
   try 
-    let user,inbx,mbx = args 1 None None None in
-    if user = None && (mbx <> None || inbx <> None) ||
-        inbx = None && mbx = None && user = None then (
+    let user,mbx = args 1 None None in
+    if user = None || mbx = None then
       usage ()
-    ) else
+    else
       try 
-        f (Option.value_exn user) inbx mbx
+        f (Option.value_exn user) (Option.value_exn mbx)
       with ex -> Printf.printf "%s\n%!" (Exn.to_string ex)
   with _ -> usage ()
 
@@ -64,25 +81,32 @@ let rec listdir path mailbox f =
     )
   ) strm 
 
-let create_mailbox user mailbox =
+let create_mailbox user ?uidvalidity mailbox =
+  Printf.printf "############# creating mailbox %s %s\n%!" user mailbox;
   IrminStorage.create user mailbox >>= fun ist ->
   IrminStorage.create_mailbox ist >>
-  return ist
+  match uidvalidity with
+  | Some uidvalidity ->
+    let metadata = empty_mailbox_metadata ~uidvalidity () in
+    IrminStorage.store_mailbox_metadata ist metadata >>
+    return ist
+  | None -> return ist
 
-let append ist message size =
-  let open Core.Std in
-  let open Storage_meta in
+let append ist ?uid message size flags =
+  catch (fun () ->
   IrminStorage.status ist >>= fun mailbox_metadata ->
   let modseq = Int64.(+) mailbox_metadata.modseq Int64.one in
+  let uid = match uid with None -> mailbox_metadata.uidnext|Some uid -> uid in
+  Printf.printf "#### appending with UID %d\n%!" uid;
   let message_metadata = {
-    uid = mailbox_metadata.uidnext;
+    uid;
     modseq;
     size;
     internal_date = Time.epoch;
-    flags=[Imaplet_types.Flags_Recent];
+    flags;
   } in
   let mailbox_metadata = { mailbox_metadata with
-    uidnext = mailbox_metadata.uidnext + 1;
+    uidnext = uid + 1;
     count = mailbox_metadata.count + 1;
     recent = mailbox_metadata.recent + 1;
     unseen = 
@@ -95,10 +119,16 @@ let append ist message size =
     modseq
   } in
   IrminStorage.store_mailbox_metadata ist mailbox_metadata >>
-  IrminStorage.append ist message message_metadata
+  IrminStorage.append ist message message_metadata >>= fun () ->
+  return ()
+  )
+  (fun ex -> 
+    let open Batteries in 
+    let stack = BatPrintexc.raw_backtrace_to_string (BatPrintexc.get_callstack 20) in
+    Printf.printf "exception2: %s\n%s\n%!" (Exn.backtrace()) stack; return ())
 
-let populate_mailbox ist path mailbox =
-  let open Core.Std in
+let append_messages ist path flags =
+  Printf.printf "#### appending messages %s\n%!" path;
   let open Email_message.Mailbox in
   let (strm,strm_push) = Lwt_stream.create () in
   async ( fun () ->
@@ -116,46 +146,199 @@ let populate_mailbox ist path mailbox =
     return ()
   );
   Lwt_stream.iter_s (fun (message,size) ->
-    append ist message size
+    append ist message size flags
   ) strm
+
+let append_maildir_message ist ?uid path flags =
+  Printf.printf "#### appending maildir message %s\n%!" path;
+  let open Email_message.Mailbox in
+  Lwt_io.file_length path >>= fun size ->
+  let size = Int64.to_int_exn size in
+  let buffer = String.create size in
+  Lwt_io.open_file ~mode:Lwt_io.Input path >>= fun ic ->
+  Lwt_io.read_into_exactly ic buffer 0 size >>= fun () ->
+  Lwt_io.close ic >>= fun () ->
+  if Regex.match_regex buffer ~regx:"^From[ ]+MAILER_DAEMON" then 
+    return ()
+  else (
+    let message = Utils.make_email_message buffer in
+    append ist ?uid message size flags
+  )
+
+let populate_mbox_msgs ist path =
+  append_messages ist path [Flags_Recent]
+
+(* maildir directory structure is flat *)
+let listdir_maildir path f =
+  let strm = Lwt_unix.files_of_directory path in
+  Lwt_stream.fold_s (fun i acc -> 
+    if i = "." || i = ".." || Regex.match_regex i ~regx:"^\\..+[^.]$" = false then
+      return acc
+    else (
+      return (i :: acc)
+    )
+  ) strm [".INBOX"] >>= fun acc ->
+  let acc = List.sort ~cmp:String.compare acc in
+  Lwt_list.iter_s (fun d ->
+    let dirs = Str.split (Str.regexp "\\.") d in
+    let mailbox = "/" ^ (String.concat ~sep:"/" dirs) in
+    let path = if d = ".INBOX" then path else Filename.concat path d in
+    f false path mailbox
+  ) acc
+
+let populate_maildir_msgs ist path flagsmap uidmap =
+  Printf.printf "#### populating maildir %s\n%!" path;
+  let populate ist path initflags flagsmap uidmap =
+    let strm = Lwt_unix.files_of_directory path in
+    Lwt_stream.fold_s (fun i acc -> 
+      if i = "." || i = ".." then
+        return acc
+      else (
+        return (i :: acc)
+      )
+    ) strm [] >>= fun acc ->
+    (* sort by file name - hopefully it'll sort in chronological order based on the
+     * unique id
+     *)
+    Printf.printf "#### number of messages in %s  %d\n%!" path (List.length acc);
+    let acc = List.sort ~cmp:String.compare acc in
+    Lwt_list.iter_s (fun name -> 
+      Printf.printf "#### processing %s\n%!" name;
+      let (trash,msgflags) =
+      if Regex.match_regex name ~regx:":2,\\([a-zA-Z]+\\)$" then (
+        let flags = Str.matched_group 1 name in
+        String.fold ~init:(false,[]) ~f:(fun (trash,acc) flag -> 
+          match Map.find flagsmap flag with
+          | None -> if flag = 'T' then (true,acc) else (trash,acc)
+          | Some flag -> (trash,flag :: acc)
+        ) flags 
+      ) else (
+        false,[]
+      )
+      in
+      if trash then
+        return ()
+      else (
+        let flags = List.concat [initflags;msgflags] in
+        let uid = 
+          if match_regex name ~regx:"^\\([^:]+\\)" then
+            Map.find uidmap (Str.matched_group 1 name)
+          else
+            None
+        in
+        Printf.printf "#### found UID %d\n%!" (Option.value uid ~default:0);
+        append_maildir_message ist ?uid (Filename.concat path name) flags
+      )
+    ) acc
+  in
+  populate ist (Filename.concat path "new") [Flags_Recent] flagsmap uidmap >>
+  populate ist (Filename.concat path "cur") [] flagsmap uidmap 
 
 let create_inbox user inbx =
   Printf.printf "creating mailbox: INBOX\n%!";
   create_mailbox user "INBOX" >>= fun ist ->
-  match inbx with
-  | Some inbx ->
-    populate_mailbox ist inbx "INBOX" >>
+  populate_mbox_msgs ist inbx >>
+  IrminStorage.commit ist
+
+let create_account user subscriptions =
+  let ac = UserAccount.create user in
+  UserAccount.delete_account ac >>= fun _ ->
+  UserAccount.create_account ac >>= fun _ ->
+  (* get subscriptions - works for dovecot *)
+  Subscriptions.create user >>= fun s ->
+  catch (fun () ->
+    let strm = Lwt_io.lines_of_file subscriptions in
+    Lwt_stream.iter_s (fun line -> 
+      Subscriptions.subscribe s line
+    ) strm
+  ) (fun _ -> return ())
+
+let get_dovecot_params path =
+  let alpha = "abcdefghijklmnopqrstuvwxyz" in
+  let strm = Lwt_io.lines_of_file (Filename.concat path "dovecot-keywords") in
+  Lwt_stream.fold_s (fun line acc -> 
+    if match_regex line ~regx:"^\\([0-9]+\\) \\(.+\\)$" then (
+      let i = int_of_string (Str.matched_group 1 line) in
+      if i >= 0 && i <= 26 then (
+        let key = String.get alpha i in
+        let data = Flags_Keyword (Str.matched_group 2 line) in
+        return (Map.add acc ~key ~data)
+      ) else
+        return acc
+    ) else
+      return acc
+  ) strm (Map.empty ~comparator:Char.comparator) >>= fun flagsmap ->
+  catch( fun () ->
+    let strm = Lwt_io.lines_of_file (Filename.concat path "dovecot-uidlist") in
+    Lwt_stream.fold_s (fun line (first,uidvalidity,acc) -> 
+      if first then (
+       if match_regex line ~regx:"^[0-9]+ V\\([0-9]+\\) " then 
+         return (false,Some (Str.matched_group 1 line),acc)
+       else
+         return (false, uidvalidity, acc)
+      ) else if match_regex line ~regx:"^\\([0-9]+\\)[^:]:\\(.+\\)$" then (
+        let key = Str.matched_group 2 line in
+        let data = int_of_string (Str.matched_group 1 line) in
+        return (first,uidvalidity,Map.add acc ~key ~data)
+      ) else
+       raise InvalidInput
+    ) strm (true,None,Map.empty ~comparator:String.comparator) >>= fun (_,uidvalidity,uidmap) ->
+    return (flagsmap,uidvalidity,uidmap)
+  )
+  (fun _ -> return (flagsmap,None,Map.empty ~comparator:String.comparator))
+
+(* irmin supports both mailbox and folders under the mailbox *)
+let create_mbox user inbox mailboxes =
+  create_inbox user inbox >>
+  listdir mailboxes "/" (fun is_dir path mailbox ->
+    Printf.printf "creating mailbox: %s\n%!" mailbox;
+    create_mailbox user mailbox >>= fun ist ->
+    begin
+    if is_dir then
+      return ()
+    else
+      populate_mbox_msgs ist path
+    end >>
     IrminStorage.commit ist
-  | None ->
-    IrminStorage.commit ist
+  )
+
+let maildir_flags flagsmap =
+  let keys = ['P';'R';'S';'D';'F'] in
+  let values =
+    [Flags_Answered;Flags_Answered;Flags_Seen;Flags_Draft;Flags_Flagged] in
+  List.foldi keys ~init:flagsmap ~f:(fun i flagsmap key ->
+    Map.add flagsmap ~key ~data:(List.nth_exn values i)
+  )
+
+let create_maildir user mailboxes fs =
+  let list = if fs then listdir mailboxes "/" else listdir_maildir mailboxes in
+  list (fun _ path mailbox ->
+    Printf.printf "#### listing %s %s\n%!" path mailbox;
+    catch (fun () ->
+      get_dovecot_params path >>= fun (flagsmap,uidvalidity,uidmap) ->
+      let flagsmap = maildir_flags flagsmap in
+      Printf.printf "#### got dovecot params %d %d %s\n%!" (Map.length flagsmap) (Map.length
+      uidmap) (Option.value uidvalidity ~default:"");
+      create_mailbox user ?uidvalidity mailbox >>= fun ist ->
+      populate_maildir_msgs ist path flagsmap uidmap >>= fun () ->
+      IrminStorage.commit ist
+    )
+    ( fun ex -> Printf.printf "exception1: %s %s\n%!" (Exn.to_string ex)
+    (Exn.backtrace());return())
+  )
 
 let () =
-  let open Core.Std in
-  commands (fun user inbx mbx ->
+  commands (fun user mbx ->
     Lwt_main.run (
       catch ( fun () ->
-        let open Core.Std in
-        let ac = UserAccount.create user in
-        UserAccount.delete_account ac >>= fun _ ->
-        UserAccount.create_account ac >>= fun _ ->
-        create_inbox user inbx >>
-        if inbx <> None then (
-          let mbx = Option.value_exn mbx in
-          listdir mbx "/" (fun is_dir path mailbox ->
-            if is_dir then (
-              Printf.printf "creating mailbox folder: %s\n%!" mailbox;
-              create_mailbox user (mailbox ^ "/") >>= fun ist ->
-              IrminStorage.commit ist
-            ) else (
-              Printf.printf "creating mailbox: %s\n%!" mailbox;
-              create_mailbox user mailbox >>= fun ist ->
-              populate_mailbox ist path mailbox >>
-              IrminStorage.commit ist
-            )
-          )
-        ) else
-          return ()
+        match mbx with
+        | `Mbox (inbox,mailboxes) -> 
+          create_account user (Filename.concat mailboxes ".subscriptions") >>
+          create_mbox user inbox mailboxes
+        | `Maildir (mailboxes,fs) -> 
+          create_account user (Filename.concat mailboxes "subscriptions") >>
+          create_maildir user mailboxes fs
       )
-      (fun ex -> Printf.printf "exception %s %s\n%!" (Exn.to_string ex) (Exn.backtrace());return())
+      (fun ex -> Printf.printf "exception: %s %s\n%!" (Exn.to_string ex) (Exn.backtrace());return())
     )
   )

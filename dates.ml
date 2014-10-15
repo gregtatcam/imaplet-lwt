@@ -52,7 +52,7 @@ let day_of_week = function
   | 0 -> "Sun"
   | 1 -> "Mon"
   | 2 -> "Tue"
-  | 3 -> "Wen"
+  | 3 -> "Wed"
   | 4 -> "Thu"
   | 5 -> "Fri"
   | 6 -> "Sat"
@@ -62,7 +62,7 @@ let of_day_of_week = function
   | "Sun" -> 0
   | "Mon" -> 1
   | "Tue" -> 2
-  | "Wen" -> 3
+  | "Wed" -> 3
   | "Thu" -> 4
   | "Fri" -> 5
   | "Sat" -> 6
@@ -169,8 +169,11 @@ let email_to_date_time_exn date =
   let f = (Time.to_float tm) +. (Float.of_int (utc_sec zone)) in
   Time.of_float f
 
-let postmark_date_time () =
-  let time = Time.to_float (Time.now()) in
+let postmark_date_time ?time () =
+  let time = match time with
+  | Some time -> Time.to_float time
+  | None -> Time.to_float (Time.now()) 
+  in
   let tm = Unix.gmtime time in
   Printf.sprintf "%s %s %d %02d:%02d:%02d %d"
     (day_of_week tm.Unix.tm_wday) (int_to_month tm.Unix.tm_mon) tm.Unix.tm_mday

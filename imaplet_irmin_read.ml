@@ -110,7 +110,7 @@ let rec selected user mailbox mbox =
   | "quit" -> raise Quit
   | "append" -> append user mailbox >>= fun () -> selected user mailbox mbox
   | "all" -> IrminMailbox.show_all mbox >>= fun () -> selected user mailbox mbox
-  | "tree" -> let (_,_,key) = Key_.mailbox_of_path ~user mailbox in
+  | "tree" -> let (_,key) = Key_.mailbox_of_path ~user mailbox in
     tree key "" >>= fun () -> selected user mailbox mbox
   | "exists" -> IrminMailbox.exists mbox >>= fun res ->
     (
@@ -176,7 +176,7 @@ let rec selected user mailbox mbox =
     List.iter l ~f:(fun i ->
       match i with
       | `Folder (f,i) -> Printf.printf "folder/%d %s\n%!" i f;
-      | `Mailbox s -> Printf.printf "mailbox %s\n%!" s;
+      | `Mailbox (m,i) -> Printf.printf "mailbox %s\n%!" m;
     );
     selected user mailbox mbox
   | "close" -> return ()
@@ -211,7 +211,7 @@ let main () =
       ) >>= fun l ->
       List.iter l ~f:(fun i -> match i with
       | `Folder (i,c) -> Printf.printf "folder children:%d %s\n%!" c i
-      | `Mailbox c -> Printf.printf "storage %s\n%!" c); request user
+      | `Mailbox (i,c) -> Printf.printf "storage %d %s\n%!" c i); request user
     | "quit" -> return ()
     | _ -> Printf.printf "unknown command\n%!"; request user
     )

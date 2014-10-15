@@ -58,6 +58,7 @@ type state =
  | State_Logout
 
 type statusOpt = 
+  | Stat_Highestmodseq
   | Stat_Messages
   | Stat_Recent
   | Stat_Uidnext

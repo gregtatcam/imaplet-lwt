@@ -65,6 +65,7 @@
 %token FULL
 %token GSSAPI
 %token HEADER
+%token HIGHESTMODSEQ
 %token ID
 %token IDLE
 %token INBOX
@@ -249,6 +250,7 @@ status_list:
   | l = delimited(LP, separated_list(SP, status_att), RP) { l }
 
 status_att:
+  | HIGHESTMODSEQ { Stat_Highestmodseq }
   | MESSAGES { Stat_Messages }
   | RECENT { Stat_Recent }
   | UIDNEXT { Stat_Uidnext }

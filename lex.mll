@@ -103,6 +103,7 @@ let keyword_table = String.Table.create()
    "FULL"		,FULL;
    "GSSAPI"		,GSSAPI;
    "HEADER"		,HEADER;
+   "HIGHESTMODSEQ"	,HIGHESTMODSEQ;
    "INTERNALDATE"	,INTERNALDATE;
    "ID"			,ID;
    "IDLE"		,IDLE;

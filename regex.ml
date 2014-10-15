@@ -96,7 +96,7 @@ let fixregx_mbox mailbox =
 (* date regex *)
 let mon = group "Jan\\|Feb\\|Mar\\|Apr\\|May\\|Jun\\|Jul\\|Aug\\|Sep\\|Oct\\|Nov\\|Dec"
 
-let dayofweek = group "Sun\\|Mon\\|Tue\\|Wen\\|Thu\\|Fri\\|Sat\\|Sun"
+let dayofweek = group "Sun\\|Mon\\|Tue\\|Wed\\|Thu\\|Fri\\|Sat\\|Sun"
 
 let dd = group ( orx ( group "[0-9]") (group "[0-9][0-9]"))
 

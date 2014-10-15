@@ -237,6 +237,7 @@ let handle_status context mailbox optlist =
   (
     let output = (List.fold optlist ~init:"" ~f:(fun acc opt ->
       let str = (match opt with
+      | Stat_Highestmodseq -> "HIGHESTMODSEQ " ^ (Int64.to_string header.modseq)
       | Stat_Messages -> "EXISTS " ^ (string_of_int header.count)
       | Stat_Recent -> "RECENT " ^ (string_of_int header.recent)
       | Stat_Uidnext -> "UIDNEXT " ^(string_of_int header.uidnext)

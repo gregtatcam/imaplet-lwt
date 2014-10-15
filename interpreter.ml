@@ -973,7 +973,7 @@ let format_flags seq modseq buid (record:mailbox_message_metadata) =
   in
   seq ^ space ^ "FETCH (" ^ uid ^ modseq ^ "FLAGS (" ^ flags ^ ")"
 
-(* send response for silent if modseq is on
+(* send response for silent even if modseq is on
  * don't send response if the flag update
  * doesn't change the original set of flags
  *)
@@ -996,7 +996,7 @@ let get_flags seq modseq buid flags record =
       let record = {record with flags} in
       `Ok (record, format_flags seq modseq buid record)
     ) else
-      `Silent record
+      `Silent {record with flags}
   | `Ok flags -> 
     if flags_eq flags record = true then
       `None

@@ -46,8 +46,8 @@ module Key_ :
     val add_path : t -> string -> t
     val add_list : t -> string list -> t
     val create_account : string -> t
-    val mailbox_of_path : ?user:string -> string -> (string*bool*t)
-    val mailbox_of_list : ?user:string -> string list -> (string*bool*t)
+    val mailbox_of_path : ?user:string -> string -> (string*t)
+    val mailbox_of_list : ?user:string -> string list -> (string*t)
     val mailboxes_of_mailbox : t -> t 
     val key_to_string : t -> string
     val key_to_path : t -> string
@@ -82,22 +82,20 @@ module Key_ :
       List.concat [key;l]
 
     let mailbox_of_list ?user l =
-      let mailbox,folder,key = List.fold_right l ~init:("",false,[]) 
-      ~f:(fun i (mailbox,folder,acc) -> 
+      let mailbox,key = List.fold_right l ~init:("",[]) 
+      ~f:(fun i (mailbox,acc) -> 
         if i <> "" then (
           if List.length acc <> 0 then
-            mailbox,folder,"mailboxes" :: (i :: acc)
+            mailbox,"mailboxes" :: (i :: acc)
           else
-            i,folder,"mailboxes" :: (i :: acc)
-        ) else if List.length acc = 0 then
-          mailbox,true,acc
-        else
-          mailbox,folder,acc
+            i,"mailboxes" :: (i :: acc)
+        ) else
+          mailbox,acc
       ) in
       if user <> None then
-        mailbox,folder,"imaplet" :: ((Option.value_exn user) :: key)
+        mailbox,"imaplet" :: ((Option.value_exn user) :: key)
       else
-        mailbox,folder,key
+        mailbox,key
 
     (* if user is None then relative path, otherwise root, i.e. /imaplet/user *)
     let mailbox_of_path ?user path =
@@ -385,7 +383,7 @@ module UserAccount :
 
   end
 
-  type mailbox_ = {user:string;mailbox:string;folders:bool;trans:IrminIntf_tr.transaction;
+  type mailbox_ = {user:string;mailbox:string;trans:IrminIntf_tr.transaction;
       index:int list option ref}
 
 (* consistency TBD *)
@@ -417,7 +415,7 @@ module IrminMailbox :
       [`NotFound|`Eof|`Ok of mailbox_message_metadata] Lwt.t
     val delete_message : t -> [`Sequence of int|`UID of int] -> unit Lwt.t
     val list : t -> subscribed:bool -> ?access:(string -> bool) -> init:'a -> 
-      f:('a -> [`Folder of string*int|`Mailbox of string] -> 'a Lwt.t) -> 'a Lwt.t
+      f:('a -> [`Folder of string*int|`Mailbox of string*int] -> 'a Lwt.t) -> 'a Lwt.t
     val read_index_uid : t -> int list Lwt.t
     val show_all : t -> unit Lwt.t
     val uid_to_seq : t -> int -> int option Lwt.t
@@ -440,9 +438,9 @@ module IrminMailbox :
      * changes commited to Irmin
      *)
     let create user path =
-      let (mailbox,folders,key) = Key_.mailbox_of_path ?user:(Some user) path in
+      let (mailbox,key) = Key_.mailbox_of_path ?user:(Some user) path in
       IrminIntf_tr.begin_transaction key >>= fun trans ->
-        return {user;mailbox;folders;trans;index=ref None}
+        return {user;mailbox;trans;index=ref None}
 
     let commit mbox =
       IrminIntf_tr.end_transaction mbox.trans
@@ -451,7 +449,7 @@ module IrminMailbox :
     let create_mailbox mbox =
       let key = get_key `Metamailbox in
       let metadata = empty_mailbox_metadata ~uidvalidity:(new_uidvalidity())()
-        ~folders:mbox.folders in
+        ~selectable:true in
       let sexp = sexp_of_mailbox_metadata metadata in
       IrminIntf_tr.update mbox.trans key (Sexp.to_string sexp) >>= fun () ->
       let key = get_key `Index in
@@ -463,7 +461,7 @@ module IrminMailbox :
 
     (* how to make this the transaction? TBD *)
     let move_mailbox mbox path =
-      let (_,_,key2) = Key_.mailbox_of_path ?user:(Some mbox.user) path in
+      let (_,key2) = Key_.mailbox_of_path ?user:(Some mbox.user) path in
       IrminIntf_tr.move_view mbox.trans key2 >>
       IrminIntf_tr.remove_view mbox.trans
 
@@ -481,7 +479,7 @@ module IrminMailbox :
     let exists mbox =
       catch (fun () ->
         read_mailbox_metadata mbox >>= fun metadata ->
-        return (if metadata.folders then `Folder else `Mailbox)
+        return (if metadata.selectable then `Mailbox else `Folder)
       )
       (fun _ -> return `No)
 
@@ -491,12 +489,12 @@ module IrminMailbox :
         IrminIntf_tr.read_exn mbox.trans key >>= fun metadata_sexp_str ->
         let metadata_sexp = Sexp.of_string metadata_sexp_str in
         let metadata = mailbox_metadata_of_sexp metadata_sexp in
-        return (if metadata.folders then `Folder else `Mailbox)
+        return (if metadata.selectable then `Mailbox else `Folder)
       )
       (fun _ -> return `No)
 
     let exists_path mbox path =
-      let (_,_,key) = Key_.mailbox_of_path path in
+      let (_,key) = Key_.mailbox_of_path path in
       exists_key mbox key
 
     let find_flag l fl =
@@ -703,7 +701,8 @@ module IrminMailbox :
             list_ mbox key subscriptions access acc f >>= fun (acc,cnt) -> 
             f acc (`Folder ((Key_.view_key_to_path key),cnt)) 
           ) else (
-            f acc (`Mailbox (Key_.view_key_to_path key)) 
+            list_ mbox key subscriptions access acc f >>= fun (acc,cnt) -> 
+            f acc (`Mailbox ((Key_.view_key_to_path key), cnt)) 
           )
           end >>= fun (acc) ->
           return (acc,cnt+1)
@@ -716,7 +715,7 @@ module IrminMailbox :
      * cards starting with the first delimeter followed by the wild card
      *)
     let list mbox ~subscribed ?(access=(fun _ -> true)) ~init ~f =
-      let (_,_,key) = Key_.mailbox_of_path "" in
+      let (_,key) = Key_.mailbox_of_path "" in
       begin
       if subscribed then (
         Subscriptions.create mbox.user >>= fun sub ->
@@ -747,7 +746,7 @@ module IrminMailbox :
     let show_all mbox =
       let open Core.Std in
       Printf.printf "---------- mailbox messages\n%!";
-      let (_,_,key) = Key_.mailbox_of_path mbox.mailbox in
+      let (_,key) = Key_.mailbox_of_path mbox.mailbox in
       let key = Key_.add_path key "messages" in
       list_messages key >>= fun l ->
       List.iter l ~f:(fun i -> Printf.printf "%s %!" i); Printf.printf "\n%!";

@@ -44,6 +44,6 @@ let () = Lwt_main.run(
     ) >>= fun listing ->
   List.iter listing ~f:(fun i -> match i with
     | `Folder (f,cnt) -> Printf.printf "folder: %s %d\n%!" f cnt
-    | `Mailbox m -> Printf.printf "mailbox: %s\n%!" m
+    | `Mailbox (m,cnt) -> Printf.printf "mailbox: %s %d\n%!" m cnt
   ); return ()
 )

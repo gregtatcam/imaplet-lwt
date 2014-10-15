@@ -24,7 +24,7 @@ type mailbox_metadata = {
   unseen: int;
   nunseen: int;
   recent: int;
-  folders: bool;
+  selectable: bool;
 } with sexp
 
 type mbox_mailbox_metadata = {
@@ -48,7 +48,7 @@ type mbox_message_metadata = {
 
 type mbox_index = [`Header of mbox_mailbox_metadata | `Record of mbox_message_metadata]
 
-val empty_mailbox_metadata : ?uidvalidity:string -> ?folders:bool -> unit -> mailbox_metadata
+val empty_mailbox_metadata : ?uidvalidity:string -> ?selectable:bool -> unit -> mailbox_metadata
 
 val empty_mailbox_message_metadata : unit -> mailbox_message_metadata
 
@@ -56,7 +56,7 @@ val empty_mbox_message_metadata : unit -> mbox_message_metadata
 
 val update_mailbox_metadata: header:mailbox_metadata -> ?uidvalidity:string ->
   ?uidnext:int -> ?modseq:int64 -> ?count:int -> ?unseen:int -> ?nunseen:int ->
-    ?recent:int -> ?folders:bool -> unit -> mailbox_metadata
+    ?recent:int -> ?selectable:bool -> unit -> mailbox_metadata
 
 val update_mailbox_message_metadata : data:mailbox_message_metadata -> ?uid:int -> ?modseq:int64 ->
   ?internal_date:Time.t -> ?size:int ->

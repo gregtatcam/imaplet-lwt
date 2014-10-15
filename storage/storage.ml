@@ -58,7 +58,7 @@ sig
    * returns list of files/folders with list of flags 
    *)
   val list : t -> subscribed:bool -> ?access:(string->bool) -> init:'a -> 
-    f:('a -> [`Folder of (string*int)|`Mailbox of string] -> 'a Lwt.t) -> 'a Lwt.t
+    f:('a -> [`Folder of (string*int)|`Mailbox of (string*int)] -> 'a Lwt.t) -> 'a Lwt.t
 
   (* append message(s) to selected mailbox *)
   val append : t -> Mailbox.Message.t -> mailbox_message_metadata -> unit Lwt.t 
@@ -81,7 +81,7 @@ sig
   (* store flags to selected mailbox *)
   val store : t -> [`Sequence of int|`UID of int] -> mailbox_message_metadata -> unit Lwt.t
 
-  (* store flags to selected mailbox *)
+  (* store mailbox metadata *)
   val store_mailbox_metadata : t -> mailbox_metadata -> unit Lwt.t
 
   (* copy messages from selected mailbox *)

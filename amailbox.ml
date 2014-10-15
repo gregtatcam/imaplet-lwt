@@ -65,16 +65,22 @@ let user mailboxt =
   mailboxt.user
 
 (** make directory item **)
-let dir_item item cnt =
-  (item, "\\Noselect" ::
+let dir_item path cnt =
+  (path, "\\Noselect" ::
     if cnt = 0 then
       ["\\HasNoChildren"]
     else
       ["\\HasChildren"])
 
 (** make mailbox item **)
-let mbox_item path mailbox =
-  (path, "NoInferiors" ::
+let mbox_item path mailbox cnt =
+  let flags =
+  if cnt = 0 then
+    "\\HasNoChildren"
+  else
+    "\\HasChildren" 
+  in
+  (path, flags ::
   if mailbox = "" then 
   (
     if path = "Drafts" then
@@ -94,28 +100,22 @@ let list_ mailboxt subscribed mailbox wilcards =
   let open Utils in
   let open Core.Std in
   (* item is relative to the mailbox *)
-  let select_item acc mailbox item isdir =
+  let select_item acc path item cnt =
     (** get item path relative to the relative root **)
-    let path = concat_path mailbox item in
     Printf.printf "list matching %s %s\n%!" mailbox wilcards;
-    if isdir <> None then
-    (
-      if match_regex path ~regx:wilcards then
-        ((dir_item path (Option.value_exn isdir)) :: acc)
-      else
-        acc
-    ) else if match_regex path ~regx:wilcards then
-        ((mbox_item path mailbox) :: acc)
+    if match_regex path ~regx:wilcards then
+      ((item cnt) :: acc)
     else
-      (acc)
+      acc
   in
   (* item has path relative to the start, i.e. root + mailbox *)
   factory mailboxt mailbox >>= fun (module Mailbox) ->
   Mailbox.MailboxStorage.list Mailbox.this ~subscribed ~access:(fun _ -> true) 
   ~init:[] ~f:(fun acc item ->
+    let path item = concat_path mailbox item in
     match item with
-      | `Folder (item,cnt)  -> return (select_item acc mailbox item (Some cnt))
-      | `Mailbox item  -> return (select_item acc mailbox item None)
+      | `Folder (item,cnt)  -> return (select_item acc (path item) (dir_item (path item)) cnt)
+      | `Mailbox (item,cnt)  -> return (select_item acc (path item) (mbox_item (path item) mailbox) cnt)
   )
 
 (** add to the calculated list the reference folder and inbox **)

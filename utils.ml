@@ -101,11 +101,22 @@ let make_email_message message =
     * look at a slice that should include the headers
     *)
     let from buff =
-      if Regex.match_regex headers ~regx:"^From: \\([^<]+\\)<\\([^>]+\\)" then
+      if Regex.match_regex buff ~regx:"^From: \\([^<]+\\)<\\([^>]+\\)" then
         Str.matched_group 2 buff
       else
         "From daemon@localhost.local"
     in
-    let post = ("From " ^ (from headers) ^ " " ^ (Dates.postmark_date_time ())) in
+    let date_time buff =
+      let time =
+        if Regex.match_regex buff ~regx:"^Date: \\([.]+\\)[\r\n]+" then (
+          try 
+            Dates.email_to_date_time_exn (Str.matched_group 1 buff)
+          with _ -> Time.now()
+        ) else
+          Time.now()
+      in
+      Dates.postmark_date_time ~time ()
+    in
+    let post = ("From " ^ (from headers) ^ " " ^ (date_time headers)) in
     (message_of_string post message)
   )

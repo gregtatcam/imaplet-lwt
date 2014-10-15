@@ -24,7 +24,7 @@ type mailbox_metadata = {
   unseen: int;
   nunseen: int;
   recent: int;
-  folders: bool;
+  selectable: bool;
 } with sexp
 
 type mbox_mailbox_metadata = {
@@ -53,10 +53,10 @@ let new_uidvalidity() =
   let f = (Time.to_float t) in
   string_of_int (Float.to_int f)
 
-let empty_mailbox_metadata ?uidvalidity ?(folders=false) () =
+let empty_mailbox_metadata ?uidvalidity ?(selectable=true) () =
   let uidvalidity =
     (match uidvalidity with None->""|Some u -> u) in
-  {uidvalidity;modseq=Int64.zero;uidnext=1;count=0;unseen=0;nunseen=0;recent=0;folders}
+  {uidvalidity;modseq=Int64.zero;uidnext=1;count=0;unseen=0;nunseen=0;recent=0;selectable}
 
 let empty_mailbox_message_metadata() =
   {uid=1;modseq=Int64.zero;internal_date=Time.now();size=0;flags=[]}
@@ -65,7 +65,7 @@ let empty_mbox_message_metadata() =
   {metadata=empty_mailbox_message_metadata();start_offset=Int64.zero;end_offset=Int64.zero}
 
 let update_mailbox_metadata ~header ?uidvalidity ?uidnext ?modseq
-?count ?unseen ?nunseen ?recent ?folders () : (mailbox_metadata) =
+?count ?unseen ?nunseen ?recent ?selectable () : (mailbox_metadata) =
   let uidvalidity=(match uidvalidity with None->header.uidvalidity|Some u->u) in
   let uidnext=(match uidnext with None->header.uidnext|Some u->u) in
   let modseq=(match modseq with None->header.modseq|Some m->m) in
@@ -73,8 +73,8 @@ let update_mailbox_metadata ~header ?uidvalidity ?uidnext ?modseq
   let unseen=(match unseen with None->header.unseen|Some u->u) in
   let nunseen=(match nunseen with None->header.nunseen|Some n->n) in
   let recent=(match recent with None->header.recent|Some r->r) in
-  let folders=(match folders with None->header.folders|Some r->r) in
-  {uidvalidity;modseq;uidnext;count;unseen;nunseen;recent;folders}
+  let selectable=(match selectable with None->header.selectable|Some r->r) in
+  {uidvalidity;modseq;uidnext;count;unseen;nunseen;recent;selectable}
 
 let update_mailbox_message_metadata ~data ?uid ?modseq
 ?internal_date ?size ?flags () : (mailbox_message_metadata) =

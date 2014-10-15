@@ -29,4 +29,4 @@ val day_of_week : int -> string
 
 val int_to_month : int -> string
 
-val postmark_date_time : unit -> string
+val postmark_date_time : ?time:Time.t -> unit -> string
