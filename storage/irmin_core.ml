@@ -16,7 +16,6 @@
 open Lwt
 open Irmin_unix
 open Core.Std
-open BatLog
 open Sexplib
 open Email_message
 open Email_message.Mailbox.Message

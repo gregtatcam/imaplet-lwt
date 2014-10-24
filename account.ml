@@ -47,7 +47,7 @@ let parse_users buff user password =
 let parse_user_b64 b64 =
   try 
    let buff = try String.chop_suffix_exn b64 ~suffix:"=" with _ -> b64 in 
-   let buff = Batteries.Base64.str_decode buff in (** need to log this if it fails **)
+   let buff = Cstruct.to_string (Nocrypto.Base64.decode (Cstruct.of_string buff)) in (** need to log this if it fails **)
    let _ = Str.search_forward (Str.regexp
    "^\\([^\\]+\\)\000\\([^\\]+\\)\000\\([^\\]+\\)$") buff 0 in
    let u1 = Str.matched_group 1 buff in

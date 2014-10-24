@@ -122,10 +122,7 @@ let append ist ?uid message size flags =
   IrminStorage.append ist message message_metadata >>= fun () ->
   return ()
   )
-  (fun ex -> 
-    let open Batteries in 
-    let stack = BatPrintexc.raw_backtrace_to_string (BatPrintexc.get_callstack 20) in
-    Printf.printf "exception2: %s\n%s\n%!" (Exn.backtrace()) stack; return ())
+  (fun ex -> Printf.printf "exception: %s\n%!" (Exn.backtrace()); return ())
 
 let append_messages ist path flags =
   Printf.printf "#### appending messages %s\n%!" path;

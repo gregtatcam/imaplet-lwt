@@ -38,9 +38,8 @@ type imapConfig = {
 }
 
 let exists file =
-  let open Batteries in
-  let stat = BatUnix.stat file in
-  if stat.BatUnix.st_kind = BatUnix.S_REG then
+  let stat = Unix.stat file in
+  if stat.Unix.st_kind = Unix.S_REG then
     true
   else
     false
@@ -52,11 +51,12 @@ let config () =
     "./imaplet.cf"
 
 let srv_config = 
-  let open Batteries in
+  let open Core.Std in
   let lines =
     try
-      let en = BatFile.lines_of (config ()) in
-      BatEnum.fold (fun acc e -> e :: acc) [] en
+      In_channel.with_file (config ()) ~f:(fun ic -> 
+        In_channel.input_lines ic
+      )
     with _ -> []
   in
   Printf.printf "##### loading configuration file #####\n%!";
@@ -95,7 +95,7 @@ let srv_config =
     if matched then (
       let n = Str.matched_group 1 hd in
       let v = Str.matched_group 2 hd in
-      let v = BatString.strip ~chars:"\"" v in
+      let v = String.strip ~drop:(fun c -> c = '"') v in
       let log n v = Printf.printf "%s: invalid value %s\n%!" n v in
       let ival n v default = try int_of_string v with _ -> log n v; default in
       let bval n v default = try bool_of_string v with _ -> log n v; default in
