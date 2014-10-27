@@ -14,7 +14,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 open Lwt
-open Core.Std
 open Sexplib
 open Irmin_storage
 open Irmin_core
@@ -32,7 +31,7 @@ let uinput = ref []
 
 let arg n =
   if List.length !uinput > n then
-    List.nth_exn !uinput n
+    List.nth !uinput n
   else
     raise InvalidCmd
 
@@ -46,7 +45,7 @@ let out_line str =
 let prompt str =
   out_line str >>= fun () ->
   in_line () >>= fun msg ->
-  uinput := (String.split msg ~on:' ');
+  uinput := (Str.split (Str.regexp " ") msg);
   return (arg 0)
 
 let rec tree key indent =
@@ -68,7 +67,7 @@ let rec tree key indent =
 let message_template from_ to_ subject_ email_ =
 let postmark = replace ~regx:"DATE" ~tmpl:(postmark_date_time()) "From FROM DATE" in
 let postmark = replace ~regx:"FROM" ~tmpl:from_ postmark in
-  let id_ = (Time.to_filename_string (Time.now())) in
+  let id_ = Pervasives.string_of_float (Unix.time()) in
   let message = 
   ("From: FROM\r\n" ^
   "Content-Type: text/plain; charset=us-ascii\r\n" ^
@@ -138,17 +137,17 @@ let rec selected user mailbox mbox =
     let pos = int_of_string pos in
     IrminMailbox.read_message_metadata mbox (`Sequence pos) >>= function
     | `Ok (meta) ->
-      let flags = List.foldi !uinput ~init:[] ~f:(
-        fun i acc el -> Printf.printf "%s\n%!" el;if i < 3 then acc else
-          (str_to_fl ("\\" ^ el)) :: acc) in
-      let find l i = (List.find l ~f:(fun el -> if el = i then true else false)) <> None in
+      let (_,flags) = List.fold_left 
+      (fun (i,acc) el -> Printf.printf "%s\n%!" el;if i < 3 then (i+1,acc) else
+          (i+1,(str_to_fl ("\\" ^ el)) :: acc)) (0,[]) !uinput in
+      let find l i = try let _ = (List.find (fun el -> el = i) l) in true with _ -> false in
       let meta =
       (
       match (arg 2) with
-      | "+" -> let flags = List.fold flags ~init:meta.flags ~f:(fun acc i -> 
-            if find acc i then acc else i :: acc) in {meta with flags}
-      | "-" -> let flags = List.fold meta.flags ~init:[] ~f:(fun acc i ->
-          if find flags i then acc else i :: acc) in {meta with flags}
+      | "+" -> let flags = List.fold_left (fun acc i -> 
+            if find acc i then acc else i :: acc) meta.flags flags in {meta with flags}
+      | "-" -> let flags = List.fold_left (fun acc i ->
+          if find flags i then acc else i :: acc) [] meta.flags in {meta with flags}
       | "|" -> {meta with flags}
       | _ -> raise InvalidCmd
       )
@@ -173,11 +172,11 @@ let rec selected user mailbox mbox =
     IrminMailbox.list ~subscribed:false ~access:(fun _ -> true) mbox ~init:[] ~f:(
       fun acc item -> return ((item::acc))
     ) >>= fun l ->
-    List.iter l ~f:(fun i ->
+    List.iter (fun i ->
       match i with
       | `Folder (f,i) -> Printf.printf "folder/%d %s\n%!" i f;
       | `Mailbox (m,i) -> Printf.printf "mailbox %s\n%!" m;
-    );
+    ) l;
     selected user mailbox mbox
   | "close" -> return ()
   | _ -> Printf.printf "unknown command\n%!"; selected user mailbox mbox
@@ -209,9 +208,9 @@ let main () =
       IrminMailbox.list ~subscribed:false ~access:(fun _ -> true) mbox ~init:[] ~f:(
         fun acc item -> return ((item::acc))
       ) >>= fun l ->
-      List.iter l ~f:(fun i -> match i with
+      List.iter (fun i -> match i with
       | `Folder (i,c) -> Printf.printf "folder children:%d %s\n%!" c i
-      | `Mailbox (i,c) -> Printf.printf "storage %d %s\n%!" c i); request user
+      | `Mailbox (i,c) -> Printf.printf "storage %d %s\n%!" c i) l; request user
     | "quit" -> return ()
     | _ -> Printf.printf "unknown command\n%!"; request user
     )
@@ -219,7 +218,7 @@ let main () =
     match ex with
     | InvalidCmd -> Printf.printf "unknown command\n%!"; request user
     | Quit -> return ()
-    | _ -> Printf.printf "exception %s\n%!" (Exn.to_string ex); return ()
+    | _ -> Printf.printf "exception %s\n%!" (Printexc.to_string ex); return ()
     )
   in
   prompt "user? " >>= fun user ->

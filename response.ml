@@ -13,7 +13,6 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
-open Core.Std
 open Imaplet_types
 
 module StatusResponse : sig
@@ -60,9 +59,8 @@ end = struct
 
   let get_response ?(tag="*") ?(code=None) ~rtype text =
     let l = [tag; get_rtype rtype; response_code code; text] in
-    let acc = List.fold l 
-      ~init:"" 
-      ~f:(fun acc s -> if acc = "" then s else if s = "" then acc else acc ^ Regex.space ^ s) in
+    let acc = List.fold_left  
+      (fun acc s -> if acc = "" then s else if s = "" then acc else acc ^ Regex.space ^ s) "" l in
     match code with 
     |None-> to_str acc
     |Some _ -> to_str (acc ^ "]")

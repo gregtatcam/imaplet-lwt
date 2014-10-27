@@ -13,7 +13,6 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
-open Core.Std
 
 let revision = "IMAP4rev1"
 let literal = "LITERAL+"
@@ -59,9 +58,9 @@ let auth_cap = [revision;literal; sasl; login'ref; id; enable; idle;starttls;aut
 ]
 let auth_cap = List.concat [notauth_cap;[condstore]]
 
-let capability = String.concat ~sep:" " notauth_cap
+let capability = String.concat " " notauth_cap
 
-let auth_capability =  String.concat ~sep:" " auth_cap
+let auth_capability =  String.concat " " auth_cap
 
 let id = "\"name\" \"Imaplet\""
 
@@ -76,8 +75,8 @@ let inbox name =
 
 let mailboxes name = 
   let open Server_config in 
-  let l = String.split srv_config.mail_path ~on:'@' in
-   (List.nth_exn l 0) ^ name ^ (List.nth_exn l 1)
+  let l = Str.split (Str.regexp "@") srv_config.mail_path in
+   (List.nth l 0) ^ name ^ (List.nth l 1)
 
 let get_mbox_flags =
   (["\\Answered"; "\\Flagged"; "\\Deleted"; "\\Seen"; "\\Draft"; "$NotJunk";

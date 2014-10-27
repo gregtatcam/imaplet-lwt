@@ -15,13 +15,14 @@
  *)
 open Lwt
 open Irmin_unix
-open Core.Std
 open Sexplib
 open Email_message
 open Email_message.Mailbox.Message
 open Server_config
 open Imaplet_types
 open Storage_meta
+open Utils
+open Sexplib.Std
 
 exception KeyDoesntExist
 exception DuplicateUID
@@ -60,15 +61,15 @@ module Key_ :
       ["imaplet";user]
 
     let assert_key key =
-      if List.length key = 0 || List.find key ~f:(fun i -> i = "") <> None then
-        raise (InvalidKey (String.concat ~sep:"/" key))
+      if List.length key = 0 || list_find key (fun i -> i = "") then
+        raise (InvalidKey (String.concat "/" key))
 
     let t_of_path str =
       if str = "" then
         assert(false);
-      let path = String.lstrip ~drop:(fun c -> c = '/') str in
-      let path = String.rstrip ~drop:(fun c -> c = '/') path in
-      String.split path ~on:'/'
+      let path = Regex.replace ~regx:"^/" ~tmpl:"" str in
+      let path = Regex.replace ~regx:"/$" ~tmpl:"" path in
+      Str.split (Str.regexp "/") path
 
     let t_of_list (l:string list) =
       assert_key l;
@@ -81,8 +82,8 @@ module Key_ :
       List.concat [key;l]
 
     let mailbox_of_list ?user l =
-      let mailbox,key = List.fold_right l ~init:("",[]) 
-      ~f:(fun i (mailbox,acc) -> 
+      let mailbox,key = List.fold_right
+      (fun i (mailbox,acc) -> 
         if i <> "" then (
           if List.length acc <> 0 then
             mailbox,"mailboxes" :: (i :: acc)
@@ -90,15 +91,15 @@ module Key_ :
             i,"mailboxes" :: (i :: acc)
         ) else
           mailbox,acc
-      ) in
+      ) l ("",[]) in
       if user <> None then
-        mailbox,"imaplet" :: ((Option.value_exn user) :: key)
+        mailbox,"imaplet" :: ((option_value_exn user) :: key)
       else
         mailbox,key
 
     (* if user is None then relative path, otherwise root, i.e. /imaplet/user *)
     let mailbox_of_path ?user path =
-      let key = String.split path ~on:'/' in
+      let key = Str.split (Str.regexp "/") path in
       mailbox_of_list ?user key
       
     let mailboxes_of_mailbox key =
@@ -106,42 +107,47 @@ module Key_ :
 
     (* convert key to path, keep "imaplet", user, and "mailboxes" *)
     let key_to_string key = 
-      List.fold key 
-      ~init:""
-      ~f:(fun acc item -> 
+      List.fold_left
+      (fun acc item -> 
         if acc = "" then
           "/" ^ item
         else
           acc ^ "/" ^ item
-     ) 
+     ) "" key
 
     (* convert key to path, remove "imaplet",user, and "mailboxes" *)
     let key_to_path key = 
-     List.foldi key 
-     ~f:(fun i acc item -> 
+     let (_,acc) =
+     List.fold_left
+     (fun (i,acc) item -> 
        if i < 2 then (* skip imaplet and user *)
-         acc
-       else if i % 2 = 0 then ( (* skip mailboxes *) 
+         (i+1,acc)
+       else if (Pervasives.(mod) i 2) = 0 then ( (* skip mailboxes *) 
          if acc = "" then
-           acc
+           (i+1,acc)
          else
-           acc ^ "/" 
+           (i+1,acc ^ "/") 
        ) else 
-         acc ^ item
-       ) ~init:""
+         (i+1,acc ^ item)
+     ) (0,"") key
+     in
+     acc
 
     (* convert view key (relative key) to path, remove "mailboxes" *)
     let view_key_to_path key = 
-     List.foldi key 
-     ~f:(fun i acc item -> 
-       if i % 2 = 0 then ( (* skip mailboxes *) 
+     let (_,acc) =
+     List.fold_left
+     (fun (i,acc) item -> 
+       if (Pervasives.(mod) i  2) = 0 then ( (* skip mailboxes *) 
          if acc = "" then
-           acc
+           (i+1,acc)
          else
-           acc ^ "/" 
+           (i+1,acc ^ "/") 
        ) else 
-         acc ^ item
-       ) ~init:""
+         (i+1,acc ^ item)
+     ) (0,"") key
+     in
+     acc
 
   end
 
@@ -302,7 +308,7 @@ module Subscriptions :
 
     (* convert the list to a string of sexp *)
     let str_sexp_of_list l =
-      let sexp = List.sexp_of_t (fun i -> Sexp.of_string i) l in
+      let sexp = sexp_of_list (fun i -> Sexp.of_string i) l in
       Sexp.to_string sexp
 
     let empty =
@@ -311,7 +317,7 @@ module Subscriptions :
     (* convert string of sexp to the list *)
     let list_of_str_sexp str =
       let sexp = Sexp.of_string str in
-      (List.t_of_sexp (fun i -> Sexp.to_string i) sexp)
+      list_of_sexp (fun i -> Sexp.to_string i) sexp 
 
     (* update subscription list *)
     let update_exn view l =
@@ -330,7 +336,7 @@ module Subscriptions :
     (* subscribe *)
     let subscribe t mailbox =
       read t >>= fun l ->
-      if (List.find l ~f:(fun i -> i = mailbox) <> None) then 
+      if list_find l (fun i -> i = mailbox) then 
         return ()
       else
         update_exn t (mailbox :: l) 
@@ -338,7 +344,7 @@ module Subscriptions :
     (* unsubscribe *)
     let unsubscribe t mailbox =
       read t >>= fun l ->
-      let l = List.fold l ~init:[] ~f:(fun acc i -> if i = mailbox then acc else i :: acc) in
+      let l = List.fold_left (fun acc i -> if i = mailbox then acc else i :: acc) [] l in
       update_exn t l
   end
 
@@ -452,7 +458,7 @@ module IrminMailbox :
       let sexp = sexp_of_mailbox_metadata metadata in
       IrminIntf_tr.update mbox.trans key (Sexp.to_string sexp) >>= fun () ->
       let key = get_key `Index in
-      let sexp = List.sexp_of_t (fun i -> Sexp.of_string i) [] in
+      let sexp = sexp_of_list (fun i -> Sexp.of_string i) [] in
       IrminIntf_tr.update mbox.trans key (Sexp.to_string sexp) 
 
     let delete_mailbox mbox =
@@ -497,14 +503,15 @@ module IrminMailbox :
       exists_key mbox key
 
     let find_flag l fl =
-      List.find l ~f:(fun f -> f = fl) <> None
+      list_find l (fun f -> f = fl)
 
     let read_index_uid mbox =
       match mbox.!index with
       | None ->
         IrminIntf_tr.read_exn mbox.trans (get_key `Index) >>= fun index_sexp_str ->
-        let uids = (List.t_of_sexp (fun i -> int_of_string (Sexp.to_string i)) 
-            (Sexp.of_string index_sexp_str)) in
+        let uids = list_of_sexp 
+          (fun i -> int_of_string (Sexp.to_string i))
+          (Sexp.of_string index_sexp_str) in
         mbox.index := Some uids;
         return uids
       | Some uids -> return uids
@@ -512,11 +519,11 @@ module IrminMailbox :
     let update_index_uids mbox uids = 
       mbox.index := Some uids;
       IrminIntf_tr.update mbox.trans (get_key `Index) 
-        (Sexp.to_string (List.sexp_of_t (fun i -> Sexp.of_string (string_of_int i)) (uids)))
+        (Sexp.to_string (sexp_of_list (fun i -> Sexp.of_string (string_of_int i)) uids ))
 
     let update_index_uid mbox uid =
       read_index_uid mbox >>= fun uids ->
-      if List.find uids ~f:(fun u -> u = uid) <> None then
+      if list_find uids (fun u -> u = uid) then
         raise DuplicateUID
       else (
         (* reverse index *)
@@ -526,7 +533,7 @@ module IrminMailbox :
 
     let uid_to_seq mbox uid =
       read_index_uid mbox >>= fun uids ->
-      match (List.findi uids ~f:(fun i u -> u = uid)) with
+      match (list_findi uids (fun i u -> u = uid)) with
       | None -> return None
       | Some (i,_) -> return (Some ((List.length uids) - i))
 
@@ -557,11 +564,11 @@ module IrminMailbox :
         else if seq = 0 then
           return `NotFound
         else
-          return (`Ok (seq,(List.nth_exn uids ((List.length uids) - seq))))
+          return (`Ok (seq,(List.nth uids ((List.length uids) - seq))))
       | `UID uid -> 
-        match (List.findi uids ~f:(fun i u -> u = uid)) with 
+        match (list_findi uids (fun i u -> u = uid)) with 
         | None ->
-          if uid > (List.nth_exn uids 0) then
+          if uid > (List.nth uids 0) then
             return `Eof
           else
             return `NotFound
@@ -592,7 +599,7 @@ module IrminMailbox :
          * sequence - then don't need to read the record 
          *)
         if filter <> None && (Interpreter.check_search_seq 
-            ~seq ~uid (Option.value_exn filter)) = false then
+            ~seq ~uid (option_value_exn filter)) = false then
           return `NotFound
         else (
           IrminIntf_tr.read_exn mbox.trans (get_key (`Metamessage uid)) >>= fun sexp_str ->
@@ -605,7 +612,7 @@ module IrminMailbox :
             let postmark = Mailbox.Postmark.t_of_sexp (Sexp.of_string postmark_sexp_str) in
             let email = Email.t_of_sexp (Sexp.of_string email_sexp_str) in
             let message = {Mailbox.Message.postmark=postmark;Mailbox.Message.email=email} in
-            if Interpreter.exec_search email (Option.value_exn filter) message_metadata seq = true then
+            if Interpreter.exec_search email (option_value_exn filter) message_metadata seq = true then
               return (`Ok (Some message,postmark_sexp_str,headers_sexp_str,email_sexp_str,message_metadata))
             else
               return `NotFound
@@ -618,7 +625,7 @@ module IrminMailbox :
       | `NotFound -> return `NotFound
       | `Ok (message,postmark_sexp_str,_,email_sexp_str,message_metadata) ->
           if message <> None then
-            return (`Ok (Option.value_exn message,message_metadata))
+            return (`Ok (option_value_exn message,message_metadata))
           else (
             let postmark = Mailbox.Postmark.t_of_sexp (Sexp.of_string postmark_sexp_str) in
             let email = Email.t_of_sexp (Sexp.of_string email_sexp_str) in
@@ -634,11 +641,12 @@ module IrminMailbox :
         IrminIntf_tr.read_exn mbox.trans (get_key (`Metamessage uid)) >>= fun sexp_str ->
         return (`Ok (mailbox_message_metadata_of_sexp (Sexp.of_string sexp_str)))
 
+    (*
     let get_min_max_uid uids =
       if List.length uids = 0 then
         (0,0)
       else
-        (List.nth_exn uids 0),(List.last_exn uids)
+        (List.nth uids 0),(List.last uids)
 
     let get_min_max_seq mailbox_metadata =
       (1, mailbox_metadata.count)
@@ -648,6 +656,7 @@ module IrminMailbox :
         get_min_max_uid uids
       else
         get_min_max_seq mailbox_metadata
+    *)
 
     let copy_mailbox mbox1 pos mbox2 message_metadata =
       get_uid mbox1 pos >>= function
@@ -668,12 +677,12 @@ module IrminMailbox :
         IrminIntf_tr.remove mbox.trans (get_key (`Metamessage uid)) >>
         IrminIntf_tr.remove mbox.trans (get_key (`Uid uid)) >>
         read_index_uid mbox >>= fun uids ->
-        let uids = List.fold_right uids ~init:[] ~f:(fun u uids ->
+        let uids = List.fold_right (fun u uids ->
           if u = uid then
             uids
           else
             u :: uids
-        ) in
+        ) uids [] in
         update_index_uids mbox uids
       |_ -> return ()
 
@@ -727,12 +736,11 @@ module IrminMailbox :
       return acc
 
     let list_messages k =
-      let open Core.Std in
       let list_subtr store k =
         IrminIntf.list store k >>= fun l ->
-        return (List.fold l ~init:"" ~f:(fun acc i ->
-          acc ^ ":" ^ (List.last_exn i)
-        ))
+        return (List.fold_left (fun acc i ->
+          acc ^ ":" ^ (List.nth i ((List.length i) - 1))
+        ) "" l)
       in
       IrminIntf.create () >>= fun store ->
       IrminIntf.list store k >>= fun l ->
@@ -743,22 +751,21 @@ module IrminMailbox :
       ) [] l
 
     let show_all mbox =
-      let open Core.Std in
       Printf.printf "---------- mailbox messages\n%!";
       let (_,key) = Key_.mailbox_of_path mbox.mailbox in
       let key = Key_.add_path key "messages" in
       list_messages key >>= fun l ->
-      List.iter l ~f:(fun i -> Printf.printf "%s %!" i); Printf.printf "\n%!";
+      List.iter (fun i -> Printf.printf "%s %!" i) l; Printf.printf "\n%!";
       Printf.printf "---------- mailbox index\n%!";
       read_index_uid mbox >>= fun uids ->
-      List.iter uids ~f:(fun i -> Printf.printf "%d %!" i); Printf.printf "\n%!";
+      List.iter (fun i -> Printf.printf "%d %!" i) uids; Printf.printf "\n%!";
       Printf.printf "---------- mailbox metadata\n%!";
       read_mailbox_metadata mbox >>= fun meta ->
       Printf.printf "%s\n%!" (Sexp.to_string (sexp_of_mailbox_metadata meta));
       Printf.printf "---------- subscriptions\n%!";
       Subscriptions.create mbox.user >>= fun sub ->
       Subscriptions.read sub >>= fun subscr ->
-      List.iter subscr ~f:(fun i -> Printf.printf "%s %!" i); Printf.printf "\n%!";
+      List.iter (fun i -> Printf.printf "%s %!" i) subscr; Printf.printf "\n%!";
       return ()
 
   end

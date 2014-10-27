@@ -13,20 +13,46 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
-open Core.Std
+open Sexplib
 
 exception InvalidDate
 
-val imapd_to_date_exn : string -> Date.t
+module ImapDate :
+  sig
+    type t with sexp
 
-val imapd_to_date_time_exn : string -> Time.t
+    val of_string : string -> t
+    val compare : t -> t -> int
+    val of_tm : Unix.tm -> t
+    val to_string : t -> string
+    val t_of_sexp : Sexp.t -> t
+    val sexp_of_t : t -> Sexp.t 
+  end
 
-val date_time_to_email : Time.t -> string
+module ImapTime : 
+  sig
+    type t with sexp
 
-val email_to_date_time_exn : string -> Time.t
+    val now : unit -> t
+    val of_string : string -> t
+    val of_float : float -> t
+    val to_float : t -> float
+    val to_date : t -> ImapDate.t
+    val epoch : t
+    val t_of_sexp : Sexp.t -> t
+    val sexp_of_t : t -> Sexp.t 
+  end
+
+val imapd_to_date_exn : string -> ImapDate.t
+
+val imapd_to_date_time_exn : string -> ImapTime.t
+
+val date_time_to_email : ImapTime.t -> string
+
+val email_to_date_time_exn : string -> ImapTime.t
 
 val day_of_week : int -> string
 
 val int_to_month : int -> string
 
-val postmark_date_time : ?time:Time.t -> unit -> string
+val postmark_date_time : ?time:ImapTime.t -> unit -> string

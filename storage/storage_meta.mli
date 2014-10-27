@@ -13,7 +13,7 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
-open Core.Std
+open Sexplib.Std
 open Imaplet_types
 
 type mailbox_metadata = {
@@ -35,7 +35,7 @@ type mbox_mailbox_metadata = {
 type mailbox_message_metadata = {
   uid: int;
   modseq: int64;
-  internal_date: Time.t;
+  internal_date: Dates.ImapTime.t;
   size: int;
   flags: mailboxFlags list;
 } with sexp
@@ -55,15 +55,17 @@ val empty_mailbox_message_metadata : unit -> mailbox_message_metadata
 val empty_mbox_message_metadata : unit -> mbox_message_metadata
 
 val update_mailbox_metadata: header:mailbox_metadata -> ?uidvalidity:string ->
-  ?uidnext:int -> ?modseq:int64 -> ?count:int -> ?unseen:int -> ?nunseen:int ->
+  ?uidnext:int -> ?modseq:int64 -> ?count:int -> ?unseen:int ->
+    ?nunseen:int ->
     ?recent:int -> ?selectable:bool -> unit -> mailbox_metadata
 
-val update_mailbox_message_metadata : data:mailbox_message_metadata -> ?uid:int -> ?modseq:int64 ->
-  ?internal_date:Time.t -> ?size:int ->
+val update_mailbox_message_metadata : data:mailbox_message_metadata ->
+  ?uid:int -> ?modseq:int64 ->
+  ?internal_date:Dates.ImapTime.t -> ?size:int ->
   ?flags:(mailboxFlags list) -> unit -> mailbox_message_metadata
 
 val update_mbox_message_metadata : data:mbox_message_metadata -> ?uid:int -> ?modseq:int64 ->
-  ?internal_date:Time.t -> ?size:int ->
+  ?internal_date:Dates.ImapTime.t -> ?size:int ->
   ?start_offset:int64 -> ?end_offset:int64 -> ?flags:(mailboxFlags list) -> unit
   -> mbox_message_metadata
 

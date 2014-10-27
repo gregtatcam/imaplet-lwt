@@ -13,7 +13,8 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
-open Core.Std
+open Sexplib
+open Sexplib.Std
 
 type mailboxFlags =
   | Flags_Answered
@@ -82,7 +83,7 @@ type searchKey =
   | Search_All (** all messages in the mailbox; the default initial key for ANDing **)
   | Search_Answered (** messages with the \Answered flag set **)
   | Search_Bcc of string (** messages with string in the envelope sructure's BCC field **) 
-  | Search_Before of Date.t (** messages with internal date **) 
+  | Search_Before of Dates.ImapDate.t (** messages with internal date **) 
   | Search_Body of string (** messages containing string in teh body **) 
   | Search_Cc of string (** messages with string int the envelope structure's CC field **)
   | Search_Deleted (** with \Deleted flag set **) 
@@ -95,14 +96,14 @@ type searchKey =
   | Search_New (** messages with \Recent set but not \Seen **)
   | Search_Modseq of (string * entryType) option * int64 (** modseq higher than for specific metadata **)
   | Search_Old (** message with no \Recent flag set **) 
-  | Search_On of Date.t (** messages with internal date within the specified date **)
+  | Search_On of Dates.ImapDate.t (** messages with internal date within the specified date **)
   | Search_Recent (** messages with \Recent flag set **)
   | Search_Seen (** message with \Seen flag set **)
-  | Search_Sentbefore of Date.t (** messages with Date: header is earlier **)
-  | Search_Senton of Date.t (** messages with Date: header is within **)
-  | Search_Sentsince of Date.t (** messages with Date: header is within or later **)
+  | Search_Sentbefore of Dates.ImapDate.t (** messages with Date: header is earlier **)
+  | Search_Senton of Dates.ImapDate.t (** messages with Date: header is within **)
+  | Search_Sentsince of Dates.ImapDate.t (** messages with Date: header is within or later **)
   | Search_SeqSet of sequence (** messages with the sequence numbers **)
-  | Search_Since of Date.t (** messages with internal date within or later **)
+  | Search_Since of Dates.ImapDate.t (** messages with internal date within or later **)
   | Search_Smaller of int (** messages with size smaller **)
   | Search_Subject of string (** messages with envelope structure's SUBJECT field **)
   | Search_Text of string (** messages with the string in the header or body, could be literal **) 
@@ -203,7 +204,7 @@ type authenticatedCmd =
   | Cmd_List of string * string (** reference name * mailbox name with possible wildcards **)
   | Cmd_Lsub of string * string (** reference name * mailbox name with possible wildcards **)
   | Cmd_Status of string * (statusOpt list) (** mailbox name * status data itme names **)
-  | Cmd_Append of string * mailboxFlags list option * Time.t option * literal (** mailbox name * optional flag parenthesized list * optional date/time string; message literal **)
+  | Cmd_Append of string * mailboxFlags list option * Dates.ImapTime.t option * literal (** mailbox name * optional flag parenthesized list * optional date/time string; message literal **)
   | Cmd_Idle
   | Cmd_Done
 

@@ -14,7 +14,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 {
-open Core.Std
 open Lexing
 open Parser
 open Printf
@@ -45,9 +44,12 @@ let date = group ("\"" ^ dd ^ "-" ^ mon ^ "-" ^ yyyy ^ " " ^ time ^ " " ^ zone ^
     (Str.search_forward (Str.regexp date) str 0) >= 0
   with _ -> false
 
+module MapStr = Map.Make(String)
 
-let flags_table = String.Table.create()
-    let _ = List.iter 
+let flags_table = 
+  List.fold_left
+  (fun acc (kwd,tok) -> MapStr.add kwd tok acc)
+  MapStr.empty
   [
    "Deleted"            ,FLDELETED;
    "deleted"            ,FLDELETED;
@@ -59,11 +61,13 @@ let flags_table = String.Table.create()
    "flagged"            ,FLFLAGGED;
    "Seen"               ,FLSEEN;
    "seen"               ,FLSEEN;
-  ] (fun (kwd, tok) -> Hashtbl.add_exn flags_table kwd tok)
+  ] 
 
 
-let keyword_table = String.Table.create()
-    let _ = List.iter 
+let keyword_table = 
+  List.fold_left
+  (fun acc (kwd,tok) -> MapStr.add kwd tok acc)
+  MapStr.empty
  [ "ALL"		,ALL;
    "ANSWERED"		,ANSWERED;
    "APPEND"		,APPEND;
@@ -158,7 +162,7 @@ let keyword_table = String.Table.create()
    "UNFLAGGED"		,UNFLAGGED;
    "UNKEYWORD"		,UNKEYWORD;
    "UNSUBSCRIBE"	,UNSUBSCRIBE;
-   "UNSEEN"		,UNSEEN  ] (fun (kwd, tok) -> Hashtbl.add_exn keyword_table kwd tok)
+   "UNSEEN"		,UNSEEN  ] 
 }
 
 let number = ['0'-'9']+
@@ -196,7 +200,7 @@ rule read context =
   | anychar as cmd              { debug "l:maybe cmd %s\n%!" cmd;
                                 if !context <> `Tag then (
                                   try 
-                                    Hashtbl.find_exn keyword_table (String.uppercase cmd) 
+                                    MapStr.find (String.uppercase cmd) keyword_table 
                                   with Not_found -> 
                                     debug "l:command not found %s\n%!" cmd; 
                                     ATOM_CHARS (cmd)
@@ -204,7 +208,7 @@ rule read context =
                                   debug "l:tag %s\n" cmd; context := `Any; TAG (cmd)
                                 )
                                 }
-  | '\\' (atom_chars as fl)       { debug "l:flag %s\n%!" fl; try Hashtbl.find_exn flags_table fl
+  | '\\' (atom_chars as fl)       { debug "l:flag %s\n%!" fl; try MapStr.find fl flags_table 
                                   with Not_found -> 
                                     FLEXTENSION (fl)
                                 }

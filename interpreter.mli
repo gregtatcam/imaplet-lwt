@@ -27,7 +27,7 @@ val exec_fetch : int -> sequence -> Mailbox.Message.t ->
   mailbox_message_metadata -> fetch -> int64 option -> bool -> string option
 
 val exec_store : mailbox_message_metadata->int -> sequence ->
-  storeFlags -> mailboxFlags list -> Core.Std.Int64.t option -> bool -> 
+  storeFlags -> mailboxFlags list -> Int64.t option -> bool -> 
   [`Ok of mailbox_message_metadata*string|`Silent of mailbox_message_metadata|`Modseqfailed of int |`None]
 
 val exec_seq : sequence -> int -> bool

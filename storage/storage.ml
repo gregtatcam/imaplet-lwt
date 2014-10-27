@@ -14,7 +14,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 open Lwt
-open Core.Std
 open Storage_meta
 open Imaplet_types
 open Email_message

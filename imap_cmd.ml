@@ -14,7 +14,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 open Lwt
-open Core.Std
 open Imaplet_types
 open Response
 open Regex
@@ -108,13 +107,13 @@ let handle_done context =
 **)
 let handle_authenticate context auth_type text =
   Account.authenticate auth_type text >>= function
-    | Ok (m,u) -> response context (Some State_Authenticated) m (Some (Amailbox.create u))
-    | Error e -> response context None e None
+    | `Ok (m,u) -> response context (Some State_Authenticated) m (Some (Amailbox.create u))
+    | `Error e -> response context None e None
 
 let handle_login context user password =
   Account.login user password >>= function
-    | Ok (m,u) -> response context (Some State_Authenticated) m (Some (Amailbox.create u))
-    | Error e -> response context None e None
+    | `Ok (m,u) -> response context (Some State_Authenticated) m (Some (Amailbox.create u))
+    | `Error e -> response context None e None
 
 let handle_starttls context =
  let open Server_config in
@@ -140,9 +139,9 @@ let quote_file file =
     file
 
 let list_resp flags file =
-  let flags_str = String.concat ~sep:" " flags in
+  let flags_str = String.concat " " flags in
   let l = List.concat [["LIST ("]; [flags_str]; [") \"/\" "]; [quote_file file]] in 
-  Resp_Untagged(String.concat ~sep:"" l)
+  Resp_Untagged(String.concat "" l)
 
 let handle_list context reference mailbox lsub =
   begin
@@ -176,8 +175,8 @@ let handle_select context mailbox condstore rw =
        *)
       context.highestmodseq := `Sessionstart header.modseq;
       let (flags,prmnt_flags) = Configuration.get_mbox_flags in
-      let flags = to_plist (String.concat ~sep:" " flags) in
-      let pflags = to_plist (String.concat ~sep:" " prmnt_flags) in
+      let flags = to_plist (String.concat " " flags) in
+      let pflags = to_plist (String.concat " " prmnt_flags) in
       write_resp context.!netw (Resp_Untagged ("FLAGS " ^ flags)) >>
       write_resp context.!netw (Resp_Ok (Some RespCode_Permanentflags, pflags)) >>
       write_resp context.!netw (Resp_Untagged ((string_of_int header.count) ^ " EXISTS")) >>
@@ -235,7 +234,7 @@ let handle_status context mailbox optlist =
   )
   else
   (
-    let output = (List.fold optlist ~init:"" ~f:(fun acc opt ->
+    let output = (List.fold_left (fun acc opt ->
       let str = (match opt with
       | Stat_Highestmodseq -> "HIGHESTMODSEQ " ^ (Int64.to_string header.modseq)
       | Stat_Messages -> "EXISTS " ^ (string_of_int header.count)
@@ -248,7 +247,7 @@ let handle_status context mailbox optlist =
         acc ^ str
       else
         acc ^ " " ^ str
-    )) in
+    ) "" optlist) in
     write_resp context.!netw (Resp_Untagged (to_plist output)) >>
     response context None (Resp_Ok(None, "STATUS completed")) None
   )
@@ -267,17 +266,17 @@ let idle_clients context =
   in
   match Amailbox.user context.!mailbox with
   |Some user ->
-    let idle = List.foldi context.!connections ~init:[] ~f:(fun i acc (ctx:client_context) ->
+    let (_,idle) = List.fold_left (fun (i,acc) (ctx:client_context) ->
       if ctx.user = user then 
-        i :: acc
+        i+1,i :: acc
       else
-        acc
-    ) in
+        i+1,acc
+    ) (0,[]) context.!connections in
     if List.length idle > 0 then (
       get_status () >>= function
       | Some status ->
         Lwt_list.iter_s (fun i ->
-          let ctx = List.nth_exn context.!connections i in
+          let ctx = List.nth context.!connections i in
           Printf.printf "=========== idle_clients %s %s\n%!" (Int64.to_string ctx.id) ctx.user;
           write_resp_untagged ctx.outch ("EXISTS " ^ (string_of_int status.count)) >>
           write_resp_untagged ctx.outch ("RECENT " ^ (string_of_int status.recent))
@@ -329,7 +328,7 @@ let rec print_search_tree t indent =
   match t with
   | Key k -> Printf.printf "%s-key\n%!" indent
   | KeyList k -> Printf.printf "%s-key list %d\n%!" indent (List.length k);
-    List.iter k ~f:(fun i -> print_search_tree i indent)
+    List.iter (fun i -> print_search_tree i indent) k
   | NotKey k -> Printf.printf "%s-key not\n%!" indent; print_search_tree k indent
   | OrKey (k1,k2) -> Printf.printf "%s-key or\n%!" indent; print_search_tree k1 indent; print_search_tree k2 indent
 
@@ -347,12 +346,12 @@ let handle_search context charset search buid =
       |None -> ""
       |Some modseq -> " (MODSEQ " ^ (Int64.to_string modseq) ^ ")"
     in
-    write_resp context.!netw (Resp_Untagged ((List.fold r ~init:""  ~f:(fun acc i ->
+    write_resp context.!netw (Resp_Untagged ((List.fold_left (fun acc i ->
       let s = string_of_int i in
       if acc = "" then 
         s 
       else 
-        s ^ " " ^ acc)
+        s ^ " " ^ acc) "" r
     ) ^ modseq)) >>
     response context None (Resp_Ok(None, "SEARCH completed")) None
 
@@ -364,7 +363,7 @@ let handle_fetch context sequence fetchattr changedsince buid =
   | `NotExists -> response context None (Resp_No(None,"Mailbox doesn't exist")) None
   | `NotSelectable ->  response context None (Resp_No(None,"Mailbox is not selectable")) None
   | `Error e -> response context None (Resp_No(None,e)) None
-  | `Ok -> 
+  | `Ok ->
     response context None (Resp_Ok(None, "FETCH completed")) None
 
 let handle_store context sequence flagsatt flagsval changedsince buid =
@@ -381,7 +380,7 @@ let handle_store context sequence flagsatt flagsval changedsince buid =
       if List.length modified = 0 then
         "completed",""
       else
-        "failed","[MODIFIED " ^ (String.concat ~sep:"," modified) ^ "] " in
+        "failed","[MODIFIED " ^ (String.concat "," modified) ^ "] " in
     idle_clients context >>= fun () ->
     response context None (Resp_Ok(None, modified ^ conditional ^ "STORE " ^ success)) None
 
@@ -448,7 +447,7 @@ let handle_selected context = function
 
 let handle_command context =
   let state = context.!state in
-  let command = (Stack.top_exn context.!commands).command in
+  let command = (Stack.top context.!commands).command in
   match command with
   | Any r -> Printf.printf "handling any\n%!"; handle_any context r
   | Notauthenticated r when state = State_Notauthenticated-> 
@@ -540,11 +539,12 @@ let get_command context =
     let current_cmd = 
     (
       let current_cmd = (Parser.request (Lex.read (ref `Tag)) lexbuff) in
-      Printf.printf "get_request_context, returned from parser\n%!"; Out_channel.flush stdout;
+      Printf.printf "get_request_context, returned from parser\n%!"; Pervasives.flush stdout;
       (* if last command idle then next could only be done *)
-      match Stack.top context.!commands with
-      |None -> current_cmd
-      |Some last_cmd -> 
+      if Stack.is_empty context.!commands then
+        current_cmd
+      else (
+        let last_cmd = Stack.top context.!commands in
         if is_idle last_cmd then (
           if is_done current_cmd = false then
             raise ExpectedDone 
@@ -552,9 +552,14 @@ let get_command context =
             {current_cmd with tag = last_cmd.tag}
         ) else
           current_cmd
+      )
     ) in
-    let _ = Stack.pop context.!commands in
-    Stack.push context.!commands current_cmd;
+    begin
+    try
+    let _ = Stack.pop context.!commands in ()
+    with _ -> ()
+    end;
+    Stack.push current_cmd context.!commands ;
     return (`Ok )
   )
   (function 
@@ -563,7 +568,7 @@ let get_command context =
   | Interpreter.InvalidSequence -> return (`Error ("bad command, invalid sequence"))
   | Dates.InvalidDate -> return (`Error("bad command, invalid date"))
   | ExpectedDone -> return (`Error("Expected DONE"))
-  | e -> return (`Error(Exn.backtrace()))
+  | e -> return (`Error(Printexc.get_backtrace()))
   )
 
 let rec client_requests context =
@@ -575,7 +580,7 @@ let rec client_requests context =
       if context.!state = State_Logout then
         return `Done
       else (
-        let command = Stack.top_exn context.!commands in
+        let command = Stack.top context.!commands in
         write_resp context.!netw ~tag:command.tag response >> client_requests context
       )
   )

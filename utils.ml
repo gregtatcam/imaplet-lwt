@@ -13,6 +13,7 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
+open Sexplib
 open Imaplet_types
 
 let formated_capability capability =
@@ -88,9 +89,8 @@ let message_of_string postmark email =
    Message.email = Email.of_string email}
 
 let make_email_message message =
-  let open Core.Std in
   let size = String.length message in
-  let headers = String.slice message 0 (if size < 1024 * 5 then size else 1024 * 5) in
+  let headers = String.sub message 0 (if size < 1024 * 5 then size else 1024 * 5) in
   if Regex.match_regex headers ~regx:"^\\(From [^\r\n]+\\)[\r\n]+?" then ( 
     let post = Str.matched_group 1 headers in
     let email = Str.last_chars message (size - (String.length
@@ -111,12 +111,39 @@ let make_email_message message =
         if Regex.match_regex buff ~regx:"^Date: \\([.]+\\)[\r\n]+" then (
           try 
             Dates.email_to_date_time_exn (Str.matched_group 1 buff)
-          with _ -> Time.now()
+          with _ -> Dates.ImapTime.now()
         ) else
-          Time.now()
+          Dates.ImapTime.now()
       in
       Dates.postmark_date_time ~time ()
     in
     let post = ("From " ^ (from headers) ^ " " ^ (date_time headers)) in
     (message_of_string post message)
   )
+
+let option_value o ~default = 
+  match o with
+  | Some v -> v
+  | None -> default
+
+let option_value_exn = function
+  | Some v -> v
+  | None -> raise Not_found
+
+let list_find l f =
+  try
+    let _ = List.find f l in true
+  with _ -> false
+
+let list_findi l f =
+  let rec findi l i f =
+    if i >= List.length l then
+      None
+    else (
+      if f i (List.nth l i) then
+        Some (i, List.nth l i)
+      else
+        findi l (i+1) f
+    )
+  in
+  findi l 0 f

@@ -40,12 +40,11 @@ let create_srv_socket () =
     for <dovecot@localhost>; Thu, 17 Jul 2014 14:53:00 +0100 (BST)
 *)
 let add_postmark from_ msg =
-  let open Core.Std in
-  let open Core.Std.Unix in
   let open Regex in
   if match_regex msg ~regx:"^From " = true then
     msg
   else (
+    let open Unix in
     let from = "From " ^ from_ in 
     let date = 
       if match_regex msg ~regx:smtp_date_regex = true then (
@@ -54,8 +53,8 @@ let add_postmark from_ msg =
         in
         (matched 1) ^ " " ^ (matched 5) ^ " " ^ (matched 2) ^ " " ^ (matched 7) ^ " " ^ (matched 6)
       ) else (
-        let tm = Unix.gmtime (Time.to_float (Time.now())) in
-        (sprintf "%s %s %d %02d:%02d:%02d %d" 
+        let tm = Unix.gmtime (Unix.time()) in
+        (Printf.sprintf "%s %s %d %02d:%02d:%02d %d" 
         (Dates.day_of_week tm.tm_wday) (Dates.int_to_month tm.tm_mon) tm.tm_mday 
         tm.tm_hour tm.tm_min tm.tm_sec (tm.tm_year + 1900)) 
       )
@@ -187,8 +186,9 @@ let rec requests inchan outchan buffer what =
       | `Done -> return ()
       | _ -> requests inchan outchan buffer what
   )
-  (fun ex -> Printf.printf "imaplet_lmtp: connection closed %s\n%!" (Core.Exn.backtrace()); return ())
-  with ex -> Printf.printf "imaplet_lmtp: exception %s\n" (Core.Exn.to_string ex); return ()
+  (fun ex -> Printf.printf "imaplet_lmtp: connection closed %s\n%!"
+  (Printexc.get_backtrace()); return ())
+  with ex -> Printf.printf "imaplet_lmtp: exception %s\n" (Printexc.to_string ex); return ()
  
 let process socket =
   Printf.printf "imaplet_lmtp: processing socket\n%!";

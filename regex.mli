@@ -70,3 +70,5 @@ val lappend_regex : string
 val fixregx_mbox : string -> string
 
 val smtp_date_regex : string
+
+val sys_date_time_regex : string

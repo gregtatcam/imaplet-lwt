@@ -13,7 +13,6 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
-open Core.Std
 open Context
 
 (* synchronization, is it needed ? *)
@@ -21,27 +20,25 @@ let connections: client_context list ref = ref []
 let connid = ref Int64.zero
 
 let next_id () =
-  connid := Int64.(+) !connid Int64.one;
+  connid := Int64.add !connid Int64.one;
   !connid
 
 let rem_id id =
-  let open Core.Std in
-  connections := List.fold !connections ~init:[] ~f:(fun acc (i:client_context) ->
-  if Int64.equal id i.id then
+  connections := List.fold_left (fun acc (i:client_context) ->
+  if Int64.compare id i.id = 0 then
     acc
   else
     i :: acc
-  )
+  ) [] !connections
 
 let add_id id user outch capability =
   connections := {id;user;outch;capability = ref []} :: !connections
 
 let add_capability id cap =
-  let open Core.Std in
-  connections := List.fold !connections ~init:[] ~f:(fun acc (i:client_context) ->
-  if Int64.equal id i.id then (
+  connections := List.fold_left (fun acc (i:client_context) ->
+  if Int64.compare id i.id = 0 then (
     let capability = cap :: i.!capability in
     {i with capability = ref capability} :: acc
   ) else
     i :: acc
-  )
+  ) [] !connections

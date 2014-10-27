@@ -14,7 +14,7 @@ Executable imaplet
   CompiledObject  : native
   BuildTools	  : ocamlbuild
   MainIs	  : imaplet.ml
-  BuildDepends	  : core,lwt,lwt.unix,lwt.syntax,tls.lwt,sexplib,sexplib.syntax,threads,str,cstruct.unix,irmin.unix,irmin.backend,email_message,nocrypto
+  BuildDepends	  : lwt,lwt.unix,lwt.syntax,tls.lwt,sexplib.syntax,threads,str,cstruct.unix,irmin.unix,irmin.backend,email_message,nocrypto
   DataFiles	  : certificates/server.pem($datadir/imaplet),certificates/server.key($datadir/imaplet),imaplet.cf($datadir/imaplet),users($datadir/imaplet)
 
 Executable imaplet_lmtp
@@ -24,7 +24,7 @@ Executable imaplet_lmtp
   CompiledObject  : native
   BuildTools	  : ocamlbuild
   MainIs	  : imaplet_lmtp.ml
-  BuildDepends	  : core,lwt,lwt.unix,lwt.syntax,str,threads
+  BuildDepends	  : lwt,lwt.unix,lwt.syntax,str,threads,sexplib.syntax
 
 Executable imaplet_irmin_read
   Build		  : true

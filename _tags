@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: 114e8fe1436aad29cffe4dab329ed899)
+# DO NOT EDIT (digest: bae7c51f771f188fe1bc0059f5a1a712)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -14,7 +14,6 @@
 "_darcs": -traverse
 "_darcs": not_hygienic
 # Executable imaplet
-"imaplet.native": pkg_core
 "imaplet.native": pkg_cstruct.unix
 "imaplet.native": pkg_email_message
 "imaplet.native": pkg_irmin.backend
@@ -23,23 +22,20 @@
 "imaplet.native": pkg_lwt.syntax
 "imaplet.native": pkg_lwt.unix
 "imaplet.native": pkg_nocrypto
-"imaplet.native": pkg_sexplib
 "imaplet.native": pkg_sexplib.syntax
 "imaplet.native": pkg_str
 "imaplet.native": pkg_threads
 "imaplet.native": pkg_tls.lwt
 <*.ml{,i}>: pkg_cstruct.unix
 <*.ml{,i}>: pkg_nocrypto
-<*.ml{,i}>: pkg_sexplib
 <*.ml{,i}>: pkg_tls.lwt
 # Executable imaplet_lmtp
-"imaplet_lmtp.native": pkg_core
 "imaplet_lmtp.native": pkg_lwt
 "imaplet_lmtp.native": pkg_lwt.syntax
 "imaplet_lmtp.native": pkg_lwt.unix
+"imaplet_lmtp.native": pkg_sexplib.syntax
 "imaplet_lmtp.native": pkg_str
 "imaplet_lmtp.native": pkg_threads
-<*.ml{,i}>: pkg_core
 <*.ml{,i}>: pkg_lwt.syntax
 # Executable imaplet_irmin_read
 "imaplet_irmin_read.native": pkg_email_message

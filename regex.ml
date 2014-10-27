@@ -74,7 +74,7 @@ let tag = "[^\r\n{()%*\"\\ ]+"
 
 let optional re = (group re) ^ "?"
 
-let orxl l = Core.Std.String.concat l ~sep:"\\|"
+let orxl l = String.concat "\\|" l
 
 let all_of_it re = "^" ^ re ^ "$"
 
@@ -96,9 +96,13 @@ let fixregx_mbox mailbox =
 (* date regex *)
 let mon = group "Jan\\|Feb\\|Mar\\|Apr\\|May\\|Jun\\|Jul\\|Aug\\|Sep\\|Oct\\|Nov\\|Dec"
 
+let mon1 = group "[0-9][0-9]"
+
 let dayofweek = group "Sun\\|Mon\\|Tue\\|Wed\\|Thu\\|Fri\\|Sat\\|Sun"
 
 let dd = group ( orx ( group "[0-9]") (group "[0-9][0-9]"))
+
+let dd1 = group "[0-9][0-9]"
 
 let dd_fixed = group ( orx ( group " [0-9]") (group "[0-9][0-9]"))
 
@@ -106,7 +110,11 @@ let yyyy = group "[0-9][0-9][0-9][0-9]"
 
 let time = group "[0-9][0-9]:[0-9][0-9]:[0-9][0-9]"
 
+let time1 = (group "[0-9][0-9]:[0-9][0-9]:[0-9][0-9]") ^ (group ".[0-9]+") ^ "?"
+
 let zone = group "[+-][0-9][0-9][0-9][0-9]"
+
+let zone1 = (group "[+-][0-9][0-9]:[0-9][0-9]") ^ "?"
 
 let date_regex =
   dd ^ "-" ^ mon ^ "-" ^ yyyy
@@ -126,6 +134,10 @@ let email_date_regex =
 (* Thu, 17 Jul 2014 14:53:00 +0100 (BST) *)
 let smtp_date_regex =
   dayofweek ^ ", " ^ email_date_regex
+
+(* 2014-10-25 09:25:47.045025+01:00 *)
+let sys_date_time_regex =
+  yyyy ^ "-" ^ mon1 ^ "-" ^ dd1 ^ " " ^ time1 ^ zone1
 
 (* append regex *)
 let append_regex =

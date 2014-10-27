@@ -14,7 +14,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 open Lwt
-open Core.Std
 open Imaplet_types
 open Storage_meta
 
@@ -63,7 +62,7 @@ val unsubscribe : t -> string -> [`Error of string|`Ok] Lwt.t
 
 (** append message to the mailbox **)
 val append : t -> string -> Lwt_io.input_channel -> Lwt_io.output_channel -> 
-  mailboxFlags list option -> Time.t option ->
+  mailboxFlags list option -> Dates.ImapTime.t option ->
   literal -> ([`NotExists|`NotSelectable|`Eof of int|`Error of string|`Ok] Lwt.t)
 
 (** sarch messages for the matching criteria **)

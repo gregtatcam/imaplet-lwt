@@ -51,12 +51,18 @@ let config () =
     "./imaplet.cf"
 
 let srv_config = 
-  let open Core.Std in
   let lines =
     try
-      In_channel.with_file (config ()) ~f:(fun ic -> 
-        In_channel.input_lines ic
-      )
+      let ic = Pervasives.open_in (config ()) in
+      let rec in_lines acc =
+        try
+          let line = Pervasives.input_line ic in
+          in_lines (line :: acc)
+        with _ -> acc
+      in
+      let lines = in_lines [] in
+      Pervasives.close_in ic;
+      lines
     with _ -> []
   in
   Printf.printf "##### loading configuration file #####\n%!";
@@ -95,7 +101,7 @@ let srv_config =
     if matched then (
       let n = Str.matched_group 1 hd in
       let v = Str.matched_group 2 hd in
-      let v = String.strip ~drop:(fun c -> c = '"') v in
+      let v = Regex.replace ~regx:"\"" ~tmpl:"" v in
       let log n v = Printf.printf "%s: invalid value %s\n%!" n v in
       let ival n v default = try int_of_string v with _ -> log n v; default in
       let bval n v default = try bool_of_string v with _ -> log n v; default in

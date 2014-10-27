@@ -13,10 +13,9 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
-open Core.Std
 
 val authenticate : Imaplet_types.authtype -> string ->
-  (Imaplet_types.response * string, Imaplet_types.response) Result.t Lwt.t
+  [`Ok of Imaplet_types.response * string | `Error of Imaplet_types.response] Lwt.t
 
 val login : string -> string ->
-  (Imaplet_types.response * string, Imaplet_types.response) Result.t Lwt.t
+  [`Ok of Imaplet_types.response * string | `Error of Imaplet_types.response] Lwt.t

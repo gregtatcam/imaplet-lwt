@@ -13,7 +13,7 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
-open Core.Std
+open Sexplib.Std
 open Imaplet_types
 
 type mailbox_metadata = {
@@ -35,7 +35,7 @@ type mbox_mailbox_metadata = {
 type mailbox_message_metadata = {
   uid: int;
   modseq: int64;
-  internal_date: Time.t;
+  internal_date: Dates.ImapTime.t;
   size: int;
   flags: mailboxFlags list;
 } with sexp
@@ -49,9 +49,9 @@ type mbox_message_metadata = {
 type mbox_index = [`Header of mbox_mailbox_metadata | `Record of mbox_message_metadata]
 
 let new_uidvalidity() =
-  let t = Time.now() in
-  let f = (Time.to_float t) in
-  string_of_int (Float.to_int f)
+  let t = Dates.ImapTime.now() in
+  let f = (Dates.ImapTime.to_float t) in
+  string_of_int (Pervasives.int_of_float f)
 
 let empty_mailbox_metadata ?uidvalidity ?(selectable=true) () =
   let uidvalidity =
@@ -59,7 +59,7 @@ let empty_mailbox_metadata ?uidvalidity ?(selectable=true) () =
   {uidvalidity;modseq=Int64.zero;uidnext=1;count=0;unseen=0;nunseen=0;recent=0;selectable}
 
 let empty_mailbox_message_metadata() =
-  {uid=1;modseq=Int64.zero;internal_date=Time.now();size=0;flags=[]}
+  {uid=1;modseq=Int64.zero;internal_date=Dates.ImapTime.now();size=0;flags=[]}
 
 let empty_mbox_message_metadata() =
   {metadata=empty_mailbox_message_metadata();start_offset=Int64.zero;end_offset=Int64.zero}

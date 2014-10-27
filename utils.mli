@@ -13,6 +13,8 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
+open Sexplib
+
 val formated_capability : string -> string
 
 val formated_id : string -> string
@@ -28,3 +30,11 @@ val substr : string -> start:int -> size:(int option)-> string
 val concat_path : string -> string -> string
 
 val make_email_message : string -> Email_message.Mailbox.Message.t
+
+val option_value : 'a option -> default:'a -> 'a
+
+val option_value_exn : 'a option -> 'a
+
+val list_find : 'a list -> ('a -> bool) -> bool
+
+val list_findi : 'a list -> (int -> 'a -> bool) -> (int * 'a) option

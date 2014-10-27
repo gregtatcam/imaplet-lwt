@@ -68,7 +68,6 @@ let accept_cmn sock =
   return (Some sock_c,(ic,oc))
 
 let rec accept_conn sock cert = 
-  let open Core.Std in
   catch (fun () ->
   match cert with
   | Some cert -> accept_ssl sock cert
@@ -77,17 +76,18 @@ let rec accept_conn sock cert =
   (fun ex ->
   match ex with
   | End_of_file -> accept_conn sock cert
-  | _ -> Printf.printf "imaplet: accept_conn exception %s %s\n%!" (Exn.to_string ex) 
-    (Exn.backtrace()); accept_conn sock cert
+  | _ -> Printf.printf "imaplet: accept_conn exception %s %s\n%!" (Printexc.to_string ex) 
+    (Printexc.get_backtrace()); accept_conn sock cert
   )
 
 (* init local delivery *)
 let init_local_delivery () =
-  let open Core.Std in
-  let _ = Unix.fork_exec
-  ~prog:(Configuration.lmtp_srv_exec)
-  ~args:[Configuration.lmtp_srv_exec] () in
-  ()
+  let pid = Unix.fork() in
+  if pid <> 0 then
+    ()
+  else (
+    Unix.execv Configuration.lmtp_srv_exec [|Configuration.lmtp_srv_exec|]
+  )
 
 (* initialize all things *)
 let init_all ssl =
@@ -99,7 +99,6 @@ let init_all ssl =
     return None
 
 let init_connection w =
-  let open Core.Std in
   Printf.printf "imaplet: writing initial capability response to client\n%!";
   catch( fun () ->
   let resp = "* OK [CAPABILITY " ^ Configuration.capability ^ "] Imaplet ready.\r\n" in
@@ -107,7 +106,7 @@ let init_connection w =
   Lwt_io.flush w
   )
   (fun ex ->
-    Printf.printf "imaplet: exception writing initial capability %s\n%!" (Exn.to_string ex);
+    Printf.printf "imaplet: exception writing initial capability %s\n%!" (Printexc.to_string ex);
     return ()
   )
 
@@ -115,14 +114,13 @@ let starttls sock () =
   Ssl_.init_ssl() >>= fun cert ->
   Tls_lwt.Unix.server_of_fd
     (Tls.Config.server ~certificate:cert ())
-    (Core.Std.Option.value_exn sock) >>= fun srv ->
+    (Utils.option_value_exn sock) >>= fun srv ->
   return (Tls_lwt.of_t srv)
 
 (**
  * start accepting connections
 **)
 let create () =
-  let open Core.Std in
   let open Connections in
   let open Server_config in
   let open Context in

@@ -36,9 +36,8 @@ module SequenceIterator :
 
     (* is this a single or a range *)
     let single seq =
-      let open Core.Std in
       if List.length seq = 1 then
-        match (List.hd_exn seq) with
+        match (List.hd seq) with
         | SeqNumber sn ->
           (
           match sn with
@@ -51,7 +50,6 @@ module SequenceIterator :
 
     (* get next in sequence *)
     let next t = 
-      let open Core.Std in
       let s,nc,c,cmax,min,max = t in
       let get_n m = function
         | Number n -> n
@@ -64,11 +62,10 @@ module SequenceIterator :
       in
       c := !c + 1;
       if !c > !cmax then (
-        let seq = List.nth s !nc in
-        match seq with
-        | None -> `End
-        | Some seq ->
-          (
+        if !nc >= List.length s then
+          `End
+        else (
+          let seq = List.nth s !nc in
           nc := !nc + 1; (* ref to the next element in the sequence *)
           match seq with
           | SeqNumber sn ->
@@ -78,7 +75,7 @@ module SequenceIterator :
             )
           | SeqRange (sn1,sn2) ->
               update (get_n min sn1) (get_n max sn2)
-          )
+        )
       ) else
         `Ok !c
   end

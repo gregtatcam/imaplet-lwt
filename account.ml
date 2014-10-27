@@ -13,7 +13,6 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
-open Core.Std
 open Lwt
 open Imaplet_types
 open Utils
@@ -46,7 +45,7 @@ let parse_users buff user password =
 
 let parse_user_b64 b64 =
   try 
-   let buff = try String.chop_suffix_exn b64 ~suffix:"=" with _ -> b64 in 
+   let buff = Str.global_replace (Str.regexp "=$") "" b64 in
    let buff = Cstruct.to_string (Nocrypto.Base64.decode (Cstruct.of_string buff)) in (** need to log this if it fails **)
    let _ = Str.search_forward (Str.regexp
    "^\\([^\\]+\\)\000\\([^\\]+\\)\000\\([^\\]+\\)$") buff 0 in
@@ -78,22 +77,22 @@ let authenticate_user ?(users=Install.users_path) user password =
 let auth_user user password resp_ok resp_no =
   authenticate_user user password >>= fun res ->
   if res then
-    return (Ok (Resp_Ok
+    return (`Ok (Resp_Ok
     (None,Utils.formated_capability(Configuration.auth_capability)), user))
   else
-    return (Error (Resp_No (None,resp_no)))
+    return (`Error (Resp_No (None,resp_no)))
 
 let plain_auth text =
   match (parse_user_b64 text) with
   | Some (u,p) -> auth_user u p "AUTHENTICATE" "PASSWORD"
-  | None -> return (Error (Resp_No (None,"PASSWORD")))
+  | None -> return (`Error (Resp_No (None,"PASSWORD")))
 
 (** TBD authenticate plain against users file **)
 let authenticate auth_type text =
-  printf "authenticating %s----\n%!" text;
+  Printf.printf "authenticating %s----\n%!" text;
   match auth_type with 
     | Auth_Plain -> plain_auth text
-    | _ -> return (Error (Resp_No (None,"Authentication Type")))
+    | _ -> return (`Error (Resp_No (None,"Authentication Type")))
 
 (** TBD **)
 let login user password = auth_user user password "LOGIN" "PASSWORD"

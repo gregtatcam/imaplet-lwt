@@ -13,19 +13,27 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
-open Core.Std
 open Email_message
 open Imaplet_types
 open Regex
 open Storage_meta
 open Utils
 open Dates
+open Printf
 
 exception InvalidSequence
 
 exception ExecDone
 
 exception InvalidMessage
+
+module MapStr = Map.Make(String)
+
+let map_find map key =
+  if MapStr.mem key map then
+    Some (MapStr.find key map)
+  else
+    None
 
 type bodystr_fields = {
   btype: string;
@@ -40,16 +48,17 @@ type bodystr_fields = {
 
 let rec raw_content email =
   let hdr_size = String.length (String_monoid.to_string (Header.to_string_monoid (Email.header email))) in
-  String.slice (Email.to_string email) hdr_size 0
+  let email_str = Email.to_string email in
+  Str.last_chars email_str ((String.length email_str) - hdr_size)
 
 let flags_to_string flags =
-  List.fold flags ~init:"" ~f:(fun acc fl -> if acc = "" then fl_to_str fl else
-    acc ^ " " ^ (fl_to_str fl))
+  List.fold_left (fun acc fl -> if acc = "" then fl_to_str fl else
+    acc ^ " " ^ (fl_to_str fl)) "" flags
 
 let media_type (email:Email.t) : Media_type.t =
   try
     let tl = Header.Content_type.all (Email.header email) in
-    (List.nth_exn tl 0)
+    (List.nth tl 0)
   with _ -> (** set to text?? **)
     Media_type.of_string "text/plain; charset=us-ascii"
 
@@ -77,18 +86,18 @@ let get_message_email (email:Email.t) (stream:Octet_stream.t) : Email.t option =
       None
   with _ -> None
 
-let headers_to_map (headers:Header.t) : ('a,'b,'c)Map.t =
+let headers_to_map (headers:Header.t) =
   let hl = Header.to_list headers in
-  List.fold hl ~init:(Map.empty ~comparator:String.comparator)
-  ~f:(fun map (k,v) -> Map.add map ~key:(String.lowercase k) ~data:(String.strip
-  ~drop:(fun c -> c = ' ') v))
+  List.fold_left 
+  (fun map (k,v) -> MapStr.add (String.lowercase k) (replace ~regx:" " ~tmpl:"" v) map) 
+    MapStr.empty hl
 
 let map_of_alist (l:string list) =
-  let l = List.dedup ~compare:String.compare l in
-  List.fold l ~init:String.Map.empty ~f:(fun m i -> Map.add m ~key:i ~data:())
+  List.fold_left (fun m i -> MapStr.add i () m) MapStr.empty l
 
 let domatch (tomatch:string list) (header:string) : bool =
-  List.find tomatch ~f:(fun regex -> match_regex ~case:false header ~regx:regex) <> None
+  list_find tomatch
+    (fun regex -> match_regex ~case:false header ~regx:regex) 
 
 let rec fold_email (email:Email.t) ~(init:'a) ~(f:('a -> Email.t -> 'a)) : 'a =
   let cont = Email.content email in
@@ -96,42 +105,41 @@ let rec fold_email (email:Email.t) ~(init:'a) ~(f:('a -> Email.t -> 'a)) : 'a =
   | `Data cont -> (f init email)
   | `Message email -> fold_email email ~init ~f
   | `Multipart lemail -> 
-    List.fold lemail ~init ~f:(fun acc email ->
+    List.fold_left (fun acc email ->
       fold_email email ~init:acc ~f
-    )
+    ) init lemail
 
-let fold_email_headers ?(incl=String.Map.empty) ?(excl=String.Map.empty)
+let fold_email_headers ?(incl=MapStr.empty) ?(excl=MapStr.empty)
 ?(regex=false)
 (headers:Header.t) ~(init:'a) ~(f:('a -> (string*string) -> 'a)) : 'a =
   let headers = (Header.to_list headers) in
-  List.fold headers
-  ~init
-  ~f:(fun acc (name,value) ->
+  List.fold_left 
+  (fun acc (name,value) ->
     if regex then (
-      let incl = Map.keys incl in
-      let excl = Map.keys excl in
-      if List.is_empty incl = false && (domatch incl name) = false then (
+      let incl = MapStr.fold (fun k _ acc -> k::acc) incl [] in
+      let excl = MapStr.fold (fun k _ acc -> k::acc) excl [] in
+      if List.length incl > 0 && (domatch incl name) = false then (
         acc
-      ) else if List.is_empty excl = false && (domatch excl name) = true then (
+      ) else if List.length excl > 0 && (domatch excl name) = true then (
         acc
       ) else (
         f acc (name,value)
       )
     ) else (
-      if (Map.is_empty incl) = false && (Map.find incl name) = None then (
+      if (MapStr.is_empty incl) = false && (map_find incl name ) = None then (
         acc
-      ) else if (Map.is_empty excl) = false && (Map.find excl name) <> None then (
+      ) else if (MapStr.is_empty excl) = false && (map_find excl name) <> None then (
         acc
       ) else (
         f acc (name,value)
       )
     )
-  )
+  ) init headers
 
 (** check if internal or deleted message should only use index for this TBD **)
 let should_include (email:Email.t) (record:mailbox_message_metadata) : bool =
   let internal =
-  List.fold (Header.to_list (Email.header email)) ~init:0 ~f:(fun acc (n,v) ->
+  List.fold_left (fun acc (n,v) ->
     if (match_regex ~case:false n ~regx:"from") && 
         (match_regex ~case:false v ~regx:"mail system internal data <mailer-daemon@") then
       acc+1
@@ -140,7 +148,7 @@ let should_include (email:Email.t) (record:mailbox_message_metadata) : bool =
       acc+1
     else
       acc
-  ) in
+  ) 0 (Header.to_list (Email.header email)) in
   if internal = 2 
     (* deleted messages can be searched and fetched - tested in dovecot
       || (List.find record.flags ~f:(fun i -> if i = Flags_Deleted then true else
@@ -174,7 +182,7 @@ let email_content_to_str (email:Email.t) : (string * int )=
   *)
   let str = raw_content email in (str, String.length str)
 
-let email_headers_to_str ?(incl=String.Map.empty) ?(excl=String.Map.empty)
+let email_headers_to_str ?(incl=MapStr.empty) ?(excl=MapStr.empty)
 ?(regex=false) (headers:Header.t) : (string*int) =
   let str =
   fold_email_headers ~excl ~incl ~regex headers
@@ -200,16 +208,16 @@ let email_to_str (email:Email.t) : (string*int) =
   let str = headers ^ content in
   (str,String.length str)
 
-let find_header ?(default="") (headers:('a,'b,'comp)Map.t) (key:string) : (string) =
-  let value = Map.find headers key in
+let find_header ?(default="") headers (key:string) : (string) =
+  let value = map_find headers key in
   match value with
   | None -> default
   | Some value -> quote value
 
-let get_nil_header (headers:('a,'b,'comp)Map.t) (key:string) : string =
+let get_nil_header headers (key:string) : string =
   find_header ~default:"NIL" headers key
 
-let get_blnk_header (headers:('a,'b,'comp)Map.t) (key:string) : string =
+let get_blnk_header headers (key:string) : string =
   find_header headers key
 
 (** build envelope structure for the address:
@@ -231,7 +239,7 @@ let get_mbox_addr (addr:string) : (string) =
   if match_regex addr ~regx:(all_of_it ( (optional "[^<>]+") ^ "<" ^ (group "[^<>]+") ^ ">")) then
     let disp = try Str.matched_group 1 addr with _ -> "" in
     let addr = Str.matched_group 2 addr in
-    dlist_of (( quote  (String.strip ~drop:(fun c -> c = ' ') disp) ) ^ space ^ (get_addr  addr) )
+    dlist_of (( quote  (replace ~regx:" " ~tmpl:"" disp) ) ^ space ^ (get_addr  addr) )
   else
     dlist_of ( (quote "")  ^ space ^ (get_addr addr) )
 
@@ -239,18 +247,17 @@ let get_mbox_addr (addr:string) : (string) =
 let get_mbox_list (group:string) (addr:string) : (string) =
   let lmbx = Str.split (Str.regexp ",") addr in
   dlist_of ((quote "") ^ space ^ (quote "") ^ space ^ (quote group) ^ space ^ (quote "NIL")) ^
-  (List.fold lmbx ~init:"" 
-  ~f:(fun acc i -> 
+  (List.fold_left (fun acc i -> 
     if acc = "" then
       get_mbox_addr i
     else 
       acc ^ space ^ (get_mbox_addr i)
-  )) ^
+  ) "" lmbx) ^
   dlist_of ((quote "") ^ space ^ (quote "") ^ space ^ (quote "NIL") ^ space ^ (quote "NIL"))
 
 (** build envelope structure for the address fields **)
-let rec get_address (headers:('a,'b,'comp)Map.t) (key:string) : string =
-  let value = Map.find headers key in
+let rec get_address headers (key:string) : string =
+  let value = map_find headers key in
   match value with
   | None -> 
     if key = "sender" || key = "reply-to" then
@@ -273,7 +280,7 @@ let exec_fetch_flags (flags:mailboxFlags list) : (string) =
   "FLAGS" ^ space ^ (list_of flags) 
 
 (** fetch internal date **)
-let exec_fetch_internaldate (date:Time.t): (string) =
+let exec_fetch_internaldate (date:Dates.ImapTime.t): (string) =
   "INTERNALDATE" ^ space ^ (quote (date_time_to_email date))
 
 (** fetch internal date **)
@@ -320,11 +327,11 @@ let get_seq_set_exn (str_set:string) : (seq_set) =
   if ( len > 0 && len <= 2) = false then
     raise InvalidSequence
   else if len = 1 then
-    let n = get_seq_number_exn (List.nth_exn num_list 0) in
+    let n = get_seq_number_exn (List.nth num_list 0) in
     SeqNumber (n)
   else
-    let n1 = get_seq_number_exn (List.nth_exn num_list 0) in
-    let n2 = get_seq_number_exn (List.nth_exn num_list 1) in
+    let n1 = get_seq_number_exn (List.nth num_list 0) in
+    let n2 = get_seq_number_exn (List.nth num_list 1) in
     SeqRange (n1,n2)
 
 
@@ -335,8 +342,8 @@ let get_seq_set_exn (str_set:string) : (seq_set) =
  **)
 let get_sequence (sequence:string) : ( seq_set list) =
   let lofset = Str.split (Str.regexp ",") sequence in
-  List.fold lofset ~init:[] ~f:(fun acc range ->
-    let r = get_seq_set_exn range in r :: acc)
+  List.fold_left (fun acc range ->
+    let r = get_seq_set_exn range in r :: acc) [] lofset
 
 let match_seq_num (seq_num:seq_number) (num:int) : (bool) =
   match seq_num with
@@ -364,14 +371,14 @@ let match_seq (seq:seq_set) (num:int) : (bool) =
 if msg_seq is none then match to message UID instead of the seq
 **)
 let exec_seq (seqset:sequence) (msg_seq:int) : (bool) =
-  List.find seqset ~f:(fun seq -> if match_seq seq msg_seq then true else false) <> None
+  list_find seqset (fun seq -> if match_seq seq msg_seq then true else false)
   
 (** match the flag
  * need the index data for this, the headers don't have any flags
  **)
 let exec_flag (flags:mailboxFlags list) (flag:searchFlags) : (bool) =
   let find_flag flags fl =
-    List.find flags ~f:(fun f -> f = fl) <> None
+    list_find flags (fun f -> f = fl)
   in
   match flag with
     | Common flag -> find_flag flags flag
@@ -380,32 +387,33 @@ let exec_flag (flags:mailboxFlags list) (flag:searchFlags) : (bool) =
     | New -> (find_flag flags Flags_Recent) && (find_flag flags Flags_Seen) = false
 
 (** match the date **)
-let exec_hdr_date (headers:('a,'b,'comp) Map.t) (date:Date.t) (op:int->int->bool) : (bool) = 
-  let value = Map.find headers "date" in
+let exec_hdr_date headers (date:Dates.ImapDate.t) (op:int->int->bool) : (bool) = 
+  let value = map_find headers "date" in
   match value with 
   | None -> false
   | Some value -> 
     let tm = email_to_date_time_exn value in
-    let diff = Date.compare date (Time.to_date tm Time.Zone.utc) in
+    let diff = Dates.ImapDate.compare date (Dates.ImapTime.to_date tm) in
     op diff 0
 
 (** match the internal date **)
-let exec_date (internal:Time.t) (date:Date.t) (op:int->int->bool) : (bool) = 
-  let idate = Time.to_date internal Core.Zone.utc in
-  op (Date.compare idate date) 0
+let exec_date (internal:Dates.ImapTime.t) (date:Dates.ImapDate.t) (op:int->int->bool) : (bool) = 
+  let idate = Dates.ImapTime.to_date internal in
+  op (Dates.ImapDate.compare idate date) 0
 
 (** match header field **)
-let exec_hdr (headers:('a,'b,'comp) Map.t) (header:string) (value:string) : (bool) = 
-  let field = Map.find headers (String.lowercase header) in
+let exec_hdr headers (header:string) (value:string) : (bool) = 
+  let field = map_find headers (String.lowercase header) in
   match field with
   | None -> false
   | Some field -> match_regex field ~regx:value
 
-let exec_text (headers:('a,'b,'comp) Map.t) (content:string) (text:string) :
+let exec_text headers (content:string) (text:string) :
   (bool) =
   match_regex content ~regx:text || 
-  (List.find (Map.data headers) ~f:(fun i -> if match_regex i ~regx:text then
-    true else false)) <> None
+  let data = MapStr.fold (fun _ v acc -> v::acc) headers [] in
+  (list_find data (fun i -> if match_regex i ~regx:text then
+    true else false))
 
 (** execute one key **)
 let exec_one_search_key headers content (record:mailbox_message_metadata) seq key =
@@ -423,7 +431,7 @@ let exec_one_search_key headers content (record:mailbox_message_metadata) seq ke
   | Search_Header (header, name) -> exec_hdr headers header name
   | Search_Keyword k -> exec_flag record.flags (Common (Flags_Keyword k))
   | Search_Larger size -> record.size > size
-  | Search_Modseq (_,modseq) -> Int64.(>) record.modseq modseq (* ignoring entry and type *)
+  | Search_Modseq (_,modseq) -> Int64.compare record.modseq modseq > 0(* ignoring entry and type *)
   | Search_New -> exec_flag record.flags (New)
   | Search_Old -> exec_flag record.flags (Old)
   | Search_On date -> exec_date record.internal_date date (=)
@@ -459,14 +467,13 @@ let rec _exec_search_all search_one keys =
   | Key k -> search_one k
   | KeyList kl ->
     (try
-      List.fold kl 
-      ~init:true 
-      ~f:(fun acc k -> 
+      List.fold_left 
+      (fun acc k -> 
         if acc && (_exec_search_all search_one k) = false then
           raise ExecDone
         else
           true
-      )
+      ) true kl
     with ExecDone -> false
     )
   | OrKey (k1,k2) ->
@@ -486,12 +493,12 @@ let rec has_key keys f =
   match keys with
   | Key k -> f k
   | KeyList kl ->
-    List.fold kl ~init:false ~f:(fun acc k ->
+    List.fold_left (fun acc k ->
       if has_key k f then
         raise ExecDone
       else
         false
-    )
+    ) false kl
   | OrKey (k1,k2) -> 
     if has_key k1 f || has_key k2 f then
       raise ExecDone
@@ -517,13 +524,13 @@ functor or another module to hide implementation TBD **)
     false
   else
     let hl = Header.to_list (Email.header email) in
-    let headers = List.fold hl ~init:(Map.empty ~comparator:String.comparator)
-    ~f:(fun map (k,v) -> Map.add map ~key:(String.lowercase k) ~data:v) in
+    let headers = List.fold_left
+    (fun map (k,v) -> MapStr.add (String.lowercase k) v map) MapStr.empty hl in
     let (cont,_) = email_content_to_str email in
     exec_search_all headers cont keys record seq 
 
 (** don't format the envelope **)
-let exec_fetch_envelope_unf (headers:('a,'b,'comp)Map.t) : (string) =
+let exec_fetch_envelope_unf headers : (string) =
   let envelope = 
     [ get_nil_header headers "date" ;
       get_nil_header headers "subject";
@@ -536,11 +543,11 @@ let exec_fetch_envelope_unf (headers:('a,'b,'comp)Map.t) : (string) =
       get_nil_header headers "in-reply-to";
       get_nil_header headers "message-id";
     ] in
-  List.fold envelope ~init:"" ~f:(fun acc i -> if acc = "" then i
-      else acc ^ space ^ i)
+  List.fold_left (fun acc i -> if acc = "" then i
+      else acc ^ space ^ i) "" envelope
 
 (** fetch envelope **)
-let exec_fetch_envelope (headers:('a,'b,'comp)Map.t) : (string) =
+let exec_fetch_envelope headers : (string) =
   let env = exec_fetch_envelope_unf headers in
   "ENVELOPE (" ^ env ^ "))"
 
@@ -550,14 +557,14 @@ let exec_fetch_uid (record:mailbox_message_metadata) : string =
 (** 4.3.2.1. **)
 let section_part_str (l:int list) : string =
   let str =
-  List.fold l ~init:"" 
-  ~f:(fun acc i -> 
+  List.fold_left
+  (fun acc i -> 
     let i = string_of_int i in 
     if acc = "" then 
       i 
     else 
       acc ^ "." ^ i
-  ) in
+  ) "" l in
   if str <> "" then
     str ^ "."
   else
@@ -566,21 +573,22 @@ let section_part_str (l:int list) : string =
 (** <x> {xxx},substr **)
 let body_part_str (l:int list) (str:string) : (string*string) =
   let (part,str) =
-  if List.is_empty l then
+  if List.length l = 0 then
     "",str
   else (
-    let start = List.nth_exn l 0 in
+    let start = List.nth l 0 in
     let part = ang_list_of (string_of_int start) in
-    let size = if (List.length l) = 2 then Some (List.nth_exn l 1) else None in
+    let size = if (List.length l) = 2 then Some (List.nth l 1) else None in
     let str = Utils.substr str start size in
     part, str
   )
   in
     part ^ " {" ^ (string_of_int (String.length str)) ^ "}", str
 
-let exec_fetch_header ?(incl=String.Map.empty) ?(excl=String.Map.empty) ?(regex=false)
+let exec_fetch_header ?(incl=MapStr.empty) ?(excl=MapStr.empty) ?(regex=false)
 (email:Email.t) : string =
-  printf "exec_fetch_header %d %d %b\n%!" (Map.length incl) (Map.length excl) regex;
+  printf "exec_fetch_header %d %d %b\n%!" (MapStr.cardinal incl)
+  (MapStr.cardinal excl) regex;
   let str,_ = email_headers_to_str ~incl ~excl ~regex (Email.header email) in str
 
 let exec_fetch_text (email:Email.t) : string =
@@ -600,12 +608,12 @@ let body_template_str (prefix:string) (content:string) (sec:sectionPart)
   
 let mk_headers_fetch_str prefix headers =
   prefix ^ " " ^
-  (List.fold headers ~init:"(" ~f:(fun acc h -> 
+  (List.fold_left (fun acc h -> 
     if acc = "(" then
       acc ^ String.uppercase h
     else 
       acc ^ " " ^ (String.uppercase h)
-  )) ^ ")"
+  ) "(" headers) ^ ")"
 
 let exec_fetch_msgtext (email:Email.t) (msgtext:sectionMsgtext) (sec:sectionPart) (part:bodyPart): string =
   let (prefix,str) =
@@ -622,8 +630,8 @@ let exec_fetch_msgtext (email:Email.t) (msgtext:sectionMsgtext) (sec:sectionPart
   body_template_str prefix str sec part
 
 let exec_fetch_mime (email:Email.t) (sec:sectionPart) (part:bodyPart) : string = 
-  let incl = String.Map.empty in
-  let incl = String.Map.add incl ~key:"^content-" ~data:() in
+  let incl = MapStr.empty in
+  let incl = MapStr.add "^content-" () incl in
   let str = exec_fetch_header ~regex:true ~incl email in
   body_template_str "MIME" str sec part
 
@@ -635,7 +643,7 @@ exception SectionDone
 (** find the requested section, return empty email if not found **)
 let find_fetch_section (email:Email.t) (secPart:sectionPart) : Email.t =
   try
-    List.fold secPart ~init:email ~f:(fun email part ->
+    List.fold_left (fun email part ->
       printf "find_fetch_section %d type: %s\n%!" part (mime_type email);
       if part = 0 then
         email
@@ -648,9 +656,9 @@ let find_fetch_section (email:Email.t) (secPart:sectionPart) : Email.t =
           if part >= (List.length lemail) then
             raise SectionDone
           else
-            List.nth_exn lemail part
+            List.nth lemail part
       )
-    )
+    ) email secPart
   with SectionDone -> printf "find_fetch_section not found\n%!"; Email.empty()
 
 let exec_fetch_sectext (email:Email.t) (secPart:sectionPart) (secText:sectionText option)
@@ -679,7 +687,7 @@ let get_params (str:string) : string =
   try
     let l = Str.split (Str.regexp "[ ]*;[ ]*") str in
     printf "%d\n" (List.length l);
-    List.fold l ~init:"NIL" ~f:(fun acc nv ->
+    List.fold_left (fun acc nv ->
       if match_regex nv ~regx:"^[ ]*\\([^= ]+\\)[ ]*=[ ]*\\([^ ]+\\|\"[^\"]+\"\\)[ ]*$" then (
         let name = Str.matched_group 1 nv in
         let value = Str.matched_group 2 nv in
@@ -691,7 +699,7 @@ let get_params (str:string) : string =
       ) else ( (** why TBD **)
         acc
       )
-    )
+    ) "NIL" l
   with _ -> "NIL"
   in
   params
@@ -709,47 +717,49 @@ let fetch_type_and_param (email:Email.t) : (string*string*string) =
   let l = Media_type.params media in
   let l = Field_name.Assoc.to_list l in
   let def = (quote "charset") ^ " " ^ (quote "us-ascii") in
-  let params = List.fold l ~init:def
-  ~f:(fun acc (n,v) -> 
+  let params = List.fold_left
+  (fun acc (n,v) -> 
     let str = (quote n) ^ " " ^ (quote v) in
     if acc = def then
       str
     else
       acc ^ " " ^ str
-  ) in
+  ) def l in
   (quote t,quote st,list_of params)
 
 (** fetch encoding **)
 let fetch_enc (email:Email.t): string =
   try
     let el = Header.Content_transfer_encoding.all (Email.header email) in
-    let enc = List.nth_exn el 0 in
+    let enc = List.nth el 0 in
     quote (Encoding.to_string enc)
   with _ -> "NIL"
 
 let fetch_id_and_descr (email:Email.t) : string*string =
   let hm = fold_email_headers ~incl:(map_of_alist
   ["content-id";"content-description"]) ~regex:true (Email.header email)
-  ~init:String.Map.empty
+  ~init:MapStr.empty
   ~f:(fun acc (n,v) -> 
     if match_regex n ~regx:"id" then
-      Map.add acc ~key:"id" ~data:(quote v)
+      MapStr.add "id" (quote v) acc
     else
-      Map.add acc ~key:"descr" ~data:(quote v)
+      MapStr.add "descr" (quote v) acc
   ) in
-  let id = try Map.find_exn hm "id" with _ -> "NIL" in
-  let descr = try Map.find_exn hm "descr" with _ -> "NIL" in
+  let id = try MapStr.find "id" hm with _ -> "NIL" in
+  let descr = try MapStr.find "descr" hm with _ -> "NIL" in
   (id,descr)
 
 let fetch_size (email:Email.t) : string * string =
   let (cont,size) = email_content_to_str email in
-  let lines = String.fold cont ~init:0 (** a better way is to save to index TBD **)
-  ~f:(fun acc c ->
-    if c = '\n' then
-      acc+1
+  let rec cntlines str i cnt =
+    if i >= String.length str then
+      cnt
+    else if str.[i] = '\n' then
+      cntlines str (i + 1) (cnt + 1)
     else
-      acc
-  ) in
+      cntlines str (i + 1) cnt
+  in
+  let lines = cntlines cont 0 0 in
   string_of_int size,string_of_int lines
 
 (**
@@ -762,12 +772,12 @@ Content-Disposition: attachment;
 perhaps should use Email_message Media_type to get this TBD **)
 let fetch_disposition (header:Header.t) : string =
   let headers = headers_to_map header in
-  let disp = try Map.find_exn headers "content-disposition" with _ -> "NIL" in
+  let disp = try MapStr.find "content-disposition" headers with _ -> "NIL" in
   if disp = "NIL" then
     disp
   else (
-    let disp = replace "\r" "" disp in
-    let disp = replace "\n" "" disp in
+    let disp = replace ~regx:"\r" ~tmpl:"" disp in
+    let disp = replace ~regx:"\n" ~tmpl:"" disp in
     if match_regex disp ~regx:"^[ \t]*\\([^; \t]+\\)\\([ \t]*;[ \t]*\\(.+\\)\\)$" then
       let name = Str.matched_group 1 disp in
       let params = Str.matched_group 3 disp in
@@ -788,7 +798,7 @@ let fetch_bodystructure_fields (email:Email.t) : bodystr_fields =
     enc; bsize = size; blines = lines;bdisp=disp}
 
 let format_basic (basic:bodystr_fields) : string =
-  String.concat ~sep:" "
+  String.concat " "
   [basic.btype;basic.bsubtype;basic.bparams;basic.bid;basic.bdescr;basic.benc;basic.bsize;]
 
 let format_simple (basic:bodystr_fields) (body:bool) : string =
@@ -808,7 +818,7 @@ let format_simple (basic:bodystr_fields) (body:bool) : string =
   in
   printf "format_simple %b %d\n%!" body (List.length extension);
   let all = List.concat [main;extension] in
-  String.concat ~sep:" " all
+  String.concat " " all
 
 let fetch_message_bodystructure (email:Email.t) (basic:bodystr_fields) (body:bool)
   (bodystructure_folder:Email.t->bool->string) : string =
@@ -833,10 +843,10 @@ let fetch_simple_bodystructure (email:Email.t) (basic:bodystr_fields) (body:bool
 let fetch_multipart_bodystructure (lemail:Email.t list) (basic:bodystr_fields) (body:bool)
   (bodystructure_folder:Email.t->bool->string) : string =
   printf "fetch_multipart_bodystructure %s\n%!" basic.btype;
-  let main = (List.fold lemail ~init:"" 
-  ~f:(fun acc email ->
+  let main = (List.fold_left
+  (fun acc email ->
     acc ^ (bodystructure_folder email body) 
-  )) ^ " " ^ basic.bsubtype in
+  ) "" lemail) ^ " " ^ basic.bsubtype in
   (** params, disposition, language, location **)
   let all =
   if body = false then 
@@ -873,9 +883,8 @@ let exec_fetch_body (email:Email.t) : string =
 let exec_fetch_att (seq:int) (sequence:sequence) (email:Email.t) 
 (record:mailbox_message_metadata) (att:fetchAtt list) : (string) = 
   let headers = headers_to_map (Email.header email) in
-  List.fold att
-  ~init:""
-  ~f:(fun acc item ->
+  List.fold_left
+  (fun acc item ->
     let res =
     (match item with
     | Fetch_Body -> exec_fetch_body email
@@ -897,7 +906,7 @@ let exec_fetch_att (seq:int) (sequence:sequence) (email:Email.t)
       res
     else
       acc ^ space ^ res
-  )
+  ) "" att
 
 let exec_fetch_macro (seq:int) (sequence:sequence) (email:Email.t)
  (record:mailbox_message_metadata) (macro:fetchMacro) : (string) =
@@ -924,7 +933,8 @@ let exec_fetch (seq:int) (sequence:sequence) (message:Mailbox.Message.t)
   if should_include message.email record = false then
     None
   else if (buid = false && exec_seq sequence seq || buid = true && (exec_seq sequence record.uid))  &&
-    (changedsince = None || Int64.(>) record.modseq (Option.value_exn changedsince)) then (
+    (changedsince = None || Int64.compare record.modseq (option_value_exn
+    changedsince) > 0) then (
       let str = exec_fetch_all seq sequence message.email record attr buid in
       let seq = string_of_int seq in
       Some (seq ^ space ^ "FETCH" ^ space ^ (list_of str))
@@ -932,11 +942,11 @@ let exec_fetch (seq:int) (sequence:sequence) (message:Mailbox.Message.t)
     None
 
 let join_flags (flags1:mailboxFlags list) (flags2:mailboxFlags list) : (mailboxFlags list) =
-  let l = List.join [flags1;flags2] in
-  List.dedup ~compare:(fun a b -> if a = b then 0 else 1) l
+  let l = List.concat [flags1;flags2] in
+  List.sort_uniq (fun a b -> if a = b then 0 else if a > b then 1 else -1) l
 
 let rem_flags (flags:mailboxFlags list) (rem:mailboxFlags list) : (mailboxFlags list) =
-  List.filter flags ~f:(fun fl -> (List.find rem ~f:(fun fl1 -> fl1 = fl)) = None)
+  List.filter (fun fl -> (list_find rem (fun fl1 -> fl1 = fl)) = false) flags
 
 (*
  * * 19 FETCH (UID 128 FLAGS (\Seen $NotJunk NotJunk))
@@ -983,9 +993,9 @@ let get_flags seq modseq buid flags record =
       false
     else (
       let cmp f1 f2 = if f1 > f2 then 1 else if f1 < f2 then -1 else 0 in
-      let flags1 = List.sort ~cmp flags in
-      let flags2 = List.sort ~cmp record.flags in
-      (List.compare ~cmp flags1 flags2) = 0
+      let flags1 = List.sort cmp flags in
+      let flags2 = List.sort cmp record.flags in
+      List.for_all2 (fun e1 e2 -> e1 = e2) flags1 flags2
     )
   in
   match flags with
@@ -1023,7 +1033,7 @@ let exec_store (record:mailbox_message_metadata) (seq:int) (sequence:sequence)
 (storeattr:storeFlags) (flagsval:mailboxFlags list) (unchangedsince:Int64.t option) (buid:bool) :
   [`Ok of mailbox_message_metadata*string|`Silent of mailbox_message_metadata|`Modseqfailed of int|`None] =
   if buid = false && exec_seq sequence seq || buid = true && (exec_seq sequence record.uid)  then (
-    if unchangedsince = None || Int64.(<=) record.modseq (Option.value_exn unchangedsince) then
+    if unchangedsince = None || Int64.compare record.modseq (option_value_exn unchangedsince) <= 0 then
       exec_store_flags record seq storeattr flagsval (unchangedsince <> None) buid
     else
       `Modseqfailed (if buid then record.uid else seq)
