@@ -17,7 +17,6 @@ open Lwt
 open Storage_meta
 open Imaplet_types
 open Email_message
-open Email_message.Mailbox.Message
 
 module type Storage_intf = 
 sig
