@@ -943,7 +943,13 @@ let exec_fetch (seq:int) (sequence:sequence) (message:Mailbox.Message.t)
 
 let join_flags (flags1:mailboxFlags list) (flags2:mailboxFlags list) : (mailboxFlags list) =
   let l = List.concat [flags1;flags2] in
-  List.sort_uniq (fun a b -> if a = b then 0 else if a > b then 1 else -1) l
+  let (_,l) = List.fold_right (fun a (prev,acc) -> 
+    match prev with 
+    |None->Some a,a::acc
+    |Some prev when prev = a -> Some a,acc
+    |Some prev->Some a,a::acc) (List.sort Pervasives.compare l) (None,[])
+  in
+  l
 
 let rem_flags (flags:mailboxFlags list) (rem:mailboxFlags list) : (mailboxFlags list) =
   List.filter (fun fl -> (list_find rem (fun fl1 -> fl1 = fl)) = false) flags

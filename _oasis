@@ -10,7 +10,6 @@ PreBuildCommand: ocaml inst.ml $bindir $datadir > install.ml
 Library email_message
   Path		  : lib/email_message
   Pack		  : true
-  Install	  : true
   FindlibName	  : email_message
   Modules	  : Bigstringable,
                     Bigstring_extended,

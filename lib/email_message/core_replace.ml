@@ -47,13 +47,6 @@ module Option_ =
       end
   end
 
-let blito_ ~src ?src_pos ?src_len ~dst ?dst_pos () =
-  let src_pos = Option_.value ~default:0 src_pos in
-  let default = (Bytes.length src) - src_pos in
-  let len = Option_.value ~default src_len in
-  let dst_pos = Option_.value ~default:0 dst_pos in
-    Bytes.blit_string src src_pos dst dst_pos len
-
 module Exn : sig
   type t = exn
 
@@ -127,12 +120,12 @@ open Bigarray
 module Bigstring_ : sig
   type t = (char, int8_unsigned_elt, c_layout) Array1.t 
   module To_string : sig
-    val blit : src:t -> src_pos:int -> dst:bytes -> dst_pos:int -> len:int -> unit
-    val blito : src:t -> ?src_pos:int -> ?src_len:int -> dst:bytes -> ?dst_pos:int ->
+    val blit : src:t -> src_pos:int -> dst:string -> dst_pos:int -> len:int -> unit
+    val blito : src:t -> ?src_pos:int -> ?src_len:int -> dst:string -> ?dst_pos:int ->
      unit -> unit
   end
   module From_string : sig
-    val blito : src:bytes -> ?src_pos:int -> ?src_len:int -> dst:t -> ?dst_pos:int ->
+    val blito : src:string -> ?src_pos:int -> ?src_len:int -> dst:t -> ?dst_pos:int ->
      unit -> unit
   end
   val blito : src:t -> ?src_pos:int -> ?src_len:int -> dst:t -> ?dst_pos:int ->
