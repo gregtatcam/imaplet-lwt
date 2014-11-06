@@ -18,8 +18,8 @@ open Lwt
 let create_cert () = 
   let open Server_config in
   X509_lwt.private_of_pems
-  ~cert:(Install.cert_path ^ "/" ^ srv_config.pem_name)
-  ~priv_key:(Install.cert_path ^ "/" ^ srv_config.key_name)
+  ~cert:(Install.data_path ^ "/" ^ srv_config.pem_name)
+  ~priv_key:(Install.data_path ^ "/" ^ srv_config.key_name)
 
 let init_ssl () =  
   Tls_lwt.rng_init () >>

@@ -525,7 +525,7 @@ let rec read_network reader writer buffer =
     )
   )
 
-let get_command context =
+let get_command msgt context =
   let open Parsing in
   let open Lexing in
   let open Lex in
@@ -571,17 +571,17 @@ let get_command context =
   | e -> return (`Error(Printexc.get_backtrace()))
   )
 
-let rec client_requests context =
+let rec client_requests msgt context =
   catch ( fun () ->
-    get_command context >>= function
+    get_command msgt context >>= function
     | `Done -> return `Done
-    | `Error e -> write_resp context.!netw (Resp_Bad(None,e)) >> client_requests context
+    | `Error e -> write_resp context.!netw (Resp_Bad(None,e)) >> client_requests msgt context
     | `Ok -> handle_command context >>= fun response ->
       if context.!state = State_Logout then
         return `Done
       else (
         let command = Stack.top context.!commands in
-        write_resp context.!netw ~tag:command.tag response >> client_requests context
+        write_resp context.!netw ~tag:command.tag response >> client_requests msgt context
       )
   )
   (fun _ -> return `Done)

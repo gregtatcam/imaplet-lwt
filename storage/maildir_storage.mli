@@ -13,4 +13,8 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
-val client_requests : [`Lmtp|`Client] -> Context.context -> [`Done|`Starttls] Lwt.t
+open Storage
+
+type storage_ = {user: string; mailbox: string}
+
+module MaildirStorage : Storage_intf with type t = storage_

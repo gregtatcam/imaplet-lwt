@@ -52,7 +52,7 @@ mail_path ""
 #rebuild_irmin false
 
 # pem/key path default datadir/imaplet
-#cert_path ""
+#data_path ""
 
 # pem name
 pem_name server.pem

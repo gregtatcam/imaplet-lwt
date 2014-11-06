@@ -28,10 +28,10 @@ let init_socket addr port =
   let socket = Lwt_unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
   Lwt_unix.setsockopt socket Unix.SO_REUSEADDR true;
   Lwt_unix.bind socket sockaddr;
-  socket
+  socket,sockaddr
 
 let create_srv_socket () =
-  let socket = init_socket srv_config.lmtp_addr srv_config.lmtp_port in
+  let (socket,_) = init_socket srv_config.lmtp_addr srv_config.lmtp_port in
   Lwt_unix.listen socket Configuration.lmtp_backlog;
   socket
 
@@ -40,37 +40,32 @@ let create_srv_socket () =
     for <dovecot@localhost>; Thu, 17 Jul 2014 14:53:00 +0100 (BST)
 *)
 let add_postmark from_ msg =
-  let open Regex in
-  if match_regex msg ~regx:"^From " = true then
+  let size = String.length msg in
+  let headers = String.sub msg 0 (if size < 1024 * 5 then size else 1024 * 5) in
+  if Regex.match_regex headers ~regx:"^From " = true then
     msg
   else (
-    let open Unix in
     let from = "From " ^ from_ in 
-    let date = 
-      if match_regex msg ~regx:smtp_date_regex = true then (
-        let matched n =
-          Str.matched_group n msg
-        in
-        (matched 1) ^ " " ^ (matched 5) ^ " " ^ (matched 2) ^ " " ^ (matched 7) ^ " " ^ (matched 6)
-      ) else (
-        let tm = Unix.gmtime (Unix.time()) in
-        (Printf.sprintf "%s %s %d %02d:%02d:%02d %d" 
-        (Dates.day_of_week tm.tm_wday) (Dates.int_to_month tm.tm_mon) tm.tm_mday 
-        tm.tm_hour tm.tm_min tm.tm_sec (tm.tm_year + 1900)) 
-      )
+    let time = 
+      if Regex.match_regex headers ~regx:"^Date: \\([.]+\\)[\r\n]+" then
+        try
+          Dates.email_to_date_time_exn (Str.matched_group 1 headers)
+        with Dates.InvalidDate -> Dates.ImapTime.now()
+      else
+        Dates.ImapTime.now ()
     in
+    let date = Dates.postmark_date_time ~time () in
     from ^ " " ^ date ^ "\r\n" ^ msg
   )
 
-(* sending "special" local append 
- * need imap to check that the command is comming from lmtp TBD
+(* sending "special" local append on unix socket
  *)
 let send_to_imap from_ to_ msg =
-  Printf.printf "imaplet_lmtp: sending to imap\n!";
+  Printf.printf "imaplet_lmtp: sending to imap\n%!";
   let open Lwt_unix in
   let msg = add_postmark from_ msg in
   Printf.printf "imaplet_lmtp:\n%s%!" msg;
-  let sockaddr = Unix.ADDR_UNIX "./lmtp" in
+  let sockaddr = Unix.ADDR_UNIX (Filename.concat Install.data_path "sock/lmtp") in
   let socket = socket Unix.PF_UNIX Unix.SOCK_STREAM 0 in
   Lwt_unix.connect socket sockaddr >>= fun () ->
   let inchan = Lwt_io.of_fd ~mode:Lwt_io.input socket in
@@ -79,17 +74,13 @@ let send_to_imap from_ to_ msg =
     Lwt_io.write outchan buff >>= fun () -> Lwt_io.flush outchan
   in
   let read () =
-    Lwt.pick [
-      (*Lwt_unix.sleep 2.0 >>= fun() -> raise InvalidCmd;*)
-      Lwt_io.read_line inchan;
-    ]
+    Lwt_io.read_line inchan
   in
-  read () >>= fun resp -> Printf.printf "imaplet_lmtp: %s\n%!" resp; (* CAPABILITY *)
   write ("a lappend " ^ to_ ^ " INBOX {" ^ (string_of_int (String.length msg)) ^ "+}\r\n") >>= fun () ->
   write msg >>= fun () ->
-  read () >>= fun resp -> Printf.printf "imaplet_lmtp: %s\n%!" resp; (* a OK APPEND completed *)
+  read () >>= fun resp -> Printf.printf "imaplet_lmtp response: %s\n%!" resp; (* a OK APPEND completed *)
   write "a logout\r\n" >>= fun () ->
-  read () >>= fun resp -> Printf.printf "imaplet_lmtp: %s\n%!" resp; (* * BYE *)
+  read () >>= fun resp -> Printf.printf "imaplet_lmtp response: %s\n%!" resp; (* * BYE *)
   Lwt_unix.close socket >>= fun () ->
   try_close inchan >> try_close outchan >> return ()
 

@@ -24,6 +24,10 @@ let try_close_sock sock =
     match sock with |None->return()|Some sock->Lwt_unix.close sock)
   (function _ -> return ())
 
+let msgt_to_str = function
+  | `Lmtp -> "lmtp"
+  | `Client -> "client"
+
 let init_socket addr port =
   Printf.printf "imaplet: creating socket %s %d\n%!" addr port;
   let sockaddr = Unix.ADDR_INET (Unix.inet_addr_of_string addr, port) in
@@ -34,7 +38,10 @@ let init_socket addr port =
 
 let init_unix_socket file =
   let open Lwt_unix in
-  Printf.printf "imaplet: creating unix socket for lmtp\n%!";
+  Printf.printf "imaplet: creating unix socket for lmtp:%s %s\n%!"
+  Server_config.srv_config.data_path file;
+  (catch (fun () -> mkdir (Filename.dirname file) 0o777)) 
+  (function _ -> return ()) >>= fun () ->
   catch (fun () -> unlink file)
   (function _ -> return ()) >>= fun () -> 
   let sockaddr = Unix.ADDR_UNIX file in
@@ -44,6 +51,7 @@ let init_unix_socket file =
   getpwnam "postfix" >>= fun (pw:Lwt_unix.passwd_entry) ->
   chown file pw.pw_uid pw.pw_gid >>= fun () ->
   chmod file  0o777 >>= fun () ->
+  Printf.printf "imaplet: created unix socket for lmtp\n%!" ;
   return socket
 
 let create_srv_socket addr = 
@@ -57,27 +65,29 @@ let create_srv_socket addr =
   Lwt_unix.listen socket 10;
   return socket
 
-let accept_ssl sock cert =
+let accept_ssl msgt sock cert =
   Tls_lwt.accept cert sock >>= fun (channels, addr) ->
-  return (None,channels)
+  return (msgt,None,channels)
 
-let accept_cmn sock =
+let accept_cmn msgt sock =
   Lwt_unix.accept sock >>= fun (sock_c, addr) ->
   let ic = Lwt_io.of_fd ~close:(fun()->return()) ~mode:Lwt_io.input sock_c in
   let oc = Lwt_io.of_fd ~close:(fun()->return()) ~mode:Lwt_io.output sock_c in
-  return (Some sock_c,(ic,oc))
+  return (msgt,Some sock_c,(ic,oc))
 
-let rec accept_conn sock cert = 
+let rec accept_conn msgt sock cert = 
   catch (fun () ->
   match cert with
-  | Some cert -> accept_ssl sock cert
-  | None -> accept_cmn sock
+  | Some cert -> accept_ssl msgt sock cert
+  | None -> accept_cmn msgt sock
   )
   (fun ex ->
   match ex with
-  | End_of_file -> accept_conn sock cert
-  | _ -> Printf.printf "imaplet: accept_conn exception %s %s\n%!" (Printexc.to_string ex) 
-    (Printexc.get_backtrace()); accept_conn sock cert
+  | End_of_file -> accept_conn msgt sock cert
+  | _ -> Printf.printf "imaplet: accept_conn exception %s %s %s\n%!"
+    (msgt_to_str msgt) (Printexc.to_string ex) 
+    (Printexc.get_backtrace()); 
+    accept_conn msgt sock cert
   )
 
 (* init local delivery *)
@@ -91,22 +101,29 @@ let init_local_delivery () =
 
 (* initialize all things *)
 let init_all ssl =
+  let open Server_config in
+  create_srv_socket (`Inet (srv_config.!addr,srv_config.!port)) >>= fun sock ->
+  create_srv_socket (`Unix (Filename.concat srv_config.data_path "sock/lmtp")) >>= fun unix_sock ->
   init_local_delivery ();
   if ssl then (
     Ssl_.init_ssl () >>= fun cert ->
-    return (Some cert)
+    return ((Some cert),sock,unix_sock)
   ) else
-    return None
+    return (None,sock,unix_sock)
 
-let init_connection w =
-  Printf.printf "imaplet: writing initial capability response to client\n%!";
+let init_connection msgt w =
   catch( fun () ->
-  let resp = "* OK [CAPABILITY " ^ Configuration.capability ^ "] Imaplet ready.\r\n" in
-  Lwt_io.write w resp >>
-  Lwt_io.flush w
+    match msgt with
+    | `Lmtp -> return ()
+    | `Client ->
+      Printf.printf "imaplet: writing initial capability response to %s\n%!" (msgt_to_str msgt);
+      let resp = "* OK [CAPABILITY " ^ Configuration.capability ^ "] Imaplet ready.\r\n" in
+      Lwt_io.write w resp >>
+      Lwt_io.flush w
   )
   (fun ex ->
-    Printf.printf "imaplet: exception writing initial capability %s\n%!" (Printexc.to_string ex);
+    Printf.printf "imaplet: exception writing initial capability %s %s\n%!" 
+      (msgt_to_str msgt) (Printexc.to_string ex);
     return ()
   )
 
@@ -124,36 +141,33 @@ let create () =
   let open Connections in
   let open Server_config in
   let open Context in
-  init_all srv_config.!ssl >>= fun cert ->
-  create_srv_socket (`Inet (srv_config.!addr,srv_config.!port)) >>= fun sock ->
-  create_srv_socket (`Unix "./lmtp") >>= fun unix_sock ->
-  let rec connect sock unix_sock cert =
-    choose [
-      accept_conn sock cert;
-      accept_conn unix_sock None; 
-    ]
-    >>= fun (sock_c,(netr,netw)) ->
-    init_connection netw >>= fun() ->
+  init_all srv_config.!ssl >>= fun (cert,sock,unix_sock) ->
+  let rec connect f msgt sock cert =
+    accept_conn msgt sock cert;
+    >>= fun (msgt,sock_c,(netr,netw)) ->
     let id = next_id () in
-    let ctx =
-      {id;connections=ref [];commands=ref (Stack.create());
-        netr=ref netr;netw=ref netw;state=ref
-        Imaplet_types.State_Notauthenticated;mailbox=ref (Amailbox.empty());
-        starttls=starttls sock_c;highestmodseq=ref `None;
-        capability=ref []} in
-    async(
+    f (
       fun () ->
       catch(
         fun () ->
-          Imap_cmd.client_requests ctx >>= fun _ ->
+          init_connection msgt netw >>= fun() ->
+          let ctx =
+            {id;connections=ref [];commands=ref (Stack.create());
+              netr=ref netr;netw=ref netw;state=ref
+              Imaplet_types.State_Notauthenticated;mailbox=ref (Amailbox.empty());
+              starttls=starttls sock_c;highestmodseq=ref `None;
+              capability=ref []} in
+          Imap_cmd.client_requests msgt ctx >>= fun _ ->
           rem_id id;
           try_close ctx.!netr >> try_close ctx.!netw >> try_close_sock sock_c 
       )
-      (function _ -> rem_id id; try_close ctx.!netr >> try_close ctx.!netw >>
+      (function _ -> rem_id id; try_close netr >> try_close netw >>
       try_close_sock sock_c) >>= fun () ->
-      Printf.printf "imaplet: client connection is closed\n%!";
+      Printf.printf "imaplet: %s connection is closed\n%!" (msgt_to_str msgt);
       return ()
     ); 
-    connect sock unix_sock cert
+    connect f msgt sock cert
   in
-  connect sock unix_sock cert
+  let f a = a () in
+  async (fun() -> connect f `Lmtp unix_sock None);
+  connect async `Client sock cert

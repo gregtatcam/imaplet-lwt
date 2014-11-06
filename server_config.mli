@@ -31,11 +31,11 @@ type imapConfig = {
   port : int ref; (* server port, default 993 *)
   ssl : bool ref; (* ssl enabled, default true *)
   starttls : bool ref; (* starttls enabled, default true *)
-  cert_path : string; (* pam/key path, default datadir/imaplet *)
+  data_path : string; (* pam/key path, default datadir/imaplet *)
   pem_name : string; (* pem file name, default server.pem *)
   key_name : string; (* private key file name, default server.key *)
   users_path : string; (* users file path, default datadir/imaplet *)
-  data_store : [`Irmin|`Mailbox]; (* type of storage, only irmin supported so far *)
+  data_store : [`Irmin|`Mailbox|`Maildir]; (* type of storage, only irmin supported so far *)
 }
 
 val srv_config : imapConfig

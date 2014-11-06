@@ -30,11 +30,11 @@ type imapConfig = {
   port : int ref; (* server port, default 993 *)
   ssl : bool ref; (* ssl enabled, default true *)
   starttls : bool ref; (* starttls enabled, default true *)
-  cert_path : string; (* pam/key path, default datadir/imaplet *)
+  data_path : string; (* pam/key path, default datadir/imaplet *)
   pem_name : string; (* pem file name, default server.pem *)
   key_name : string; (* private key file name, default server.key *)
   users_path : string; (* users file path, default datadir/imaplet *)
-  data_store : [`Irmin|`Mailbox]; (* type of storage, only irmin supported so far *)
+  data_store : [`Irmin|`Mailbox|`Maildir]; (* type of storage, only irmin supported so far *)
 }
 
 let exists file =
@@ -83,7 +83,7 @@ let srv_config =
     port = ref 993;
     ssl = ref true;
     starttls = ref true;
-    cert_path = Install.cert_path;
+    data_path = Install.data_path;
     pem_name = "server.pem";
     key_name = "server.key";
     users_path = Install.users_path;
@@ -122,7 +122,7 @@ let srv_config =
       | "port" -> {acc with port = ref (ival n v 993)}
       | "ssl" -> {acc with ssl = ref (bval n v true)}
       | "starttls" -> {acc with starttls = ref (bval n v true)}
-      | "cert_path" -> {acc with cert_path = v};
+      | "data_path" -> {acc with data_path = v};
       | "pem_name" -> {acc with pem_name = v}
       | "key_name" -> {acc with key_name = v}
       | "users_path" -> {acc with users_path = v}

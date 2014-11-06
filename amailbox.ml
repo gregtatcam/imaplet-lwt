@@ -24,16 +24,20 @@ type selection = [`Select of string | `Examine of string | `None]
 
 type amailboxt = {inbox_path:string;mail_path:string;user:string option;selected:selection}
 
-let factory mailboxt ?mailbox2 mailbox =
+let factory (mailboxt:amailboxt) ?mailbox2 mailbox =
   let open Server_config in
   let open Storage in
   let open Mailbox_storage in
+  let open Maildir_storage in
   match srv_config.data_store with
   | `Irmin -> 
     build_strg_inst (module IrminStorage) (Utils.option_value_exn mailboxt.user)
     ?mailbox2 mailbox
   | `Mailbox ->
     build_strg_inst (module MailboxStorage) (Utils.option_value_exn mailboxt.user)
+    ?mailbox2 mailbox
+  | `Maildir ->
+    build_strg_inst (module MaildirStorage) (Utils.option_value_exn mailboxt.user)
     ?mailbox2 mailbox
 
 (* inbox location * all mailboxes location * user * type of selected mailbox *)
