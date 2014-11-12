@@ -75,8 +75,10 @@ let inbox name =
 
 let mailboxes name = 
   let open Server_config in 
+  try
   let l = Str.split (Str.regexp "@") srv_config.!mail_path in
    (List.nth l 0) ^ name ^ (List.nth l 1)
+  with _ -> srv_config.!mail_path
 
 let get_mbox_flags =
   (["\\Answered"; "\\Flagged"; "\\Deleted"; "\\Seen"; "\\Draft"; "$NotJunk";
