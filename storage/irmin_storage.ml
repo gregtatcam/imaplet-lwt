@@ -85,7 +85,6 @@ struct
   (* search selected mailbox *)
   let search t keys buid =
     IrminMailbox.read_index_uid t.mailbox >>= fun uids ->
-    IrminMailbox.read_mailbox_metadata t.mailbox >>= fun mailbox_metadata ->
     Lwt_list.fold_right_s (fun uid (seq,acc) ->
       IrminMailbox.read_message t.mailbox (`UID uid) ?filter:(Some keys) >>= function
       | `Ok _ -> return (if buid then (seq+1,uid :: acc) else (seq+1, seq :: acc))

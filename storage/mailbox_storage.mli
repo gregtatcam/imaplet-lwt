@@ -14,6 +14,5 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 open Storage
-open Irmin_core
 
 module MailboxStorage : Storage_intf with type t = string

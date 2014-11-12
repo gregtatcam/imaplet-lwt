@@ -16,8 +16,8 @@
 
 type imapConfig = {
   rebuild_irmin : bool; (* rebuild irminsule database on start up, default false *)
-  inbox_path : string; (* inbox location, default /var/mail *)
-  mail_path : string; (* mailboxes location, default /Users/user-name/mail *)
+  inbox_path : string ref; (* inbox location, default /var/mail *)
+  mail_path : string ref; (* mailboxes location, default /Users/user-name/mail *)
   irmin_path : string; (* irminsule location, default / *)
   max_msg_size : int; (* max email size *)
   imap_name : string; (* greeting name, default imaplet *)
@@ -35,7 +35,7 @@ type imapConfig = {
   pem_name : string; (* pem file name, default server.pem *)
   key_name : string; (* private key file name, default server.key *)
   users_path : string; (* users file path, default datadir/imaplet *)
-  data_store : [`Irmin|`Mailbox|`Maildir]; (* type of storage, only irmin supported so far *)
+  data_store : [`Irmin|`Mailbox|`Maildir] ref; (* type of storage, only irmin supported so far *)
 }
 
 val srv_config : imapConfig

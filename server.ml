@@ -38,8 +38,9 @@ let init_socket addr port =
 
 let init_unix_socket file =
   let open Lwt_unix in
+  let open Server_config in
   Printf.printf "imaplet: creating unix socket for lmtp:%s %s\n%!"
-  Server_config.srv_config.data_path file;
+  srv_config.data_path file;
   (catch (fun () -> mkdir (Filename.dirname file) 0o777)) 
   (function _ -> return ()) >>= fun () ->
   catch (fun () -> unlink file)

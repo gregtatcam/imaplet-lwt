@@ -68,14 +68,14 @@ let max_message_in_memory_size = 0 (**10_240**)
 
 let inbox_root = 
   let open Server_config in 
-  srv_config.inbox_path
+  srv_config.!inbox_path
 
 let inbox name =
   Filename.concat (inbox_root) name
 
 let mailboxes name = 
   let open Server_config in 
-  let l = Str.split (Str.regexp "@") srv_config.mail_path in
+  let l = Str.split (Str.regexp "@") srv_config.!mail_path in
    (List.nth l 0) ^ name ^ (List.nth l 1)
 
 let get_mbox_flags =

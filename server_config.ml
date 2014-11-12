@@ -15,8 +15,8 @@
  *)
 type imapConfig = {
   rebuild_irmin : bool; (* rebuild irminsule database on start up, default false *)
-  inbox_path : string; (* inbox location, default /var/mail *)
-  mail_path : string; (* mailboxes location, default /Users/user-name/mail *)
+  inbox_path : string ref; (* inbox location, default /var/mail *)
+  mail_path : string ref; (* mailboxes location, default /Users/user-name/mail *)
   irmin_path : string; (* irminsule location, default / *)
   max_msg_size : int;
   imap_name : string; (* greeting name, default imaplet *)
@@ -34,7 +34,7 @@ type imapConfig = {
   pem_name : string; (* pem file name, default server.pem *)
   key_name : string; (* private key file name, default server.key *)
   users_path : string; (* users file path, default datadir/imaplet *)
-  data_store : [`Irmin|`Mailbox|`Maildir]; (* type of storage, only irmin supported so far *)
+  data_store : [`Irmin|`Mailbox|`Maildir] ref; (* type of storage, only irmin supported so far *)
 }
 
 let exists file =
@@ -68,8 +68,8 @@ let srv_config =
   Printf.printf "##### loading configuration file #####\n%!";
   let config = {
     rebuild_irmin = false;
-    inbox_path = "";(*"/var/mail";*)
-    mail_path = "";(*"/Users/@/mail";*)
+    inbox_path = ref "";(*"/var/mail";*)
+    mail_path = ref "";(*"/Users/@/mail";*)
     irmin_path = "/tmp/irmin/test";
     max_msg_size = 0;
     imap_name = "imaplet";
@@ -87,7 +87,7 @@ let srv_config =
     pem_name = "server.pem";
     key_name = "server.key";
     users_path = Install.users_path;
-    data_store = `Irmin;
+    data_store = ref `Irmin;
   } in
   let rec proc lines acc =
     match lines with 
@@ -105,11 +105,13 @@ let srv_config =
       let log n v = Printf.printf "%s: invalid value %s\n%!" n v in
       let ival n v default = try int_of_string v with _ -> log n v; default in
       let bval n v default = try bool_of_string v with _ -> log n v; default in
+      let stval n = function
+        |"irmin"->`Irmin|"mbox"->`Mailbox|"maildir"->`Maildir|_->log n v; `Irmin in
       match n with 
       | "imap_name" -> {acc with imap_name = v }
       | "rebuild_irmin" -> {acc with rebuild_irmin = bval n v false}
-      | "inbox_path" -> {acc with inbox_path = v}
-      | "mail_path" -> {acc with mail_path = v}
+      | "inbox_path" -> {acc with inbox_path = ref v}
+      | "mail_path" -> {acc with mail_path = ref v}
       | "irmin_path" -> {acc with irmin_path = v}
       | "max_msg_size" -> {acc with max_msg_size = ival n v 10_000_000}
       | "imap_addr" -> {acc with imap_addr = v}
@@ -126,11 +128,15 @@ let srv_config =
       | "pem_name" -> {acc with pem_name = v}
       | "key_name" -> {acc with key_name = v}
       | "users_path" -> {acc with users_path = v}
-      | "data_store" -> {acc with data_store = `Irmin}
+      | "data_store" -> {acc with data_store = ref (stval n v)}
       | _ -> Printf.printf "unknown configuration %s\n%!" n; acc
     ) else 
       acc
     ) in proc tl acc
     | [] -> acc
   in
-  proc lines config
+  let config = proc lines config in
+  assert ((config.!data_store = `Mailbox && config.!inbox_path <> "" ||
+  config.!data_store = `Maildir) && config.!mail_path <> "" ||
+  config.!data_store = `Irmin);
+  config

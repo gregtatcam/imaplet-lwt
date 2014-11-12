@@ -147,3 +147,10 @@ let list_findi l f =
     )
   in
   findi l 0 f
+
+let with_file path ~flags ~perms ~mode ~f =
+  let open Lwt in
+  Lwt_unix.openfile path flags perms >>= fun fd ->
+  let ch = Lwt_io.of_fd ~close:(fun () -> return ()) ~mode fd in
+  Lwt.finalize (fun () -> f ch)
+  (fun () -> Lwt_io.close ch >> Lwt_unix.close fd)

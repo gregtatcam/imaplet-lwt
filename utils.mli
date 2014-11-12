@@ -38,3 +38,7 @@ val option_value_exn : 'a option -> 'a
 val list_find : 'a list -> ('a -> bool) -> bool
 
 val list_findi : 'a list -> (int -> 'a -> bool) -> (int * 'a) option
+
+val with_file : string -> flags:Lwt_unix.open_flag list ->
+  perms:Lwt_unix.file_perm -> mode:'a Lwt_io.mode -> 
+  f:('a Lwt_io.channel -> 'b Lwt.t) -> 'b Lwt.t 

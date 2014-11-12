@@ -29,7 +29,8 @@ let factory (mailboxt:amailboxt) ?mailbox2 mailbox =
   let open Storage in
   let open Mailbox_storage in
   let open Maildir_storage in
-  match srv_config.data_store with
+  Printf.printf "FACTORY ==================== %s\n%!" mailbox;
+  match srv_config.!data_store with
   | `Irmin -> 
     build_strg_inst (module IrminStorage) (Utils.option_value_exn mailboxt.user)
     ?mailbox2 mailbox
@@ -53,9 +54,10 @@ let selected_mbox mailboxt =
 let create user =
   let open Server_config in
   let (inbox_path,mail_path) = 
-  match srv_config.data_store with
+  match srv_config.!data_store with
   | `Irmin -> "",""
-  | `Mailbox -> srv_config.inbox_path,srv_config.mail_path
+  | `Mailbox -> srv_config.!inbox_path,Configuration.mailboxes user
+  | `Maildir -> srv_config.!inbox_path,Configuration.mailboxes user
   in
   {inbox_path;mail_path;user=Some user;selected=`None}
 
@@ -302,7 +304,7 @@ let append mailboxt mailbox reader writer flags date literal =
         uid = mailbox_metadata.uidnext;
         modseq;
         size;
-        internal_date = Utils.option_value date ~default:Dates.ImapTime.epoch;
+        internal_date = Utils.option_value date ~default:(Dates.ImapTime.now());
         flags;
       } in
       let seen = find_fl flags Flags_Seen in
