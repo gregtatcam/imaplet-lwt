@@ -153,7 +153,8 @@ let mail_flags : (string*mailboxFlags) list =
   "T", Flags_Deleted;
   "D", Flags_Draft;
   "F", Flags_Flagged;
-  "S", Flags_Seen;]
+  "S", Flags_Seen;
+  "R", Flags_Recent;]
    
 (* get the keyword mapping, hardcoded for now TBD *)
 let get_map_to_flag mailbox =
@@ -427,16 +428,16 @@ struct
     (* uidlist needs to be locked TBD , maybe have a separate thread to sync 
      * the read/write(Lwt_mvar?)
      *)
-    (* UID list -> don't need to read it in, just append!!!!! *)
     let file = make_message_file_name (MaildirPath.to_maildir t.mailbox) message_metadata in
     let tmp_file = MaildirPath.file_path t.mailbox (`Tmp file) in
     append_uidlist (MaildirPath.file_path t.mailbox `Uidlist) message_metadata.uid file >>= fun () ->
-    Utils.with_file tmp_file ~flags:[Unix.O_WRONLY] ~perms:0o660 ~mode:Lwt_io.Output
+    Utils.with_file tmp_file ~flags:[Unix.O_CREAT;Unix.O_WRONLY] ~perms:0o660 ~mode:Lwt_io.Output
     ~f:(fun co ->
       Lwt_io.write co (Sexp.to_string (Mailbox.Message.sexp_of_t message))
     ) >>= fun () ->
     let cur_file = current t file in
-    Lwt_unix.rename tmp_file cur_file
+    Lwt_unix.rename tmp_file cur_file >>
+    return ()
 
   let get_file t position uids = 
     let len = List.length uids in

@@ -29,7 +29,6 @@ let factory (mailboxt:amailboxt) ?mailbox2 mailbox =
   let open Storage in
   let open Mailbox_storage in
   let open Maildir_storage in
-  Printf.printf "FACTORY ==================== %s\n%!" mailbox;
   match srv_config.!data_store with
   | `Irmin -> 
     build_strg_inst (module IrminStorage) (Utils.option_value_exn mailboxt.user)
@@ -106,7 +105,6 @@ let list_ mailboxt subscribed mailbox wilcards =
   (* item is relative to the mailbox *)
   let select_item acc path item cnt =
     (** get item path relative to the relative root **)
-    Printf.printf "list matching %s %s\n%!" mailbox wilcards;
     if match_regex path ~regx:wilcards then
       ((item cnt) :: acc)
     else
@@ -157,7 +155,6 @@ let list_adjusted mailboxt subscribed reference mailbox =
   let open Regex in
   let flags = ["\\Noselect"] in
   if mailbox = "" then (
-    Printf.printf "special listmbx -%s- -%s-\n%!" reference mailbox;
     (* reference doesn't start with / *)
     if match_regex reference ~regx:"^\"?\\([^/]+/\\)" then
       return ([Str.matched_group 1 reference,flags])
@@ -165,11 +162,9 @@ let list_adjusted mailboxt subscribed reference mailbox =
       return (["/",flags])
   (* reference starts with / *)
   ) else if match_regex reference ~regx:"^\"?/" then (
-    Printf.printf "special blank listmbx -%s- -%s-\n%!" reference mailbox;
     return ([])
   ) else (
     let (path,regx) = get_path_and_regex reference mailbox in
-    Printf.printf "regular listmbx -%s- -%s- -%s- -%s-\n%!" reference mailbox path regx;
     list_ mailboxt subscribed path regx >>= 
       fun acc -> return (add_list reference mailbox acc)
   )

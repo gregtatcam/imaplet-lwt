@@ -76,7 +76,6 @@ let parse_postfix (section:string) : (bodyPart * string) =
   let sect = group "[^]]*" in
   let body_part = (group number) ^ (optional (dot ^ (group nz_number))) in
   let all = all_of_it ((bkt_list_of sect) ^ (optional (ang_list_of (optional body_part)))) in
-  Printf.printf "parse_postfix %s %s\n%!" section all;
   if match_regex section ~regx:all then
     let suffix = Str.matched_group 1 section in
     let postfix = try (Str.matched_group 3 section) with _ -> "" in
@@ -105,9 +104,7 @@ let parse_text (str:string) : (sectionPart * sectionText option) =
 (**  : (sectionSpec,int,int) = **)
 let parse_fetch_section (section:string) : (sectionSpec * bodyPart) =
   let section = replace "^[^[]+" "" section in
-  Printf.printf "parse_fetch_section %s\n%!" section;
   let (body_part,section) = parse_postfix section in
-  Printf.printf "parse_fetch_section %s\n%!" section;
   if match_regex ~case:false section ~regx:(sol ^ sec_part_regex) then (
     let (part,text) = parse_text section in
     SectionPart (part,text), body_part

@@ -54,7 +54,7 @@ Executable imaplet
   CompiledObject  : native
   BuildTools	  : ocamlbuild
   MainIs	  : imaplet.ml
-  BuildDepends	  : lwt,lwt.unix,lwt.syntax,tls.lwt,sexplib.syntax,threads,str,cstruct.unix,irmin.unix,irmin.backend,email_message,nocrypto
+  BuildDepends	  : lwt,lwt.unix,lwt.syntax,tls.lwt,sexplib.syntax,threads,str,cstruct.unix,irmin.unix,email_message,nocrypto
   DataFiles	  : certificates/server.pem($datadir/imaplet),certificates/server.key($datadir/imaplet),imaplet.cf($datadir/imaplet),users($datadir/imaplet)
 
 Executable imaplet_lmtp
@@ -73,7 +73,7 @@ Executable imaplet_irmin_read
   CompiledObject  : native
   BuildTools	  : ocamlbuild
   MainIs	  : imaplet_irmin_read.ml
-  BuildDepends	  : lwt,irmin.backend,irmin.unix,sexplib.syntax,str,email_message,threads
+  BuildDepends	  : lwt,irmin.unix,sexplib.syntax,str,email_message,threads
 
 Executable imaplet_irmin_build
   Build		  : true
@@ -82,7 +82,7 @@ Executable imaplet_irmin_build
   CompiledObject  : native
   BuildTools	  : ocamlbuild
   MainIs	  : imaplet_irmin_build.ml
-  BuildDepends	  : lwt,lwt.unix,email_message,str,sexplib.syntax,threads,irmin.unix,irmin.backend
+  BuildDepends	  : lwt,lwt.unix,email_message,str,sexplib.syntax,threads,irmin.unix
 
 Executable imaplet_maildir_index
   Build		  : true

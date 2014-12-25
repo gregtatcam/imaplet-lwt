@@ -92,7 +92,6 @@ let handle_idle context =
   begin
   match Amailbox.user context.!mailbox with
   | Some user -> 
-    Printf.printf "handle_idle ======== %s %s\n%!" (Int64.to_string context.id) user;
     Connections.add_id context.id user context.!netw context.!capability
   | None -> ()
   end;
@@ -185,6 +184,12 @@ let handle_select context mailbox condstore rw =
       write_resp context.!netw (Resp_Ok (Some RespCode_Uidnext, string_of_int header.uidnext)) >>
       write_resp context.!netw (Resp_Ok (Some RespCode_Highestmodseq, Int64.to_string header.modseq)) >>
       begin
+      if header.unseen <> 0 then
+        write_resp context.!netw (Resp_Ok (Some RespCode_Unseen, string_of_int header.unseen))
+      else
+        return ()
+      end >>
+      begin 
       if rw then
         response context (Some State_Selected) (Resp_Ok(Some RespCode_Read_write, "")) (Some mbx)
       else
@@ -277,7 +282,6 @@ let idle_clients context =
       | Some status ->
         Lwt_list.iter_s (fun i ->
           let ctx = List.nth context.!connections i in
-          Printf.printf "=========== idle_clients %s %s\n%!" (Int64.to_string ctx.id) ctx.user;
           write_resp_untagged ctx.outch ("EXISTS " ^ (string_of_int status.count)) >>
           write_resp_untagged ctx.outch ("RECENT " ^ (string_of_int status.recent))
         ) idle
@@ -289,7 +293,6 @@ let idle_clients context =
 
 (** handle append **)
 let handle_append context mailbox flags date literal =
-  Printf.printf "handle_append\n%!";
   (** is the size sane? **)
   let size = (match literal with
   | Literal n -> n
@@ -322,7 +325,6 @@ let handle_close context =
   response context (Some State_Authenticated) (Resp_Ok(None, "CLOSE completed")) (Some mbx)
 
 let rec print_search_tree t indent =
-  Printf.printf "search ------\n%!";
   let indent = indent ^ " " in
   let open Amailbox in
   match t with
@@ -356,7 +358,6 @@ let handle_search context charset search buid =
     response context None (Resp_Ok(None, "SEARCH completed")) None
 
 let handle_fetch context sequence fetchattr changedsince buid =
-  Printf.printf "handle_fetch\n";
   let resp_prefix = resp_highestmodseq (changedsince <> None) context in
   Amailbox.fetch context.!mailbox resp_prefix (write_resp_untagged
       context.!netw) sequence fetchattr changedsince buid >>= function
@@ -367,7 +368,6 @@ let handle_fetch context sequence fetchattr changedsince buid =
     response context None (Resp_Ok(None, "FETCH completed")) None
 
 let handle_store context sequence flagsatt flagsval changedsince buid =
-  Printf.printf "handle_store %d %d\n" (List.length sequence) (List.length flagsval);
   let resp_prefix = resp_highestmodseq (changedsince <> None) context in
   Amailbox.store context.!mailbox resp_prefix (write_resp_untagged context.!netw) sequence
       flagsatt flagsval changedsince buid >>= function
@@ -385,7 +385,6 @@ let handle_store context sequence flagsatt flagsval changedsince buid =
     response context None (Resp_Ok(None, modified ^ conditional ^ "STORE " ^ success)) None
 
 let handle_copy context sequence mailbox buid =
-  Printf.printf "handle_copy %d %s\n" (List.length sequence) mailbox;
   Amailbox.copy context.!mailbox mailbox sequence buid >>= function
   | `NotExists -> response context None (Resp_No(None,"Mailbox doesn't exist")) None
   | `NotSelectable ->  response context None (Resp_No(None,"Mailbox is not selectable")) None
@@ -393,7 +392,6 @@ let handle_copy context sequence mailbox buid =
   | `Ok -> response context None (Resp_Ok(None, "COPY completed")) None
 
 let handle_expunge context =
-  Printf.printf "handle_expunge\n";
   Amailbox.expunge context.!mailbox (write_resp_untagged context.!netw) >>= function
   | `NotExists -> response context  None (Resp_No(None,"Mailbox doesn't exist")) None
   | `NotSelectable ->  response context  None (Resp_No(None,"Mailbox is not selectable")) None
@@ -449,15 +447,14 @@ let handle_command context =
   let state = context.!state in
   let command = (Stack.top context.!commands).command in
   match command with
-  | Any r -> Printf.printf "handling any\n%!"; handle_any context r
+  | Any r -> handle_any context r
   | Notauthenticated r when state = State_Notauthenticated-> 
-    Printf.printf "handling nonauthenticated\n%!"; handle_notauthenticated context r
+    handle_notauthenticated context r
   | Authenticated r when state = State_Authenticated || state = State_Selected -> 
-    Printf.printf "handling authenticated\n%!"; handle_authenticated context r
+    handle_authenticated context r
   | Selected r when state = State_Selected -> 
-    Printf.printf "handling selected\n%!"; handle_selected context r
-  | Done -> Printf.printf "Done, should log out\n%!"; 
-    response context (Some State_Logout) (Resp_Bad(None,"")) None
+    handle_selected context r
+  | Done -> response context (Some State_Logout) (Resp_Bad(None,"")) None
   | _ -> response context None (Resp_Bad(None, "Bad Command")) None
 
 (* read a line from the network
@@ -465,7 +462,6 @@ let handle_command context =
  * then read N bytes, otherwise return the buffer
  *)
 let rec read_network reader writer buffer =
-  Printf.printf "read_network\n%!";
   begin
   catch ( fun () ->
   Lwt_io.read_line_opt reader >>= function
@@ -483,7 +479,6 @@ let rec read_network reader writer buffer =
   (** does command end in the literal {[0-9]+} ? **)
   let i = match_regex_i buff ~regx:"{\\([0-9]+\\)[+]?}$" in
   if i < 0 then (
-    Printf.printf "line not ending in literal\n%!";
     Buffer.add_string buffer buff;
     Buffer.add_string buffer "\r\n";
     return (`Ok (Buffer.contents buffer))
@@ -494,18 +489,14 @@ let rec read_network reader writer buffer =
     let sub = Str.string_before buff i in
     let literal = Str.string_after buff i in
     Buffer.add_string buffer sub;
-    Printf.printf "line is ending in literal %d %s --%s--\n%!" len literal sub;
     if match_regex ~case:false (Buffer.contents buffer) ~regx:append_regex ||
       match_regex ~case:false (Buffer.contents buffer) ~regx:lappend_regex then (
-      Printf.printf "handling append\n%!";
       Buffer.add_string buffer literal;
       Buffer.add_string buffer "\r\n";
       return (`Ok (Buffer.contents buffer))
     ) else if ((Buffer.length buffer) + len) > 10240 then (
-      Printf.printf "command size is too big: %s\n%!" (Buffer.contents buffer);
       return (`Error "command too long")
     ) else (
-      Printf.printf "handling another command with the literal\n%!";
       (if match_regex literal ~regx:"[+]}$" = false then
         write_resp writer (Resp_Cont(""))
       else
@@ -520,7 +511,6 @@ let rec read_network reader writer buffer =
         Buffer.add_string buffer str;
         read_network reader writer buffer
       | `Timeout ->
-        Printf.printf "network timeout\n%!";
         return (`Error "timeout")
     )
   )
@@ -539,7 +529,6 @@ let get_command msgt context =
     let current_cmd = 
     (
       let current_cmd = (Parser.request (Lex.read (ref `Tag)) lexbuff) in
-      Printf.printf "get_request_context, returned from parser\n%!"; Pervasives.flush stdout;
       (* if last command idle then next could only be done *)
       if Stack.is_empty context.!commands then
         current_cmd
@@ -563,8 +552,8 @@ let get_command msgt context =
     return (`Ok )
   )
   (function 
-  | SyntaxError e -> Printf.printf "parse_command error %s\n%!" e; return (`Error (e))
-  | Parser.Error -> Printf.printf "parse_command bad command\n%!"; return (`Error ("bad command, parser"))
+  | SyntaxError e -> return (`Error (e))
+  | Parser.Error -> return (`Error ("bad command, parser"))
   | Interpreter.InvalidSequence -> return (`Error ("bad command, invalid sequence"))
   | Dates.InvalidDate -> return (`Error("bad command, invalid date"))
   | ExpectedDone -> return (`Error("Expected DONE"))

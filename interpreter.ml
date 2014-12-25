@@ -19,7 +19,6 @@ open Regex
 open Storage_meta
 open Utils
 open Dates
-open Printf
 
 exception InvalidSequence
 
@@ -77,10 +76,8 @@ let is_message_rfc822 (email:Email.t) : bool =
 
 (** get encapsulated message or None **)
 let get_message_email (email:Email.t) (stream:Octet_stream.t) : Email.t option = 
-  printf "get_message_email %b %s\n%!" (is_message_rfc822 email) (mime_type email);
   try
     if is_message_rfc822 email then (
-      printf "get_message_email %s\n%!" (Octet_stream.to_string stream);
       Some (Email.of_octet_stream stream)
     ) else
       None
@@ -289,25 +286,21 @@ let exec_fetch_modseq (modseq:int64): (string) =
 
 (** fetch rfc822 message **)
 let exec_fetch_rfc822 (email:Email.t) : string =
-  printf "%s\n%!" (Email.to_string email);
   let (str,length) = email_to_str email in
   "RFC822 {" ^ (string_of_int length) ^ "}" ^ crlf ^ str
 
 (** fetch rfc822 header **)
 let exec_fetch_rfc822header (email:Email.t) : string =
-  printf "%s\n%!" (Email.to_string email);
   let (str,length) = email_headers_pruned_to_str (Email.header email) in
   "RFC822.HEADER {" ^ (string_of_int length) ^ "}" ^ crlf ^ str
 
 (** fetch rfc822 text **)
 let exec_fetch_rfc822text (email:Email.t) : string =
-  printf "%s\n%!" (Email.to_string email);
   let (str,length) = email_content_to_str (email) in
   "RFC822.TEXT {" ^ (string_of_int length) ^ "}" ^ crlf ^ str
 
 (** fetch rfc822 text **)
 let exec_fetch_rfc822size (email:Email.t) : string =
-  printf "%s\n%!" (Email.to_string email);
   let (_,length) = email_to_str email in
   "RFC822.SIZE " ^ (string_of_int length) 
   
@@ -587,8 +580,6 @@ let body_part_str (l:int list) (str:string) : (string*string) =
 
 let exec_fetch_header ?(incl=MapStr.empty) ?(excl=MapStr.empty) ?(regex=false)
 (email:Email.t) : string =
-  printf "exec_fetch_header %d %d %b\n%!" (MapStr.cardinal incl)
-  (MapStr.cardinal excl) regex;
   let str,_ = email_headers_to_str ~incl ~excl ~regex (Email.header email) in str
 
 let exec_fetch_text (email:Email.t) : string =
@@ -644,22 +635,21 @@ exception SectionDone
 let find_fetch_section (email:Email.t) (secPart:sectionPart) : Email.t =
   try
     List.fold_left (fun email part ->
-      printf "find_fetch_section %d type: %s\n%!" part (mime_type email);
       if part = 0 then
         email
       else (
         let content = Email.content email in
         match content with
-        | `Data cont -> printf "find_fetch_section data\n%!";raise SectionDone
-        | `Message email -> printf "find_fetch_section message\n%!";raise SectionDone
-        | `Multipart lemail -> printf "find_fetch_section multipart >= \n%!";
+        | `Data cont -> raise SectionDone
+        | `Message email -> raise SectionDone
+        | `Multipart lemail -> 
           if part >= (List.length lemail) then
             raise SectionDone
           else
             List.nth lemail part
       )
     ) email secPart
-  with SectionDone -> printf "find_fetch_section not found\n%!"; Email.empty()
+  with SectionDone -> Email.empty()
 
 let exec_fetch_sectext (email:Email.t) (secPart:sectionPart) (secText:sectionText option)
 (spec:sectionSpec) (part:bodyPart) =
@@ -686,7 +676,6 @@ let get_params (str:string) : string =
   let params = 
   try
     let l = Str.split (Str.regexp "[ ]*;[ ]*") str in
-    printf "%d\n" (List.length l);
     List.fold_left (fun acc nv ->
       if match_regex nv ~regx:"^[ ]*\\([^= ]+\\)[ ]*=[ ]*\\([^ ]+\\|\"[^\"]+\"\\)[ ]*$" then (
         let name = Str.matched_group 1 nv in
@@ -710,7 +699,6 @@ message/rfc822 ; name="Re: thread test.eml"
 **)
 let fetch_type_and_param (email:Email.t) : (string*string*string) =
   let str,_ = email_headers_to_str (Email.header email) in
-  printf "fetch_type_and_param %s\n%!" str;
   let media = media_type email in
   let t = (Media_type.mime_type media) in
   let st = (Media_type.mime_subtype media) in
@@ -816,13 +804,11 @@ let format_simple (basic:bodystr_fields) (body:bool) : string =
     else
       []
   in
-  printf "format_simple %b %d\n%!" body (List.length extension);
   let all = List.concat [main;extension] in
   String.concat " " all
 
 let fetch_message_bodystructure (email:Email.t) (basic:bodystr_fields) (body:bool)
   (bodystructure_folder:Email.t->bool->string) : string =
-  printf "fetch_message_bodystructure\n%!";
   let main =(format_basic basic) ^ " " ^
   (list_of (exec_fetch_envelope_unf (headers_to_map (Email.header email)))) ^ 
   (bodystructure_folder email body) ^ " " ^ basic.blines in
@@ -837,12 +823,10 @@ let fetch_message_bodystructure (email:Email.t) (basic:bodystr_fields) (body:boo
   list_of (all)
 
 let fetch_simple_bodystructure (email:Email.t) (basic:bodystr_fields) (body:bool) : string =
-  printf "fetch_text_or_basic_bodystructure %s\n%!" basic.btype;
   list_of (format_simple basic body)
 
 let fetch_multipart_bodystructure (lemail:Email.t list) (basic:bodystr_fields) (body:bool)
   (bodystructure_folder:Email.t->bool->string) : string =
-  printf "fetch_multipart_bodystructure %s\n%!" basic.btype;
   let main = (List.fold_left
   (fun acc email ->
     acc ^ (bodystructure_folder email body) 
@@ -866,7 +850,7 @@ let rec fold_email_bodystructure (email:Email.t) (body:bool): string =
     | Some email -> fetch_message_bodystructure email basic body fold_email_bodystructure
     | None -> fetch_simple_bodystructure email basic body
     )
-  | `Message email -> printf "fold_email_bodystructure message %s\n%!" basic.btype; 
+  | `Message email -> 
     fetch_message_bodystructure email basic body fold_email_bodystructure
   | `Multipart lemail -> fetch_multipart_bodystructure lemail basic body fold_email_bodystructure
 

@@ -132,7 +132,7 @@
 %{
 open Imaplet_types
 let debug format = 
-  Printf.printf format (*(fun format a -> ())*)
+  (*Printf.printf format*) (fun format a -> ())
 %}
 
 %start <Imaplet_types.clientRequest> request

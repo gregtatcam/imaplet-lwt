@@ -27,9 +27,9 @@ let next_line lexbuf =
                pos_lnum = pos.pos_lnum + 1
     }
 
-let debug frmt = printf frmt (*(fun format a -> ())*)
+let dummy f a = ()
 
-let print_first f = if !f = true then printf "first is true\n" else printf "first is false\n"
+let debug frmt = (*printf frmt*) dummy frmt 
 
 let match_date str =
 let group re = "\\(" ^ re ^ "\\)" in

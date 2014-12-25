@@ -75,6 +75,31 @@ let commands f =
       with ex -> Printf.printf "%s\n%!" (Printexc.to_string ex)
   with _ -> usage ()
 
+
+let validate_config () =
+  let open Server_config in
+  let err res msg =
+    begin
+    if res = false then (
+      Printf.printf "%s %s\n%!" msg Install.config_path;
+      assert (false)
+    ) else
+      return ()
+    end
+  in
+  match srv_config.!data_store with
+  | `Irmin -> 
+    Utils.exists srv_config.irmin_path Unix.S_DIR >>= fun res ->
+    err res "Invalid Irminsule path in"
+  | `Mailbox ->
+    Utils.exists srv_config.!inbox_path Unix.S_REG >>= fun res ->
+    err res "Invalid Inbox path in " >>
+    Utils.exists srv_config.!mail_path Unix.S_DIR >>= fun res ->
+    err res "Invalid Mail path in "
+  | `Maildir ->
+    Utils.exists srv_config.!mail_path Unix.S_DIR >>= fun res ->
+    err res "Invalid Maildir path in "
+
 (**
  * start the server
 **)
@@ -84,6 +109,7 @@ let () =
       (fun net port ssl tls store ->
         Lwt_main.run (catch(fun() ->
             update_config net port ssl tls store;
+            validate_config () >>
             Server.create ()
           )
           (fun ex -> Printf.printf "imaplet: fatal exception: %s %s"

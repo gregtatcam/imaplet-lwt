@@ -65,7 +65,6 @@ let srv_config =
       lines
     with _ -> []
   in
-  Printf.printf "##### loading configuration file #####\n%!";
   let config = {
     rebuild_irmin = false;
     inbox_path = ref "";(*"/var/mail";*)

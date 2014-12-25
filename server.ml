@@ -29,7 +29,6 @@ let msgt_to_str = function
   | `Client -> "client"
 
 let init_socket addr port =
-  Printf.printf "imaplet: creating socket %s %d\n%!" addr port;
   let sockaddr = Unix.ADDR_INET (Unix.inet_addr_of_string addr, port) in
   let socket = Lwt_unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
   Lwt_unix.setsockopt socket Unix.SO_REUSEADDR true;
@@ -38,9 +37,6 @@ let init_socket addr port =
 
 let init_unix_socket file =
   let open Lwt_unix in
-  let open Server_config in
-  Printf.printf "imaplet: creating unix socket for lmtp:%s %s\n%!"
-  srv_config.data_path file;
   (catch (fun () -> mkdir (Filename.dirname file) 0o777)) 
   (function _ -> return ()) >>= fun () ->
   catch (fun () -> unlink file)
@@ -52,7 +48,6 @@ let init_unix_socket file =
   getpwnam "postfix" >>= fun (pw:Lwt_unix.passwd_entry) ->
   chown file pw.pw_uid pw.pw_gid >>= fun () ->
   chmod file  0o777 >>= fun () ->
-  Printf.printf "imaplet: created unix socket for lmtp\n%!" ;
   return socket
 
 let create_srv_socket addr = 
@@ -117,7 +112,6 @@ let init_connection msgt w =
     match msgt with
     | `Lmtp -> return ()
     | `Client ->
-      Printf.printf "imaplet: writing initial capability response to %s\n%!" (msgt_to_str msgt);
       let resp = "* OK [CAPABILITY " ^ Configuration.capability ^ "] Imaplet ready.\r\n" in
       Lwt_io.write w resp >>
       Lwt_io.flush w
@@ -164,7 +158,6 @@ let create () =
       )
       (function _ -> rem_id id; try_close netr >> try_close netw >>
       try_close_sock sock_c) >>= fun () ->
-      Printf.printf "imaplet: %s connection is closed\n%!" (msgt_to_str msgt);
       return ()
     ); 
     connect f msgt sock cert

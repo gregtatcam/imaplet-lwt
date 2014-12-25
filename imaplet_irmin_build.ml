@@ -262,6 +262,7 @@ let create_account user subscriptions =
   ) (fun _ -> return ())
 
 let get_dovecot_params path =
+  catch (fun () ->
   let alpha = "abcdefghijklmnopqrstuvwxyz" in
   let strm = Lwt_io.lines_of_file (Filename.concat path "dovecot-keywords") in
   Lwt_stream.fold_s (fun line acc -> 
@@ -275,7 +276,8 @@ let get_dovecot_params path =
         return acc
     ) else
       return acc
-  ) strm (MapChar.empty) >>= fun flagsmap ->
+  ) strm (MapChar.empty)
+  ) (fun _ -> return (MapChar.empty)) >>= fun flagsmap ->
   catch( fun () ->
     let strm = Lwt_io.lines_of_file (Filename.concat path "dovecot-uidlist") in
     Lwt_stream.fold_s (fun line (first,uidvalidity,acc) -> 

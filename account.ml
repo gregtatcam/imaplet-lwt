@@ -89,7 +89,6 @@ let plain_auth text =
 
 (** TBD authenticate plain against users file **)
 let authenticate auth_type text =
-  Printf.printf "authenticating %s----\n%!" text;
   match auth_type with 
     | Auth_Plain -> plain_auth text
     | _ -> return (`Error (Resp_No (None,"Authentication Type")))
