@@ -82,6 +82,7 @@ module Lazy_sequence : sig
     type +'a t
     val of_list: 'a list -> 'a t
     val iter: 'a t -> f:('a -> unit) -> unit
+    val fold: 'a t -> f:('b -> 'a -> 'b) -> init:'b -> 'b
     val empty: _ t 
     val read_lines: string -> string t
     val initialize: (unit -> 'a t) -> 'a t
@@ -165,6 +166,18 @@ module Lazy_sequence : sig
         | Cons (x, tail) -> f x; iter (tail ()) ~f
         in
         wrap_finallys finallys (fun () -> iter t ~f)
+
+    let fold t ~f ~init =
+      let finallys = ref [] in
+      let rec fold t ~f ~init =
+        match t with
+        | Nil -> init
+        | Lazy tail -> fold (tail ()) ~f ~init
+        | Protect (finally, tail) -> add finally finallys;
+          fold tail ~f ~init
+        | Cons (x, tail) -> let acc = f init x in fold (tail ()) ~f ~init:acc
+        in
+        wrap_finallys finallys (fun () -> fold t ~f ~init)
 
   module Iterator = struct
     type 'a seq = 'a t

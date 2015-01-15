@@ -28,6 +28,7 @@ module type With_container = sig
   val t_of_file : string -> t
   val of_string : string -> t
   val iter_string : t -> f:(string -> unit) -> unit
+  val fold_message : t -> f:('a -> Message.t -> 'a) -> init:'a -> 'a
 end
 
 module With_lazy_list : With_container with type t = Message.t Lazy_list.t;;

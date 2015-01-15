@@ -269,6 +269,7 @@ module type With_container = sig
   val t_of_file : string -> t
   val of_string : string -> t
   val iter_string : t -> f:(string -> unit) -> unit
+  val fold_message : t -> f:('a -> Message.t -> 'a) -> init:'a -> 'a
 end
 
 module With_lazy_list =
@@ -291,6 +292,7 @@ struct
   ;;
 
   let iter_string t ~f = Lazy_list.iter t ~f:(Fn_.compose f Message.to_string);;
+  let fold_message t ~f ~init = Lazy_list.fold_left ~f ~init t;;
 end
 
 
@@ -321,4 +323,5 @@ module With_seq = struct
 
   let iter_string t ~f =
     Lazy_sequence.iter t ~f:(Fn_.compose f Message.to_string);;
+  let fold_message t ~f ~init = Lazy_sequence.fold ~f ~init t;;
 end
