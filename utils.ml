@@ -133,7 +133,7 @@ let option_value_exn = function
 let list_find l f =
   try
     let _ = List.find f l in true
-  with _ -> false
+  with Not_found -> false
 
 let list_findi l f =
   let rec findi l i f =

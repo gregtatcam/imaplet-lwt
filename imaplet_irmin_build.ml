@@ -34,7 +34,9 @@ let get_mailbox_structure str =
     let dir = (Str.matched_group 1 str) in
     let fs = try let _ = Str.matched_group 2 str in true with _ -> false in
     `Maildir (dir,fs)
-  ) else
+  ) else if match_regex str ~regx:"^gmail:\\([^:]+\\)$" then (
+    `Gmail (Str.matched_group 1 str)
+  ) else 
     raise InvalidCommand
 
 (* -u : user
@@ -52,7 +54,8 @@ let rec args i user mailbox =
     | _ -> raise InvalidCommand
 
 let usage () =
-  Printf.printf "usage: imaplet_irmin_build -u [user] -m [mbox:inbox-path:mailboxes-path|maildir:mailboxes-path]\n%!"
+  Printf.printf "usage: imaplet_irmin_build -u [user] -m
+  [mbox:inbox-path:mailboxes-path|maildir:mailboxes-path|gmail:mbox-path]\n%!"
 
 let commands f =
   try 
@@ -126,6 +129,52 @@ let append ist ?uid message size flags =
   )
   (fun ex -> Printf.printf "exception: %s\n%!" (Printexc.get_backtrace()); return ())
 
+let mailbox_of_gmail_label message = 
+  if Regex.match_regex message ~regx:"^X-Gmail-Labels: \\(.+\\)$" = false then 
+    "INBOX"
+  else (
+    let labels = Str.split (Str.regexp ",") (Str.matched_group 1 message) in
+    let mailbox =
+    if List.length labels = 0 then
+      "INBOX"
+    else if List.length labels = 1 then (
+      match (List.hd labels) with
+      | "Sent" -> "Sent Messages"
+      | "Important" | "Starred" -> "INBOX"
+      | "Trash" -> "Deleted Messages"
+      | label -> label
+    ) else (
+      let (sent,trash,draft,label) =
+      List.fold_left (fun (sent,trash,draft,label) i -> 
+        match i with 
+        | "Important" | "Starred" -> (sent,trash,draft,label)
+        | "Sent" -> (true,trash,draft,label)
+        | "Draft" -> (sent,trash,true,label)
+        | "Trash" -> (sent,true,draft,label)
+        | label -> (sent,trash,draft,label)
+      ) (false,false,false,"") labels
+      in
+      if label = "" then (
+        if sent = false && trash = false && draft = false then
+          "INBOX"
+        else if trash = true then
+          "Deleted Messages"
+        else if sent = true then
+          "Sent Messages"
+        else
+          "Drafts"
+      ) else if label = "Inbox" then
+        "INBOX"
+      else
+        label
+    )
+    in
+    if mailbox = "Inbox" then
+      "INBOX"
+    else
+      Regex.replace ~regx:"[Imap]/" ~tmpl:"" mailbox 
+  )
+
 let append_messages ist path flags =
   Printf.printf "#### appending messages %s\n%!" path;
   let open Email_message.Mailbox in
@@ -146,6 +195,36 @@ let append_messages ist path flags =
   );
   Lwt_stream.iter_s (fun (message,size) ->
     append ist message size flags
+  ) strm
+  
+let gmail_mailboxes = ref MapStr.empty
+
+let append_gmail_messages user path flags =
+  Printf.printf "#### appending gmail messages %s\n%!" path;
+  let open Email_message.Mailbox in
+  let (strm,strm_push) = Lwt_stream.create () in
+  async ( fun () ->
+    let wseq = With_seq.t_of_file path in
+    With_seq.iter_string wseq (fun message ->
+      let size = String.length message in
+      let mailbox = mailbox_of_gmail_label message in
+      let message = Utils.make_email_message message in
+      strm_push (Some (message, mailbox, size))
+    );
+    strm_push None;
+    return ()
+  );
+  Lwt_stream.iter_s (fun (message,mailbox,size) ->
+    begin
+      try 
+        let _ = MapStr.find mailbox !gmail_mailboxes in
+        IrminStorage.create user mailbox 
+      with Not_found ->
+        gmail_mailboxes := MapStr.add mailbox "" !gmail_mailboxes;
+        create_mailbox user mailbox 
+    end >>= fun ist ->
+    append ist message size flags >>= fun () ->
+    IrminStorage.commit ist
   ) strm
 
 let append_maildir_message ist ?uid path flags =
@@ -340,17 +419,26 @@ let create_maildir user mailboxes fs =
     (Printexc.get_backtrace());return())
   )
 
+let create_gmail_maildir user mailbox =
+  append_gmail_messages user mailbox []
+
 let () =
   commands (fun user mbx ->
     Lwt_main.run (
       catch ( fun () ->
         match mbx with
         | `Mbox (inbox,mailboxes) -> 
+          Printf.printf "porting from mbox\n%!";
           create_account user (Filename.concat mailboxes ".subscriptions") >>
           create_mbox user inbox mailboxes
         | `Maildir (mailboxes,fs) -> 
+          Printf.printf "porting from maildir\n%!";
           create_account user (Filename.concat mailboxes "subscriptions") >>
           create_maildir user mailboxes fs
+        | `Gmail mailbox ->
+          Printf.printf "porting from gmail\n%!";
+          create_account user (Filename.concat mailbox "subscriptions") >>
+          create_gmail_maildir user mailbox 
       )
       (fun ex -> Printf.printf "exception: %s %s\n%!" (Printexc.to_string ex)
       (Printexc.get_backtrace());return())
