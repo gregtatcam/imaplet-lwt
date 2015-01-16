@@ -542,9 +542,7 @@ module IrminMailbox :
       IrminIntf_tr.update mbox.trans (get_key (`Postmark uid)) postmark_sexp_str >>
       IrminIntf_tr.update mbox.trans (get_key (`Email uid)) email_sexp_str >>
       IrminIntf_tr.update mbox.trans (get_key (`Headers uid)) headers_sexp_str >>
-      (*
       update_index_uid mbox message_metadata.uid >>
-      *)
       return ()
 
     let append_message mbox message message_metadata =
