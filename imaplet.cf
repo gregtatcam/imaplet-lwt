@@ -6,19 +6,6 @@ max_msg_size 10000000
 # server name in capability response
 imap_name imaplet
 
-# imap server address, this is always the loopback
-# the front-end server handles either regular or ssl connection
-imap_addr 127.0.0.1
-
-# internal imap server port
-imap_port 6000
-
-# irminsule storage address
-irmin_addr 127.0.0.1
-
-# irminsule storage port
-irmin_port 6001
-
 # irminsule location
 irmin_path /tmp/irmin/test
 
@@ -65,3 +52,9 @@ key_name server.key
  
 # type of data storage like mailbox,mbox,irmin
 data_store irmin
+
+# encrypt message
+encrypt true
+
+# compress message, but not attachment
+compress true

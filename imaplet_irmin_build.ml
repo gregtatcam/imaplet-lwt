@@ -34,8 +34,8 @@ let get_mailbox_structure str =
     let dir = (Str.matched_group 1 str) in
     let fs = try let _ = Str.matched_group 2 str in true with _ -> false in
     `Maildir (dir,fs)
-  ) else if match_regex str ~regx:"^gmail:\\([^:]+\\)$" then (
-    `Gmail (Str.matched_group 1 str)
+  ) else if match_regex str ~regx:"^archive:\\([^:]+\\)$" then (
+    `Archive (Str.matched_group 1 str)
   ) else 
     raise InvalidCommand
 
@@ -55,7 +55,7 @@ let rec args i user mailbox =
 
 let usage () =
   Printf.printf "usage: imaplet_irmin_build -u [user] -m
-  [mbox:inbox-path:mailboxes-path|maildir:mailboxes-path|gmail:mbox-path]\n%!"
+  [mbox:inbox-path:mailboxes-path|maildir:mailboxes-path|archive:mbox-path]\n%!"
 
 let commands f =
   try 
@@ -435,7 +435,7 @@ let () =
           Printf.printf "porting from maildir\n%!";
           create_account user (Filename.concat mailboxes "subscriptions") >>
           create_maildir user mailboxes fs
-        | `Gmail mailbox ->
+        | `Archive mailbox ->
           Printf.printf "porting from gmail\n%!";
           create_account user (Filename.concat mailbox "subscriptions") >>
           create_gmail_maildir user mailbox 

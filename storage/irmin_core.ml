@@ -31,6 +31,7 @@ exception InvalidKey of string
 module Store = Irmin.Basic (Irmin_git.FS) (Irmin.Contents.String)
 module View = Irmin.View(Store)
 
+module MapStr = Map.Make(String)
 
 module Key_ :
   sig
@@ -412,7 +413,7 @@ module IrminMailbox :
       [`NotFound|`Eof|`Ok of (Mailbox.Message.t * mailbox_message_metadata)] Lwt.t
     val read_message_raw : t -> ?filter:(searchKey) searchKeys -> 
       [`Sequence of int|`UID of int] ->
-      [`NotFound|`Eof|`Ok of (Mailbox.Message.t option * string * string * string * mailbox_message_metadata)] Lwt.t
+      [`NotFound|`Eof|`Ok of (Mailbox.Message.t * mailbox_message_metadata)] Lwt.t
     val read_message_metadata : t -> [`Sequence of int|`UID of int] -> 
       [`NotFound|`Eof|`Ok of mailbox_message_metadata] Lwt.t
     val delete_message : t -> [`Sequence of int|`UID of int] -> unit Lwt.t
@@ -435,6 +436,10 @@ module IrminMailbox :
     | `Email uid -> Key_.t_of_path ("messages/" ^ (string_of_int uid) ^ "/email")
     | `Metamessage uid -> Key_.t_of_path ("messages/" ^ (string_of_int uid) ^ "/meta")
     | `Uid uid -> Key_.t_of_path ("messages/" ^ (string_of_int uid))
+    | `Attachments (uid,contid) -> 
+      match contid with
+      | None -> Key_.t_of_path ("messages/" ^ (string_of_int uid) ^ "/attachments")
+      | Some contid -> Key_.t_of_path ("messages/" ^ (string_of_int uid) ^ "/attachments/" ^ contid)
 
     (* commit should be called explicitly on each created mailbox to have the
      * changes commited to Irmin
@@ -534,23 +539,22 @@ module IrminMailbox :
       | None -> return None
       | Some (i,_) -> return (Some ((List.length uids) - i))
 
-    let append_message_raw mbox ~postmark_sexp_str ~headers_sexp_str ~email_sexp_str 
-        message_metadata =
+    let append_message_raw mbox ~postmark ~headers ~content ~attachments message_metadata =
       let uid = message_metadata.uid in
       IrminIntf_tr.update mbox.trans (get_key (`Metamessage uid)) 
         (Sexp.to_string (sexp_of_mailbox_message_metadata message_metadata)) >>
-      IrminIntf_tr.update mbox.trans (get_key (`Postmark uid)) postmark_sexp_str >>
-      IrminIntf_tr.update mbox.trans (get_key (`Email uid)) email_sexp_str >>
-      IrminIntf_tr.update mbox.trans (get_key (`Headers uid)) headers_sexp_str >>
+      IrminIntf_tr.update mbox.trans (get_key (`Postmark uid)) postmark >>
+      IrminIntf_tr.update mbox.trans (get_key (`Email uid)) content >>
+      IrminIntf_tr.update mbox.trans (get_key (`Headers uid)) headers >>
+      MapStr.fold (fun contid attachment _ ->
+        IrminIntf_tr.update mbox.trans (get_key (`Attachments (uid,Some contid))) attachment
+      ) attachments (return()) >>
       update_index_uid mbox message_metadata.uid >>
       return ()
 
     let append_message mbox message message_metadata =
-      let postmark_sexp_str = Sexp.to_string (Mailbox.Postmark.sexp_of_t message.postmark) in
-      let email_sexp_str = Sexp.to_string (Email.sexp_of_t message.email) in
-      let headers_sexp_str = Sexp.to_string (Header.sexp_of_t (Email.header message.email)) in
-      append_message_raw mbox ~postmark_sexp_str ~headers_sexp_str ~email_sexp_str 
-          message_metadata
+      Email_parse.parse message >>= fun (postmark,headers,content,attachments) ->
+      append_message_raw mbox ~postmark ~headers ~content ~attachments message_metadata
 
     let get_uid mbox position = 
       read_index_uid mbox >>= fun uids ->
@@ -581,11 +585,20 @@ module IrminMailbox :
           (Sexp.to_string (sexp_of_mailbox_message_metadata metadata)) >>= fun () ->
         return `Ok
 
+    let get_attachments mbox uid =
+      IrminIntf_tr.list mbox.trans (get_key (`Attachments (uid,None))) >>= fun l ->
+      Lwt_list.fold_left_s (fun attachments key ->
+        let contid = (List.nth key (List.length key - 1)) in
+        IrminIntf_tr.read_exn mbox.trans key >>= fun attachment ->
+        return (MapStr.add contid attachment attachments)
+      ) (MapStr.empty) l
+
     let get_message_only_raw mbox uid =
-      IrminIntf_tr.read_exn mbox.trans (get_key (`Headers uid)) >>= fun headers_sexp_str ->
-      IrminIntf_tr.read_exn mbox.trans (get_key (`Postmark uid)) >>= fun postmark_sexp_str ->
-      IrminIntf_tr.read_exn mbox.trans (get_key (`Email uid)) >>= fun email_sexp_str ->
-      return (postmark_sexp_str, headers_sexp_str, email_sexp_str)
+      IrminIntf_tr.read_exn mbox.trans (get_key (`Headers uid)) >>= fun headers ->
+      IrminIntf_tr.read_exn mbox.trans (get_key (`Postmark uid)) >>= fun postmark ->
+      IrminIntf_tr.read_exn mbox.trans (get_key (`Email uid)) >>= fun email ->
+      get_attachments mbox uid >>= fun attachments ->
+      return (postmark, headers, email, attachments)
 
     let read_message_raw mbox ?filter position =
       get_uid mbox position >>= function
@@ -601,34 +614,17 @@ module IrminMailbox :
         else (
           IrminIntf_tr.read_exn mbox.trans (get_key (`Metamessage uid)) >>= fun sexp_str ->
           let message_metadata = mailbox_message_metadata_of_sexp (Sexp.of_string sexp_str) in
-          get_message_only_raw mbox uid >>=
-          fun (postmark_sexp_str, headers_sexp_str, email_sexp_str) ->
-          if filter = None then
-            return (`Ok (None,postmark_sexp_str,headers_sexp_str,email_sexp_str,message_metadata))
-          else (
-            let postmark = Mailbox.Postmark.t_of_sexp (Sexp.of_string postmark_sexp_str) in
-            let email = Email.t_of_sexp (Sexp.of_string email_sexp_str) in
-            let message = {Mailbox.Message.postmark=postmark;Mailbox.Message.email=email} in
-            if Interpreter.exec_search email (option_value_exn filter) message_metadata seq = true then
-              return (`Ok (Some message,postmark_sexp_str,headers_sexp_str,email_sexp_str,message_metadata))
+          get_message_only_raw mbox uid >>= fun (postmark, headers, content, attachments) ->
+          Email_parse.restore postmark headers content attachments >>= fun message ->
+          if filter = None ||
+            Interpreter.exec_search (message.email) (option_value_exn filter) message_metadata seq = true then
+              return (`Ok (message,message_metadata))
             else
               return `NotFound
-          )
         )
 
     let read_message mbox ?filter position =
-      read_message_raw mbox ?filter position >>= function
-      | `Eof -> return `Eof
-      | `NotFound -> return `NotFound
-      | `Ok (message,postmark_sexp_str,_,email_sexp_str,message_metadata) ->
-          if message <> None then
-            return (`Ok (option_value_exn message,message_metadata))
-          else (
-            let postmark = Mailbox.Postmark.t_of_sexp (Sexp.of_string postmark_sexp_str) in
-            let email = Email.t_of_sexp (Sexp.of_string email_sexp_str) in
-            let message = {Mailbox.Message.postmark=postmark;Mailbox.Message.email=email} in
-            return (`Ok (message,message_metadata))
-          )
+      read_message_raw mbox ?filter position
 
     let read_message_metadata mbox position =
       get_uid mbox position >>= function
@@ -661,9 +657,8 @@ module IrminMailbox :
       | `NotFound -> return ()
       | `Ok (seq,uid) ->
         get_message_only_raw mbox1 uid >>=
-        fun (postmark_sexp_str,headers_sexp_str,email_sexp_str) ->
-        append_message_raw mbox2 ~postmark_sexp_str ~headers_sexp_str
-        ~email_sexp_str message_metadata 
+        fun (postmark ,headers ,content, attachments) ->
+        append_message_raw mbox2 ~postmark ~headers ~content ~attachments message_metadata 
 
     let delete_message mbox position =
       get_uid mbox position >>= function
@@ -673,6 +668,11 @@ module IrminMailbox :
         IrminIntf_tr.remove mbox.trans (get_key (`Email uid)) >>
         IrminIntf_tr.remove mbox.trans (get_key (`Metamessage uid)) >>
         IrminIntf_tr.remove mbox.trans (get_key (`Uid uid)) >>
+        IrminIntf_tr.list mbox.trans (get_key (`Attachments (uid,None))) >>= fun l ->
+        Lwt_list.iter_s (fun key ->
+          IrminIntf_tr.remove mbox.trans key
+        ) l >>
+        IrminIntf_tr.remove mbox.trans (get_key (`Attachments (uid,None))) >>
         read_index_uid mbox >>= fun uids ->
         let uids = List.fold_right (fun u uids ->
           if u = uid then

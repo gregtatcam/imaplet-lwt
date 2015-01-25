@@ -21,10 +21,6 @@ type imapConfig = {
   irmin_path : string; (* irminsule location, default / *)
   max_msg_size : int; (* max email size *)
   imap_name : string; (* greeting name, default imaplet *)
-  imap_addr : string; (* imap address, default 127.0.0.1 *)
-  imap_port : int; (* local imap port, default 6002 *)
-  irmin_addr : string; (* irmin server addres, default 127.0.0.1 *)
-  irmin_port : int; (* irmin server port, default 20001 *)
   lmtp_addr : string; (* lmtp server address, default 127.0.0.1 *)
   lmtp_port : int; (* lmtp server port, default 24 *)
   addr : string ref; (* server address, default 127.0.0.1 *)
@@ -36,6 +32,8 @@ type imapConfig = {
   key_name : string; (* private key file name, default server.key *)
   users_path : string; (* users file path, default datadir/imaplet *)
   data_store : [`Irmin|`Mailbox|`Maildir] ref; (* type of storage, only irmin supported so far *)
+  encrypt : bool; (* encrypt messages, default true *)
+  compress : bool; (* compress messages, but not attachments, default true *)
 }
 
 val srv_config : imapConfig

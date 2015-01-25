@@ -124,10 +124,10 @@ let rec selected user mailbox mbox =
   | "message" -> let pos = arg 1 in
     (
     let pos = int_of_string pos in
-    IrminMailbox.read_message_raw mbox (`Sequence pos) >>= function
-    | `Ok (_,postmark,headers,email,meta) ->
+    IrminMailbox.read_message mbox (`Sequence pos) >>= function
+    | `Ok (message,meta) ->
       Printf.printf "%s\n%!" (Sexp.to_string (sexp_of_mailbox_message_metadata meta));
-      Printf.printf "%s %s\n%!" postmark email;
+      Printf.printf "%s\n%!" (Mailbox.Message.to_string message);
       return ()
     | `NotFound -> Printf.printf "not found\n%!"; return ()
     | `Eof -> Printf.printf "eof\n%!"; return ()

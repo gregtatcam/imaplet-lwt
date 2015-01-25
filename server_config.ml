@@ -20,10 +20,6 @@ type imapConfig = {
   irmin_path : string; (* irminsule location, default / *)
   max_msg_size : int;
   imap_name : string; (* greeting name, default imaplet *)
-  imap_addr : string; (* imap address, default 127.0.0.1 *)
-  imap_port : int; (* local imap port, default 6002 *)
-  irmin_addr : string; (* irmin server addres, default 127.0.0.1 *)
-  irmin_port : int; (* irmin server port, default 20001 *)
   lmtp_addr : string; (* lmtp server address, default 127.0.0.1 *)
   lmtp_port : int; (* lmtp server port, default 24 *)
   addr : string ref; (* server port, default 127.0.0.1 *)
@@ -35,6 +31,8 @@ type imapConfig = {
   key_name : string; (* private key file name, default server.key *)
   users_path : string; (* users file path, default datadir/imaplet *)
   data_store : [`Irmin|`Mailbox|`Maildir] ref; (* type of storage, only irmin supported so far *)
+  encrypt : bool; (* encrypt messages, default true *)
+  compress : bool; (* compress messages, but not attachments, default true *)
 }
 
 let exists file =
@@ -72,10 +70,6 @@ let srv_config =
     irmin_path = "/tmp/irmin/test";
     max_msg_size = 0;
     imap_name = "imaplet";
-    imap_addr = "127.0.0.1";
-    imap_port = 6000;
-    irmin_addr = "127.0.0.1";
-    irmin_port = 6001;
     lmtp_addr = "127.0.0.1";
     lmtp_port = 24;
     addr = ref "127.0.0.1";
@@ -87,6 +81,8 @@ let srv_config =
     key_name = "server.key";
     users_path = Install.users_path;
     data_store = ref `Irmin;
+    encrypt = true;
+    compress = true;
   } in
   let rec proc lines acc =
     match lines with 
@@ -113,10 +109,6 @@ let srv_config =
       | "mail_path" -> {acc with mail_path = ref v}
       | "irmin_path" -> {acc with irmin_path = v}
       | "max_msg_size" -> {acc with max_msg_size = ival n v 10_000_000}
-      | "imap_addr" -> {acc with imap_addr = v}
-      | "imap_port" -> {acc with imap_port = ival n v 6000}
-      | "irmin_addr" -> {acc with irmin_addr = v}
-      | "irmin_port" -> {acc with irmin_port = ival n v 6001}
       | "lmtp_addr" -> {acc with lmtp_addr = v}
       | "lmtp_port" -> {acc with lmtp_port = ival n v 24}
       | "addr" -> {acc with addr = ref v}
@@ -128,6 +120,8 @@ let srv_config =
       | "key_name" -> {acc with key_name = v}
       | "users_path" -> {acc with users_path = v}
       | "data_store" -> {acc with data_store = ref (stval n v)}
+      | "encrypt" -> {acc with encrypt = (bval n v true)}
+      | "compress" -> {acc with encrypt = (bval n v true)}
       | _ -> Printf.printf "unknown configuration %s\n%!" n; acc
     ) else 
       acc
