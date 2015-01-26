@@ -263,8 +263,6 @@ let unsubscribe mailboxt mailbox =
     return `Ok
 
 let get_message_from_client reader writer literal =
-  let open Email_message in
-  let open Email_message.Mailbox in
   (** request the message from the client **)
   begin
     match literal with

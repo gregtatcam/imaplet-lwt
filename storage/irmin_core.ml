@@ -169,7 +169,7 @@ module IrminIntf :
 
     let remove store key =
       Key_.assert_key key;
-      Store.remove (store "") key
+      Store.remove_rec (store "") key
 
     let read_exn store key =
       Key_.assert_key key;
@@ -268,7 +268,7 @@ module IrminIntf_tr :
       Key_.assert_key key;
       (*Printf.printf "------ store remove %s\n" (Key_.key_to_string key);*)
       let (_,view,_,dirty) = tr in
-      View.remove (view "") key >>= fun () ->
+      View.remove_rec (view "") key >>= fun () ->
       dirty := true;
       return ()
 
@@ -411,9 +411,6 @@ module IrminMailbox :
     val read_message : t -> ?filter:(searchKey) searchKeys -> 
       [`Sequence of int|`UID of int] ->
       [`NotFound|`Eof|`Ok of (Mailbox.Message.t * mailbox_message_metadata)] Lwt.t
-    val read_message_raw : t -> ?filter:(searchKey) searchKeys -> 
-      [`Sequence of int|`UID of int] ->
-      [`NotFound|`Eof|`Ok of (Mailbox.Message.t * mailbox_message_metadata)] Lwt.t
     val read_message_metadata : t -> [`Sequence of int|`UID of int] -> 
       [`NotFound|`Eof|`Ok of mailbox_message_metadata] Lwt.t
     val delete_message : t -> [`Sequence of int|`UID of int] -> unit Lwt.t
@@ -539,22 +536,25 @@ module IrminMailbox :
       | None -> return None
       | Some (i,_) -> return (Some ((List.length uids) - i))
 
-    let append_message_raw mbox ~postmark ~headers ~content ~attachments message_metadata =
+    let save_attachment mbox uid contid attachment =
+      IrminIntf_tr.update mbox.trans (get_key (`Attachments (uid,Some contid))) attachment
+
+    let append_message_raw mbox ~parse message_metadata =
       let uid = message_metadata.uid in
-      IrminIntf_tr.update mbox.trans (get_key (`Metamessage uid)) 
-        (Sexp.to_string (sexp_of_mailbox_message_metadata message_metadata)) >>
-      IrminIntf_tr.update mbox.trans (get_key (`Postmark uid)) postmark >>
-      IrminIntf_tr.update mbox.trans (get_key (`Email uid)) content >>
-      IrminIntf_tr.update mbox.trans (get_key (`Headers uid)) headers >>
-      MapStr.fold (fun contid attachment _ ->
+      parse ~save_message:(fun postmark headers content ->
+        IrminIntf_tr.update mbox.trans (get_key (`Metamessage uid)) 
+          (Sexp.to_string (sexp_of_mailbox_message_metadata message_metadata)) >>
+        IrminIntf_tr.update mbox.trans (get_key (`Postmark uid)) postmark >>
+        IrminIntf_tr.update mbox.trans (get_key (`Email uid)) content >>
+        IrminIntf_tr.update mbox.trans (get_key (`Headers uid)) headers
+      ) 
+      ~save_attachment:(fun contid attachment ->
         IrminIntf_tr.update mbox.trans (get_key (`Attachments (uid,Some contid))) attachment
-      ) attachments (return()) >>
-      update_index_uid mbox message_metadata.uid >>
-      return ()
+      ) >>
+      update_index_uid mbox uid
 
     let append_message mbox message message_metadata =
-      Email_parse.parse message >>= fun (postmark,headers,content,attachments) ->
-      append_message_raw mbox ~postmark ~headers ~content ~attachments message_metadata
+      append_message_raw mbox ~parse:(Email_parse.parse message) message_metadata
 
     let get_uid mbox position = 
       read_index_uid mbox >>= fun uids ->
@@ -585,22 +585,26 @@ module IrminMailbox :
           (Sexp.to_string (sexp_of_mailbox_message_metadata metadata)) >>= fun () ->
         return `Ok
 
-    let get_attachments mbox uid =
+    let get_attachment mbox uid contid =
+      IrminIntf_tr.read_exn mbox.trans (get_key (`Attachments (uid,Some contid)))
+
+    let get_attachments mbox uid f =
       IrminIntf_tr.list mbox.trans (get_key (`Attachments (uid,None))) >>= fun l ->
-      Lwt_list.fold_left_s (fun attachments key ->
+      Lwt_list.iter_s (fun key ->
         let contid = (List.nth key (List.length key - 1)) in
         IrminIntf_tr.read_exn mbox.trans key >>= fun attachment ->
-        return (MapStr.add contid attachment attachments)
-      ) (MapStr.empty) l
+        (* return (MapStr.add contid attachment attachments) *)
+        f contid attachment
+      ) l
 
-    let get_message_only_raw mbox uid =
+    let get_message_only_raw mbox uid f =
       IrminIntf_tr.read_exn mbox.trans (get_key (`Headers uid)) >>= fun headers ->
       IrminIntf_tr.read_exn mbox.trans (get_key (`Postmark uid)) >>= fun postmark ->
       IrminIntf_tr.read_exn mbox.trans (get_key (`Email uid)) >>= fun email ->
-      get_attachments mbox uid >>= fun attachments ->
-      return (postmark, headers, email, attachments)
+      (* get_attachments mbox uid >>= fun attachments -> *)
+      return (postmark, headers, email, f mbox uid)
 
-    let read_message_raw mbox ?filter position =
+    let read_message mbox ?filter position =
       get_uid mbox position >>= function
       | `Eof -> return `Eof
       | `NotFound -> return `NotFound
@@ -614,17 +618,16 @@ module IrminMailbox :
         else (
           IrminIntf_tr.read_exn mbox.trans (get_key (`Metamessage uid)) >>= fun sexp_str ->
           let message_metadata = mailbox_message_metadata_of_sexp (Sexp.of_string sexp_str) in
-          get_message_only_raw mbox uid >>= fun (postmark, headers, content, attachments) ->
-          Email_parse.restore postmark headers content attachments >>= fun message ->
+          get_message_only_raw mbox uid get_attachment >>= fun (postmark, headers, content, attachments) ->
+          Email_parse.restore ~get_message:(fun () -> 
+            return (postmark,headers,content)
+          )  ~get_attachment:attachments >>= fun message ->
           if filter = None ||
             Interpreter.exec_search (message.email) (option_value_exn filter) message_metadata seq = true then
               return (`Ok (message,message_metadata))
             else
               return `NotFound
         )
-
-    let read_message mbox ?filter position =
-      read_message_raw mbox ?filter position
 
     let read_message_metadata mbox position =
       get_uid mbox position >>= function
@@ -656,9 +659,11 @@ module IrminMailbox :
       | `Eof -> return ()
       | `NotFound -> return ()
       | `Ok (seq,uid) ->
-        get_message_only_raw mbox1 uid >>=
-        fun (postmark ,headers ,content, attachments) ->
-        append_message_raw mbox2 ~postmark ~headers ~content ~attachments message_metadata 
+        append_message_raw mbox2 ~parse:(fun ~save_message ~save_attachment -> 
+          get_message_only_raw mbox1 uid get_attachments >>= fun (postmark,headers,content,attachments) ->
+          (save_message postmark headers content) >>
+          attachments save_attachment
+        ) message_metadata 
 
     let delete_message mbox position =
       get_uid mbox position >>= function

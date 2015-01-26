@@ -95,7 +95,7 @@ let email_content attachment base64 email =
  * headers or the message and not both
  * should add encrypt and compress to the message metadata TBD
  *)
-let parse message =
+let parse message ~save_message ~save_attachment =
   let do_encrypt data =
     if srv_config.encrypt then
       pub_key () >>= fun pub ->
@@ -106,7 +106,7 @@ let parse message =
   let headers_str email =
     String_monoid.to_string (Header.to_string_monoid (Email.header email)) in
   let buffer = Buffer.create 100 in
-  let rec walk email boundary first attachments =
+  let rec walk email boundary first =
     if first = false then Buffer.add_string buffer (headers_str email);
     let boundary,attach,base64 = get_hdr_attrs (Header.to_list (Email.header email)) boundary in
     if attach = false then Buffer.add_string buffer "\n";
@@ -115,26 +115,26 @@ let parse message =
       email_content attach base64 email >>= fun (contid,content) -> 
       if attach then ( (* consider adding Content-type: message/external-body...  *)
         Buffer.add_string buffer ("X-Imaplet-External-Content: " ^ contid ^ "\n\n");
-        return (MapStr.add contid content attachments )
+        save_attachment contid content
       ) else (
         Buffer.add_string buffer content;
-        return attachments
+        return ()
       )
     | `Message email ->
-      walk email boundary false attachments
+      walk email boundary false 
     | `Multipart elist ->
-      Lwt_list.fold_left_s (fun attachments email ->
+      Lwt_list.iter_s (fun email ->
         (match boundary with
         | None -> ()
         | Some boundary -> Buffer.add_string buffer ("--" ^ boundary ^ "\n"));
-        walk email boundary false attachments
-      ) attachments elist
+        walk email boundary false 
+      ) elist
   in
-  walk message.Mailbox.Message.email None true (MapStr.empty) >>= fun attachments ->
+  walk message.Mailbox.Message.email None true >>
   do_encrypt (Mailbox.Postmark.to_string message.postmark) >>= fun postmark ->
   do_encrypt (headers_str message.email) >>= fun headers ->
   do_encrypt (Buffer.contents buffer) >>= fun content ->
-  return (postmark,headers,content,attachments)
+  save_message postmark headers content
 
 let email_content email =
   match (Email.raw_content email) with
@@ -160,7 +160,7 @@ let get_hdr_attrs buffer headers boundary =
     )
   ) (boundary,None,false) headers
 
-let restore postmark headers content attachments =
+let restore ~get_message ~get_attachment  =
   let do_decrypt data =
     if srv_config.encrypt then (
       priv_key() >>= fun priv ->
@@ -168,54 +168,55 @@ let restore postmark headers content attachments =
     ) else
       return data
   in
+  get_message () >>= fun (postmark,headers,content) ->
   do_decrypt postmark >>= fun postmark ->
   do_decrypt headers >>= fun headers ->
   do_decrypt content >>= fun content ->
-  if (MapStr.cardinal attachments) = 0 then (
-    let postmark = Mailbox.Postmark.of_string postmark in
-    let email = Email.of_string (headers ^ "\n" ^ content) in
-    return {Mailbox.Message.postmark=postmark;Mailbox.Message.email=email}
-  ) else (
-    let wseq = Mailbox.With_seq.of_string (postmark ^ "\n" ^ headers ^ "\n" ^ content) in
-    let buffer = Buffer.create 100 in
-    Mailbox.With_seq.fold_message wseq ~f:(fun _ message ->
-      let rec walk email boundary =
-        let (boundary,extbody,base64) = get_hdr_attrs buffer (Header.to_list (Email.header email)) boundary in
-        Buffer.add_string buffer "\n";
-        match (Email.content email) with
-        | `Data _ -> 
-          begin
-          match extbody with
-          | None -> Buffer.add_string buffer ((email_content email) ^ "\n"); return()
-          | Some contid ->
-            let attachment = MapStr.find contid attachments in
-            priv_key() >>= fun priv ->
-            let content = conv_decrypt ~compressed:srv_config.compress attachment priv in
-            Buffer.add_string buffer ((
-            if base64 then
-              String_monoid.to_string (Octet_stream.to_string_monoid
-              (Octet_stream.Base64.encode (Octet_stream.of_string content)))
-            else
-              content
-            ) ^ "\n");
-            return ()
-          end
-        | `Message email -> 
-          walk email boundary
-        | `Multipart elist ->
-          let add_boundary suffix = function
-            | None -> ()
-            | Some boundary -> Buffer.add_string buffer ("--" ^ boundary ^ suffix)
-          in
-          Lwt_list.iter_s (fun email ->
-            add_boundary "\n" boundary;
-            walk email boundary
-          ) elist >>= fun () ->
-          add_boundary "--\n" boundary;
-          return ()
-      in
-      walk message.email None
-    ) ~init:(return()) >>
+  let wseq = Mailbox.With_seq.of_string (postmark ^ "\n" ^ headers ^ "\n" ^ content) in
+  let buffer = Buffer.create 100 in
+  Mailbox.With_seq.fold_message wseq ~f:(fun (a:((int*Mailbox.Message.t option) Lwt.t)) message ->
+    a >>= fun (cnt,_) ->    
+    let rec walk email boundary nattach =
+      let (boundary,extbody,base64) = get_hdr_attrs buffer (Header.to_list (Email.header email)) boundary in
+      Buffer.add_string buffer "\n";
+      match (Email.content email) with
+      | `Data _ -> 
+        begin
+        match extbody with
+        | None -> Buffer.add_string buffer ((email_content email) ^ "\n"); return nattach
+        | Some contid ->
+          get_attachment contid >>= fun attachment ->
+          priv_key() >>= fun priv ->
+          let content = conv_decrypt ~compressed:srv_config.compress attachment priv in
+          Buffer.add_string buffer ((
+          if base64 then
+            String_monoid.to_string (Octet_stream.to_string_monoid
+            (Octet_stream.Base64.encode (Octet_stream.of_string content)))
+          else
+            content
+          ) ^ "\n");
+          return (nattach+1)
+        end
+      | `Message email -> 
+        walk email boundary nattach
+      | `Multipart elist ->
+        let add_boundary suffix = function
+          | None -> ()
+          | Some boundary -> Buffer.add_string buffer ("--" ^ boundary ^ suffix)
+        in
+        Lwt_list.fold_left_s (fun nattach email ->
+          add_boundary "\n" boundary;
+          walk email boundary nattach
+        ) nattach elist >>= fun nattach ->
+        add_boundary "--\n" boundary;
+        return nattach 
+    in
+    walk message.email None cnt >>= fun nattach ->
+    return (nattach,Some message)
+  ) ~init:(return(0,None)) >>= fun (nattach,message) ->
+  if nattach = 0 then
+    return (Utils.option_value_exn message)
+  else (
     let postmark = Mailbox.Postmark.of_string postmark in
     let email = Email.of_string (Buffer.contents buffer) in
     return {Mailbox.Message.postmark=postmark;Mailbox.Message.email=email}

@@ -10,7 +10,7 @@ PreBuildCommand: ocaml inst.ml $bindir $datadir > install.ml
 Library email_message
   Path		  : lib/email_message
   Pack		  : true
-  Install	  : false
+  Install	  : true
   Modules	  : Bigstringable,
                     Bigstring_extended,
                     Boundary,
