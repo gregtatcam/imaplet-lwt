@@ -97,12 +97,12 @@ let create_mailbox user ?uidvalidity mailbox =
     return ist
   | None -> return ist
 
-let append ist ?uid message size flags =
+let append ist ?uid message size flags mailbox =
   catch (fun () ->
   IrminStorage.status ist >>= fun mailbox_metadata ->
   let modseq = Int64.add mailbox_metadata.modseq Int64.one in
   let uid = match uid with None -> mailbox_metadata.uidnext|Some uid -> uid in
-  Printf.printf "#### appending with UID %d\n%!" uid;
+  Printf.printf "#### appending %s with UID %d\n%!" mailbox uid;
   let message_metadata = {
     uid;
     modseq;
@@ -124,10 +124,9 @@ let append ist ?uid message size flags =
     modseq
   } in
   IrminStorage.store_mailbox_metadata ist mailbox_metadata >>
-  IrminStorage.append ist message message_metadata >>= fun () ->
-  return ()
+  IrminStorage.append ist message message_metadata 
   )
-  (fun ex -> Printf.printf "exception: %s\n%!" (Printexc.get_backtrace()); return ())
+  (fun ex -> Printf.printf "exception: %s %s\n%!" (Printexc.to_string ex) (Printexc.get_backtrace()); return ())
 
 let mailbox_of_gmail_label message = 
   if Regex.match_regex message ~regx:"^X-Gmail-Labels: \\(.+\\)$" = false then 
@@ -177,55 +176,48 @@ let mailbox_of_gmail_label message =
 
 let append_messages ist path flags =
   Printf.printf "#### appending messages %s\n%!" path;
+  let open Email_message in
   let open Email_message.Mailbox in
-  let (strm,strm_push) = Lwt_stream.create () in
-  async ( fun () ->
-    let wseq = With_seq.t_of_file path in
-    With_seq.iter_string wseq (fun message ->
-      if Regex.match_regex message ~regx:"^From[ ]+MAILER_DAEMON" then 
-        ()
-      else (
-        let size = String.length message in
-        let message = Utils.make_email_message message in
-        strm_push (Some (message,size))
-      )
-    );
-    strm_push None;
-    return ()
-  );
-  Lwt_stream.iter_s (fun (message,size) ->
-    append ist message size flags
-  ) strm
+  let wseq = With_seq.t_of_file path in
+  With_seq.fold_message wseq ~f:(fun _ message ->
+    if Regex.match_regex (Postmark.to_string message.postmark) ~regx:"^From[ ]+MAILER_DAEMON" then 
+      return ()
+    else (
+      let size = String.length (Email.to_string message.email) in
+      append ist message size flags ""
+    )
+  ) ~init:(return())
   
 let gmail_mailboxes = ref MapStr.empty
 
-let append_gmail_messages user path flags =
-  Printf.printf "#### appending gmail messages %s\n%!" path;
+let append_archive_messages user path flags =
+  Printf.printf "#### appending archive messages %s\n%!" path;
+  let open Email_message in
   let open Email_message.Mailbox in
-  let (strm,strm_push) = Lwt_stream.create () in
-  async ( fun () ->
-    let wseq = With_seq.t_of_file path in
-    With_seq.iter_string wseq (fun message ->
-      let size = String.length message in
-      let mailbox = mailbox_of_gmail_label message in
-      let message = Utils.make_email_message message in
-      strm_push (Some (message, mailbox, size))
-    );
-    strm_push None;
-    return ()
-  );
-  Lwt_stream.iter_s (fun (message,mailbox,size) ->
+  let wseq = With_seq.t_of_file path in
+  With_seq.fold_message wseq ~f:(fun (a:int Lwt.t) message ->
+    a >>= fun cnt ->
+    Printf.printf "-- message %d %!" cnt;
+    let size = String.length (Email.to_string message.email) in
+    let headers = String_monoid.to_string (Header.to_string_monoid
+        (Email.header message.email)) in
+    let mailbox = mailbox_of_gmail_label headers in
     begin
-      try 
-        let _ = MapStr.find mailbox !gmail_mailboxes in
-        IrminStorage.create user mailbox 
-      with Not_found ->
-        gmail_mailboxes := MapStr.add mailbox "" !gmail_mailboxes;
-        create_mailbox user mailbox 
+    try 
+      let _ = MapStr.find mailbox !gmail_mailboxes in
+      IrminStorage.create user mailbox 
+    with Not_found ->
+      gmail_mailboxes := MapStr.add mailbox "" !gmail_mailboxes;
+      create_mailbox user mailbox 
     end >>= fun ist ->
-    append ist message size flags >>= fun () ->
-    IrminStorage.commit ist
-  ) strm
+    append ist message size flags mailbox >>
+    IrminStorage.commit ist >>
+    if cnt = 150 then
+      exit 1
+    else
+      return (cnt + 1)
+  ) ~init:(return 1) >>= fun _ ->
+  return ()
 
 let append_maildir_message ist ?uid path flags =
   Printf.printf "#### appending maildir message %s\n%!" path;
@@ -240,7 +232,7 @@ let append_maildir_message ist ?uid path flags =
     return ()
   else (
     let message = Utils.make_email_message buffer in
-    append ist ?uid message size flags
+    append ist ?uid message size flags ""
   )
 
 let populate_mbox_msgs ist path =
@@ -419,8 +411,8 @@ let create_maildir user mailboxes fs =
     (Printexc.get_backtrace());return())
   )
 
-let create_gmail_maildir user mailbox =
-  append_gmail_messages user mailbox []
+let create_archive_maildir user mailbox =
+  append_archive_messages user mailbox []
 
 let () =
   commands (fun user mbx ->
@@ -436,9 +428,9 @@ let () =
           create_account user (Filename.concat mailboxes "subscriptions") >>
           create_maildir user mailboxes fs
         | `Archive mailbox ->
-          Printf.printf "porting from gmail\n%!";
+          Printf.printf "porting from archive\n%!";
           create_account user (Filename.concat mailbox "subscriptions") >>
-          create_gmail_maildir user mailbox 
+          create_archive_maildir user mailbox 
       )
       (fun ex -> Printf.printf "exception: %s %s\n%!" (Printexc.to_string ex)
       (Printexc.get_backtrace());return())
