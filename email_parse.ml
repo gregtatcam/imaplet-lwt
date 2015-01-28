@@ -137,6 +137,7 @@ let parse (message:Mailbox.Message.t) ~save_message ~save_attachment =
         add_boundary buffer ~boundary ~suffix:"\n" ;
         walk email boundary false map
       ) map elist >>= fun map ->
+      Buffer.add_string buffer "\n";
       add_boundary buffer ~boundary ~suffix:"--\n" ;
       return map
   in

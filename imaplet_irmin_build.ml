@@ -139,10 +139,11 @@ let mailbox_of_gmail_label message =
       | "Starred" -> (label,inferred,(Flags_Keyword "Starred") :: flags)
       | "Sent" -> (label,(Some "Sent Messages"),Flags_Answered :: flags)
       | "Trash" -> (label,(Some "Deleted Messages"),Flags_Deleted :: flags)
-      | "Unread" -> (label,inferred,Flags_Recent :: flags)
+      | "Unread" -> 
+        (label,inferred,Flags_Recent :: ((List.filter (fun f -> f <> Flags_Seen)) flags))
       | "Draft" -> (label,(Some "Drafts"),Flags_Draft :: flags)
       | label -> ((Some label),inferred, flags)
-    ) (None,None,[]) labels
+    ) (None,None,[Flags_Seen]) labels
     in
     match label with
     | None ->

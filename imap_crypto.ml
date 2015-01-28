@@ -18,12 +18,10 @@ open Nocrypto
 let pad c_data padding =
   let len = Cstruct.len c_data in
   let m = Pervasives.(mod) len 32 in
-  (32-m,
   if m > 0 then
-    Cstruct.of_string (Bytes.cat (Cstruct.to_string c_data) (Bytes.sub (Cstruct.to_string padding) 0 (32-m)))
+    (32-m,Cstruct.of_string (Bytes.cat (Cstruct.to_string c_data) (Bytes.sub (Cstruct.to_string padding) 0 (32-m))))
   else
-    c_data
-  )
+    (0,c_data)
 
 let aes_encrypt ?(compress=false) data pub secrets =
   let open Nocrypto.Cipher_block in
