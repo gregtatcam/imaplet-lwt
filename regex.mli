@@ -17,7 +17,7 @@ val match_regex_i: ?case:bool -> string -> regx:string -> int
 
 val match_regex: ?case:bool -> string -> regx:string ->  bool
 
-val replace: regx:string -> tmpl:string -> string -> string
+val replace: ?case:bool -> regx:string -> tmpl:string -> string -> string
 
 val date_regex : string
 

@@ -31,8 +31,6 @@ exception InvalidKey of string
 module Store = Irmin.Basic (Irmin_git.FS) (Irmin.Contents.String)
 module View = Irmin.View(Store)
 
-module MapStr = Map.Make(String)
-
 module Key_ :
   sig
     type t
@@ -593,7 +591,6 @@ module IrminMailbox :
       Lwt_list.iter_s (fun key ->
         let contid = (List.nth key (List.length key - 1)) in
         IrminIntf_tr.read_exn mbox.trans key >>= fun attachment ->
-        (* return (MapStr.add contid attachment attachments) *)
         f contid attachment
       ) l
 

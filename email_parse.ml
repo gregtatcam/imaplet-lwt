@@ -102,7 +102,7 @@ let email_content attachment base64 email =
  * headers or the message and not both
  * should add encrypt and compress to the message metadata TBD
  *)
-let parse message ~save_message ~save_attachment =
+let parse (message:Mailbox.Message.t) ~save_message ~save_attachment =
   let do_encrypt data =
     if srv_config.encrypt then
       pub_key () >>= fun pub ->
@@ -122,7 +122,7 @@ let parse message ~save_message ~save_attachment =
       email_content attach base64 email >>= fun (contid,content) -> 
       if attach then ( (* consider adding Content-type: message/external-body...  *)
         let ext = "X-Imaplet-External-Content: " ^ contid ^ "\n\n" in
-        (Buffer.length buffer,Bytes.length ext,base64) :: map;
+        let map = (Buffer.length buffer,Bytes.length ext,base64) :: map in
         Buffer.add_string buffer ext;
         save_attachment contid content >>
         return map
@@ -140,9 +140,11 @@ let parse message ~save_message ~save_attachment =
       add_boundary buffer ~boundary ~suffix:"--\n" ;
       return map
   in
-  walk message.Mailbox.Message.email None true [] >>= fun map ->
-  let map_sexp_str = Sexp.to_string (sexp_of_list (fun (a,b,c) -> sexp_of_string ((string_of_int a) ^
-      " " ^ (string_of_int b) ^ " " ^ (string_of_bool c)))  (List.rev map)) in
+  walk message.email None true [] >>= fun map ->
+  let map_sexp_str = Sexp.to_string (sexp_of_list (fun (a,b,c) -> 
+      sexp_of_string 
+      (String.concat " " [string_of_int a;string_of_int b; string_of_bool c])
+    )  (List.rev map)) in
   let content = Printf.sprintf "%04d%s%s" (Bytes.length map_sexp_str) map_sexp_str (Buffer.contents buffer) in
   do_encrypt (Mailbox.Postmark.to_string message.postmark) >>= fun postmark ->
   do_encrypt (headers_str message.email) >>= fun headers ->
@@ -174,6 +176,7 @@ let get_hdr_attrs buffer headers boundary =
   ) (boundary,None,false) headers
 
 let restore ~get_message ~get_attachment  =
+  catch (fun () ->
   let do_decrypt data =
     if srv_config.encrypt then (
       priv_key() >>= fun priv ->
@@ -188,9 +191,11 @@ let restore ~get_message ~get_attachment  =
   let len = int_of_string (Bytes.sub content 0 4) in
   let map_sexp_str = Bytes.sub content 4 len in
   let map = list_of_sexp (fun sexp -> 
-    let str = Sexp.to_string sexp in
+    let str = replace ~regx:"\"" ~tmpl:"" (Sexp.to_string sexp) in
     let parts = Str.split (Str.regexp " ") str in
-    (int_of_string (List.nth parts 0),int_of_string (List.nth parts 1),bool_of_string (List.nth parts 2))
+      (int_of_string (List.nth parts 0),
+       int_of_string (List.nth parts 1),
+       bool_of_string (List.nth parts 2))
   ) (Sexp.of_string map_sexp_str) in
   let content = Bytes.sub content (4 + len) (Bytes.length content - 4 - len) in
   begin
@@ -223,3 +228,5 @@ let restore ~get_message ~get_attachment  =
   let postmark = Mailbox.Postmark.of_string postmark in
   let email = Email.of_string (headers ^ "\n" ^ content ^ "\n") in
   return {Mailbox.Message.postmark=postmark;Mailbox.Message.email=email}
+  ) (fun ex -> Printf.printf "restore exception %s\n%!" (Printexc.to_string ex);
+  raise ex)

@@ -131,9 +131,7 @@ let option_value_exn = function
   | None -> raise Not_found
 
 let list_find l f =
-  try
-    let _ = List.find f l in true
-  with Not_found -> false
+  List.exists f l
 
 let list_findi l f =
   let rec findi l i f =

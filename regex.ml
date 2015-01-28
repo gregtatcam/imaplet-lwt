@@ -13,16 +13,16 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
+
+let prep_regex ?(case=true) regx =
+  if case = false then
+    Str.regexp_case_fold regx
+  else
+    Str.regexp regx
+
 let match_regex_i ?(case=true) str ~regx = 
   try
-    let regexp =
-    (
-      if case = false then
-        Str.regexp_case_fold regx
-      else
-        Str.regexp regx
-    ) in
-    (Str.search_forward regexp str 0)
+    Str.search_forward (prep_regex ~case regx) str 0
   with _ ->
     (-1)
 
@@ -30,8 +30,8 @@ let match_regex ?(case=true) str ~regx =
   let i = match_regex_i ~case str ~regx in
   (i >= 0)
 
-let replace ~regx ~tmpl str =
-  Str.global_replace (Str.regexp regx) tmpl str
+let replace ?(case=true) ~regx ~tmpl str =
+  Str.global_replace (prep_regex ~case regx) tmpl str
   
 let dq = "\""
 
