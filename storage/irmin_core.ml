@@ -159,6 +159,13 @@ module IrminIntf :
   end =
   struct
     type store = (string -> Store.t)
+    let fmt t x = Printf.ksprintf (fun str -> t str) x
+    let path () = String.concat "/"
+
+    let task msg =
+      let date = Int64.of_float (Unix.gettimeofday ()) in
+      let owner = "imaplet <imaplet@openmirage.org>" in
+      Irmin.Task.create ~date ~owner msg
 
 
     let create () =
@@ -167,29 +174,43 @@ module IrminIntf :
 
     let remove store key =
       Key_.assert_key key;
-      Store.remove_rec (store "") key
+      Store.remove_rec (fmt store "Remove %a." path key) key
 
     let read_exn store key =
       Key_.assert_key key;
-      Store.read_exn (store "") key
+      Store.read_exn (fmt store "Read %a." path key) key
 
     let mem store key =
       Key_.assert_key key;
-      Store.mem (store "") key
+      Store.mem (fmt store "Check if %a exists." path key) key
 
     let list store key =
       Key_.assert_key key;
-      Store.list (store "") key
+      Store.list (fmt store "List the contents of %a" path key) key
 
     let update_view store key view =
       Key_.assert_key key;
       (*Printf.printf "------ store update_view %s\n%!" (Key_.key_to_string * key);*)
-      View.update_path "" store key view
+      let msg =
+        let buf = Buffer.create 1024 in
+        let path buf key = Buffer.add_string buf (String.concat "/" key) in
+        Printf.bprintf buf "Updating %a.\n\n" path key;
+        let actions = View.actions (view "Getting actions") in
+        List.iter (function
+            | `List (k, _)     -> Printf.bprintf buf "- list   %a\n" path k
+            | `Read (k, _)     -> Printf.bprintf buf "- read   %a\n" path k
+            | `Rmdir k         -> Printf.bprintf buf "- rmdir  %a\n" path k
+            | `Write (k, None) -> Printf.bprintf buf "- remove %a\n" path k
+            | `Write (k, _)    -> Printf.bprintf buf "- write  %a\n" path k
+          ) actions;
+        Buffer.contents buf
+      in
+      View.update_path msg store key view
 
     let read_view store key =
       Key_.assert_key key;
       (*Printf.printf "------ reading view %s\n%!" (Key_.key_to_string key);*)
-      View.of_path task (store "") key
+      View.of_path task (fmt store "Reading %a" path key) key
 
   end
 
