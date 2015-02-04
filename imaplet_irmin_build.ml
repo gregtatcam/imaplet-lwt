@@ -106,7 +106,7 @@ let append ist ?uid message size flags mailbox =
     uid;
     modseq;
     size;
-    internal_date = Dates.ImapTime.epoch;
+    internal_date = Dates.ImapTime.now();
     flags;
   } in
   let mailbox_metadata = { mailbox_metadata with

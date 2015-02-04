@@ -213,10 +213,25 @@ let restore ~get_message ~get_attachment  =
       priv_key() >>= fun priv ->
       let cont = conv_decrypt ~compressed:false attachment priv in
       Buffer.add_string buffer ((
-      if base64 then
+      if base64 then (
+        (*
         String_monoid.to_string (Octet_stream.to_string_monoid
         (Octet_stream.Base64.encode (Octet_stream.of_string cont)))
-      else
+        *)
+        (* there must be a better way to do it TBD *)
+        let rec printable buffer str =
+          if Bytes.length str >= 76 then (
+            Buffer.add_string buffer (Bytes.sub str 0 76);
+            Buffer.add_string buffer "\n";
+            printable buffer (Bytes.sub str 76 (Bytes.length str - 76))
+          ) else (
+            Buffer.add_string buffer str;
+            Buffer.add_string buffer "\n";
+            Buffer.contents buffer
+          )
+        in
+        printable (Buffer.create 100) (Cstruct.to_string (Nocrypto.Base64.encode (Cstruct.of_string cont)))
+      ) else
         cont
       ) ^ "\n");
       return (offset + size)

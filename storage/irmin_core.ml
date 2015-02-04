@@ -48,9 +48,9 @@ module Key_ :
     val key_to_path : t -> string
     val view_key_to_path : t -> string
     val assert_key : t -> unit
-  end with type t = Store.key =
+  end with type t = View.key =
   struct
-    type t = Store.key
+    type t = View.key
 
     let create_account user =
       ["imaplet";user]
@@ -153,12 +153,12 @@ module IrminIntf :
     val remove : store -> Key_.t -> unit Lwt.t
     val read_exn : store -> Key_.t -> string Lwt.t
     val mem : store -> Key_.t -> bool Lwt.t
-    val list : store -> Key_.t -> Store.key list Lwt.t
-    val update_view : store -> Key_.t -> (string -> View.t) -> unit Lwt.t
-    val read_view : store -> Key_.t -> (string -> View.t) Lwt.t
+    val list : store -> Key_.t -> View.key list Lwt.t
+    val update_view : store -> Key_.t -> View.t -> unit Lwt.t
+    val read_view : store -> Key_.t -> View.t Lwt.t
   end =
   struct
-    type store = (string -> Store.t)
+    type store = (string -> View.db)
     let fmt t x = Printf.ksprintf (fun str -> t str) x
     let path () = String.concat "/"
 
@@ -195,7 +195,7 @@ module IrminIntf :
         let buf = Buffer.create 1024 in
         let path buf key = Buffer.add_string buf (String.concat "/" key) in
         Printf.bprintf buf "Updating %a.\n\n" path key;
-        let actions = View.actions (view "Getting actions") in
+        let actions = View.actions view in
         List.iter (function
             | `List (k, _)     -> Printf.bprintf buf "- list   %a\n" path k
             | `Read (k, _)     -> Printf.bprintf buf "- read   %a\n" path k
@@ -205,12 +205,12 @@ module IrminIntf :
           ) actions;
         Buffer.contents buf
       in
-      View.update_path msg store key view
+      View.update_path (store msg) key view
 
     let read_view store key =
       Key_.assert_key key;
       (*Printf.printf "------ reading view %s\n%!" (Key_.key_to_string key);*)
-      View.of_path task (fmt store "Reading %a" path key) key
+      View.of_path (fmt store "Reading %a" path key) key
 
   end
 
@@ -225,12 +225,12 @@ module IrminIntf_tr :
     val update : transaction -> Key_.t -> string -> unit Lwt.t
     val read : transaction -> Key_.t -> string option Lwt.t
     val read_exn : transaction -> Key_.t -> string Lwt.t
-    val list : transaction -> Key_.t -> Store.key list Lwt.t
+    val list : transaction -> Key_.t -> View.key list Lwt.t
     val remove : transaction -> Key_.t -> unit Lwt.t
     val mem : transaction -> Key_.t -> bool Lwt.t
   end =
   struct
-    type transaction = IrminIntf.store * (string -> View.t) * Key_.t * bool ref
+    type transaction = IrminIntf.store * View.t * Key_.t * bool ref
 
     let begin_transaction key =
       Key_.assert_key key;
@@ -263,38 +263,38 @@ module IrminIntf_tr :
       Key_.assert_key key;
       (*Printf.printf "------ store view.update %s\n" (Key_.key_to_string * key);*)
       let (_,view,_,dirty) = tr in
-      View.update (view "") key data >>= fun () ->
+      View.update view key data >>= fun () ->
       dirty := true;
       return ()
 
     let read tr key =
       Key_.assert_key key;
       let (_,view,_,_) = tr in
-      View.read (view "") key
+      View.read view key
 
     let read_exn tr key =
       Key_.assert_key key;
       let (_,view,_,_) = tr in
-      View.read_exn (view "") key
+      View.read_exn view key
 
     let list tr key =
       Key_.assert_key key;
       (*Printf.printf "------ store list %s\n%!" (Key_.key_to_string key);*)
       let (_,view,_,_) = tr in
-      View.list (view "") key
+      View.list view key
 
     let remove tr key =
       Key_.assert_key key;
       (*Printf.printf "------ store remove %s\n" (Key_.key_to_string key);*)
       let (_,view,_,dirty) = tr in
-      View.remove_rec (view "") key >>= fun () ->
+      View.remove_rec view key >>= fun () ->
       dirty := true;
       return ()
 
     let mem tr key =
       Key_.assert_key key;
       let (_,view,_,_) = tr in
-      View.mem (view "") key
+      View.mem view key
 
     let tr_key tr =
       let (_,_,key,_) = tr in
