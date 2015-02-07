@@ -263,39 +263,32 @@ let populate_maildir_msgs ist path flagsmap uidmap =
     let acc = List.sort String.compare acc in
     Lwt_list.iter_s (fun name -> 
       Printf.printf "#### processing %s\n%!" name;
-      let (trash,msgflags) =
+      let msgflags =
       if Regex.match_regex name ~regx:":2,\\([a-zA-Z]+\\)$" then (
         let flags = Str.matched_group 1 name in
-        let rec fold str i (trash,acc) =
+        let rec fold str i acc =
           try
             let flag = str.[i] in
-            if flag = 'T' then
-              (true,acc)
-            else
-              try 
-                let flag = MapChar.find flag flagsmap in
-                fold str (i+1) (trash,flag :: acc)
-              with _ -> fold str (i+1) (trash,acc)
-          with _ -> (trash,acc) in
-        fold flags 0 (false,[])
+            try 
+              let flag = MapChar.find flag flagsmap in
+              fold str (i+1) (flag :: acc)
+            with _ -> fold str (i+1) acc
+          with _ -> acc in
+        fold flags 0 []
       ) else (
-        false,[]
+        []
       )
       in
-      if trash then
-        return ()
-      else (
-        let flags = List.concat [initflags;msgflags] in
-        let uid = 
-          if match_regex name ~regx:"^\\([^:]+\\)" then
-            try
-              Some (MapStr.find (Str.matched_group 1 name) uidmap)
-            with _ -> None
-          else
-            None
-        in
-        append_maildir_message ist ?uid (Filename.concat path name) flags
-      )
+      let flags = List.concat [initflags;msgflags] in
+      let uid = 
+        if match_regex name ~regx:"^\\([^:]+\\)" then
+          try
+            Some (MapStr.find (Str.matched_group 1 name) uidmap)
+          with _ -> None
+        else
+          None
+      in
+      append_maildir_message ist ?uid (Filename.concat path name) flags
     ) acc
   in
   populate ist (Filename.concat path "new") [Flags_Recent] flagsmap uidmap >>
@@ -372,9 +365,9 @@ let create_mbox user inbox mailboxes =
   )
 
 let maildir_flags flagsmap =
-  let keys = ['P';'R';'S';'D';'F'] in
+  let keys = ['P';'R';'S';'T';'D';'F'] in
   let values =
-    [Flags_Answered;Flags_Answered;Flags_Seen;Flags_Draft;Flags_Flagged] in
+    [Flags_Answered;Flags_Answered;Flags_Seen;Flags_Deleted;Flags_Draft;Flags_Flagged] in
   let (_,flagsmap) =
   List.fold_left (fun (i,flagsmap) key ->
     i+1, MapChar.add key (List.nth values i) flagsmap
