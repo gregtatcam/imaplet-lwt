@@ -23,9 +23,31 @@ let pad c_data padding =
   else
     (0,c_data)
 
+let refill input =
+  let n = String.length input in
+  let toread = ref n in
+  fun buf ->
+    let m = min !toread (String.length buf) in
+    String.blit input (n - !toread) buf 0 m;
+    toread := !toread - m;
+    m
+
+let flush output buf len =
+  Buffer.add_substring output buf 0 len
+
+let do_compress input =
+  let output = Buffer.create (String.length input) in
+  Zlib.compress ~level:6 (refill input) (flush output);
+  Buffer.contents output
+
+let do_uncompress input =
+  let output = Buffer.create (String.length input) in
+  Zlib.uncompress (refill input) (flush output);
+  Buffer.contents output
+
 let aes_encrypt ?(compress=false) data pub secrets =
   let open Nocrypto.Cipher_block in
-  let data = if compress then (Bz2.compress ~block:9 data 0 (Bytes.length data)) else data in
+  let data = if compress then do_compress data else data in
   let (secret,iv) = secrets data in
   let key = AES.CBC.of_secret secret in
   let (pad_size,c_data) = pad (Cstruct.of_string data) secret in
@@ -50,10 +72,7 @@ let aes_decrypt ?(compressed=false) data priv =
   let decr = AES.CBC.decrypt ~key ~iv (Cstruct.of_string encrypted) in
   let decrypted = Cstruct.to_string decr.message in
   let data = Bytes.sub decrypted 0 ((Bytes.length decrypted) - pad_size) in
-  if compressed then
-    Bz2.uncompress data 0 (Bytes.length data)
-  else
-    data
+  if compressed then do_uncompress data else data
 
 let encrypt ?(compress=false) data pub =
   let (_,_,e) = 

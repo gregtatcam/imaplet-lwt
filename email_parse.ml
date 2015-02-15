@@ -97,19 +97,18 @@ let email_content attachment base64 email =
       return ("",Octet_stream.to_string rc)
   | None -> return ("","") 
 
-(* there is a value in having the main headers separatelly and the message
- * separatelly as the search could be optimized when it is done on iether
- * headers or the message and not both
- * should add encrypt and compress to the message metadata TBD
- *)
-let parse (message:Mailbox.Message.t) ~save_message ~save_attachment =
-  let do_encrypt data =
-    if srv_config.encrypt then
-      pub_key () >>= fun pub ->
-      return (encrypt ~compress:srv_config.compress data pub)
-    else
-      return data
-  in
+let do_encrypt data =
+  if srv_config.encrypt then
+    pub_key () >>= fun pub ->
+    return (encrypt ~compress:srv_config.compress data pub)
+  else
+    return data
+
+let do_encrypt_headers email =
+  let headers_sexp_str = Sexp.to_string (Header.sexp_of_t (Email.header email)) in
+  do_encrypt headers_sexp_str
+
+let do_encrypt_content email save_attachment =
   let headers_str email =
     String_monoid.to_string (Header.to_string_monoid (Email.header email)) in
   let buffer = Buffer.create 100 in
@@ -141,15 +140,18 @@ let parse (message:Mailbox.Message.t) ~save_message ~save_attachment =
       add_boundary buffer ~boundary ~suffix:"--\n" ;
       return map
   in
-  walk message.email None true [] >>= fun map ->
+  walk email None true [] >>= fun map ->
   let map_sexp_str = Sexp.to_string (sexp_of_list (fun (a,b,c) -> 
       sexp_of_string 
       (String.concat " " [string_of_int a;string_of_int b; string_of_bool c])
     )  (List.rev map)) in
   let content = Printf.sprintf "%04d%s%s" (Bytes.length map_sexp_str) map_sexp_str (Buffer.contents buffer) in
+  do_encrypt content 
+
+let parse (message:Mailbox.Message.t) ~save_message ~save_attachment =
   do_encrypt (Mailbox.Postmark.to_string message.postmark) >>= fun postmark ->
-  do_encrypt (headers_str message.email) >>= fun headers ->
-  do_encrypt content >>= fun content ->
+  do_encrypt_headers message.email >>= fun headers ->
+  do_encrypt_content message.email save_attachment >>= fun content ->
   save_message postmark headers content
 
 let email_content email =
@@ -176,18 +178,48 @@ let get_hdr_attrs buffer headers boundary =
     )
   ) (boundary,None,false) headers
 
-let restore ~get_message ~get_attachment  =
-  catch (fun () ->
-  let do_decrypt data =
-    if srv_config.encrypt then (
-      priv_key() >>= fun priv ->
-      return (decrypt ~compressed:srv_config.compress data priv)
-    ) else
-      return data
-  in
-  get_message () >>= fun (postmark,headers,content) ->
-  do_decrypt postmark >>= fun postmark ->
-  do_decrypt headers >>= fun headers ->
+(* there must be a better way to do it TBD *)
+let rec printable buffer str =
+  if Bytes.length str >= 76 then (
+    Buffer.add_string buffer (Bytes.sub str 0 76);
+    Buffer.add_string buffer "\n";
+    printable buffer (Bytes.sub str 76 (Bytes.length str - 76))
+  ) else (
+    Buffer.add_string buffer str;
+    Buffer.add_string buffer "\n";
+    Buffer.contents buffer
+  )
+
+let reassemble_attachments ~content ~map ~get_attachment =
+  let buffer = Buffer.create 100 in
+  Lwt_list.fold_left_s (fun start (offset,size,base64) ->
+    Buffer.add_string buffer ((Bytes.sub content start (offset - start)) ^ "\n\n");
+    let header = Bytes.sub content offset size in
+    let _ = match_regex ~case:false header ~regx:"^X-Imaplet-External-Content: \\([^\n]+\\)\n\n$" in
+    let contid = Str.matched_group 1 header in
+    get_attachment contid >>= fun attachment ->
+    priv_key() >>= fun priv ->
+    let cont = conv_decrypt ~compressed:false attachment priv in
+    Buffer.add_string buffer ((
+    if base64 then
+      printable (Buffer.create 100) (Cstruct.to_string (Nocrypto.Base64.encode (Cstruct.of_string cont)))
+    else
+      cont
+    ) ^ "\n");
+    return (offset + size)
+  ) 0 map >>= fun start ->
+  if start <> Bytes.length content then
+    Buffer.add_string buffer (Bytes.sub content start (Bytes.length content - start));
+  return (Buffer.contents buffer)
+
+let do_decrypt data =
+  if srv_config.encrypt then (
+    priv_key() >>= fun priv ->
+    return (decrypt ~compressed:srv_config.compress data priv)
+  ) else
+    return data
+
+let do_decrypt_content content =
   do_decrypt content >>= fun content ->
   let len = int_of_string (Bytes.sub content 0 4) in
   let map_sexp_str = Bytes.sub content 4 len in
@@ -199,50 +231,26 @@ let restore ~get_message ~get_attachment  =
        bool_of_string (List.nth parts 2))
   ) (Sexp.of_string map_sexp_str) in
   let content = Bytes.sub content (4 + len) (Bytes.length content - 4 - len) in
-  begin
-  if List.length map = 0 then ( (* no attachments *)
-    return content
-  ) else (
-    let buffer = Buffer.create 100 in
-    Lwt_list.fold_left_s (fun start (offset,size,base64) ->
-      Buffer.add_string buffer ((Bytes.sub content start (offset - start)) ^ "\n\n");
-      let header = Bytes.sub content offset size in
-      let _ = match_regex ~case:false header ~regx:"^X-Imaplet-External-Content: \\([^\n]+\\)\n\n$" in
-      let contid = Str.matched_group 1 header in
-      get_attachment contid >>= fun attachment ->
-      priv_key() >>= fun priv ->
-      let cont = conv_decrypt ~compressed:false attachment priv in
-      Buffer.add_string buffer ((
-      if base64 then (
-        (*
-        String_monoid.to_string (Octet_stream.to_string_monoid
-        (Octet_stream.Base64.encode (Octet_stream.of_string cont)))
-        *)
-        (* there must be a better way to do it TBD *)
-        let rec printable buffer str =
-          if Bytes.length str >= 76 then (
-            Buffer.add_string buffer (Bytes.sub str 0 76);
-            Buffer.add_string buffer "\n";
-            printable buffer (Bytes.sub str 76 (Bytes.length str - 76))
-          ) else (
-            Buffer.add_string buffer str;
-            Buffer.add_string buffer "\n";
-            Buffer.contents buffer
-          )
-        in
-        printable (Buffer.create 100) (Cstruct.to_string (Nocrypto.Base64.encode (Cstruct.of_string cont)))
-      ) else
-        cont
-      ) ^ "\n");
-      return (offset + size)
-    ) 0 map >>= fun start ->
-    if start <> Bytes.length content then
-      Buffer.add_string buffer (Bytes.sub content start (Bytes.length content - start));
-    return (Buffer.contents buffer)
-  )
-  end >>= fun content -> 
-  let postmark = Mailbox.Postmark.of_string postmark in
-  let email = Email.of_string (headers ^ "\n" ^ content ^ "\n") in
-  return {Mailbox.Message.postmark=postmark;Mailbox.Message.email=email}
-  ) (fun ex -> Printf.printf "restore exception %s\n%!" (Printexc.to_string ex);
-  raise ex)
+  return (content,map)
+
+let do_decrypt_headers headers =
+  do_decrypt headers >>= fun headers ->
+  let headers = Header.t_of_sexp (Sexp.of_string headers) in
+  return (String_monoid.to_string (Header.to_string_monoid headers))
+
+let do_decrypt_headers_to_list headers =
+  do_decrypt headers >>= fun headers ->
+  let headers = Header.t_of_sexp (Sexp.of_string headers) in
+  return (Header.to_list headers)
+
+let restore ~get_message ~get_attachment  =
+  catch (fun () ->
+    get_message () >>= fun (postmark,headers,content) ->
+    do_decrypt postmark >>= fun postmark ->
+    do_decrypt_headers headers >>= fun headers ->
+    do_decrypt_content content >>= fun (content,map) ->
+    reassemble_attachments ~content ~map ~get_attachment >>= fun content -> 
+    let postmark = Mailbox.Postmark.of_string postmark in
+    let email = Email.of_string (headers ^ "\n" ^ content ^ "\n") in
+    return {Mailbox.Message.postmark=postmark;Mailbox.Message.email=email}
+  ) (fun ex -> Printf.printf "restore exception %s\n%!" (Printexc.to_string ex); raise ex)

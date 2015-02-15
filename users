@@ -1,2 +1,1 @@
-dovecot:{PLAIN}dovecot1:501:::/Users/dovecot
-gregt:{PLAIN}gregt:502:::/Users/gregt
+imaplet:{PLAIN}imaplet:501:::/Users/imaplet

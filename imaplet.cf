@@ -18,14 +18,14 @@ lmtp_port 24
 # imap server address for outside connections
 addr 127.0.0.1
 
-# imap server port for outside connections
-port 993
+# imap server port for outside connections, 143 no ssl/993 ssl
+port 143
 
 # is ssl enabled
-ssl true
+ssl false
 
 # is starttls enabled
-starttls true
+starttls false
 
 # inbox location for the storage (irmin, mbox(/var/mail), mailbox, etc)
 # blank for irmin
