@@ -47,6 +47,15 @@ Library email_message
                     re2,
                     threads
 
+Executable parse_restore
+  Build		  : true
+  Install	  : false
+  Path		  : test
+  CompiledObject  : native
+  BuildTools	  : ocamlbuild
+  MainIs	  : parse_restore.ml
+  BuildDepends	  : lwt,lwt.unix,lwt.syntax,tls.lwt,sexplib.syntax,threads,str,cstruct.unix,irmin.unix,email_message,nocrypto
+
 Executable imaplet
   Build		  : true
   Install	  : true

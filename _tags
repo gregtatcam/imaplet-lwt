@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: a3e79c9f92b1bbb607fcf2bf9dadacd4)
+# DO NOT EDIT (digest: cf8702b0abc8ecb95c47a9b6fdb184c3)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -47,6 +47,33 @@ true: annot, bin_annot
 <lib/email_message/*.ml{,i,y}>: pkg_sexplib.syntax
 <lib/email_message/*.ml{,i,y}>: pkg_str
 <lib/email_message/*.ml{,i,y}>: pkg_threads
+# Executable parse_restore
+"test/parse_restore.native": pkg_cstruct.unix
+"test/parse_restore.native": pkg_fieldslib.syntax
+"test/parse_restore.native": pkg_irmin.unix
+"test/parse_restore.native": pkg_lwt
+"test/parse_restore.native": pkg_lwt.syntax
+"test/parse_restore.native": pkg_lwt.unix
+"test/parse_restore.native": pkg_nocrypto
+"test/parse_restore.native": pkg_re2
+"test/parse_restore.native": pkg_sexplib.syntax
+"test/parse_restore.native": pkg_str
+"test/parse_restore.native": pkg_threads
+"test/parse_restore.native": pkg_tls.lwt
+"test/parse_restore.native": use_email_message
+<test/*.ml{,i,y}>: pkg_cstruct.unix
+<test/*.ml{,i,y}>: pkg_fieldslib.syntax
+<test/*.ml{,i,y}>: pkg_irmin.unix
+<test/*.ml{,i,y}>: pkg_lwt
+<test/*.ml{,i,y}>: pkg_lwt.syntax
+<test/*.ml{,i,y}>: pkg_lwt.unix
+<test/*.ml{,i,y}>: pkg_nocrypto
+<test/*.ml{,i,y}>: pkg_re2
+<test/*.ml{,i,y}>: pkg_sexplib.syntax
+<test/*.ml{,i,y}>: pkg_str
+<test/*.ml{,i,y}>: pkg_threads
+<test/*.ml{,i,y}>: pkg_tls.lwt
+<test/*.ml{,i,y}>: use_email_message
 # Executable imaplet
 "imaplet.native": pkg_cstruct.unix
 "imaplet.native": pkg_fieldslib.syntax
