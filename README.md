@@ -7,7 +7,7 @@ To get started
 - configure authentication in "users" file. 
   The file can be found in ~/.opam/xxxx/share/imaplet/users or /usr/local/share/imaplet/users if installed manually. There is one line per configured user, for instance
 imaplet:{PLAIN}imaplet:501:::/Users/imaplet
-Where 'imaplet' is the user name, {PLAIN} is the only supported authentication, 'imaplet' is the password, 501 is the user id, /Users/imaplet is user's home directory.
+Where 'imaplet' is the user name, {PLAIN} is the only supported authentication, 'imaplet' is the password, 501 is the user id (you can get with 'id' command on MAC X), /Users/imaplet is user's home directory.
 - configure run-time parameters in imaplet.cf (same dir as above). The important parameters to set:
 - irmin_path: path for the git repository, default is /tmp/irmin/test
 - port: port to listen on, normally 993 for SSL and 143 for plain, default is 143
