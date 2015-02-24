@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: cf8702b0abc8ecb95c47a9b6fdb184c3)
+# DO NOT EDIT (digest: d36a6109f980f11580af5d080db3fb98)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -108,18 +108,19 @@ true: annot, bin_annot
 "imaplet_irmin_read.native": pkg_str
 "imaplet_irmin_read.native": pkg_threads
 "imaplet_irmin_read.native": use_email_message
-<*.ml{,i,y}>: pkg_nocrypto
 # Executable imaplet_irmin_build
 "imaplet_irmin_build.native": pkg_fieldslib.syntax
 "imaplet_irmin_build.native": pkg_irmin.unix
 "imaplet_irmin_build.native": pkg_lwt
 "imaplet_irmin_build.native": pkg_lwt.unix
+"imaplet_irmin_build.native": pkg_nocrypto
 "imaplet_irmin_build.native": pkg_re2
 "imaplet_irmin_build.native": pkg_sexplib.syntax
 "imaplet_irmin_build.native": pkg_str
 "imaplet_irmin_build.native": pkg_threads
 "imaplet_irmin_build.native": use_email_message
 <*.ml{,i,y}>: pkg_irmin.unix
+<*.ml{,i,y}>: pkg_nocrypto
 # Executable imaplet_maildir_index
 "imaplet_maildir_index.native": pkg_fieldslib.syntax
 "imaplet_maildir_index.native": pkg_lwt

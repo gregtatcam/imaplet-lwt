@@ -15,10 +15,10 @@
  *)
 open Nocrypto
 
-val encrypt : ?compress:bool -> bytes -> Rsa.pub -> bytes
+val encrypt : ?compress:bool -> string -> Rsa.pub -> string
 
-val decrypt : ?compressed:bool -> bytes -> Rsa.priv -> bytes
+val decrypt : ?compressed:bool -> string -> Rsa.priv -> string
 
-val conv_encrypt : ?compress:bool -> bytes -> Rsa.pub -> bytes * bytes
+val conv_encrypt : ?compress:bool -> string -> Rsa.pub -> string * string
 
-val conv_decrypt : ?compressed:bool -> bytes -> Rsa.priv -> bytes
+val conv_decrypt : ?compressed:bool -> string -> Rsa.priv -> string

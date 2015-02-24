@@ -91,7 +91,7 @@ Executable imaplet_irmin_build
   CompiledObject  : native
   BuildTools	  : ocamlbuild
   MainIs	  : imaplet_irmin_build.ml
-  BuildDepends	  : lwt,lwt.unix,email_message,str,sexplib.syntax,threads,irmin.unix
+  BuildDepends	  : lwt,lwt.unix,email_message,str,sexplib.syntax,threads,irmin.unix,nocrypto
 
 Executable imaplet_maildir_index
   Build		  : true
