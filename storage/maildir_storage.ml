@@ -21,6 +21,7 @@ open Storage_meta
 open Imaplet_types
 open Email_message
 open Email_message.Mailbox.Message
+open Lazy_message
 
 module MapStr = Map.Make(String)
 module MapFlag = Map.Make(
@@ -28,6 +29,94 @@ module MapFlag = Map.Make(
     type t = mailboxFlags
     let compare f1 f2 = Pervasives.compare f1 f2
   end)
+
+let _raw_content t =
+  match Email.raw_content t with
+  | Some os -> Octet_stream.to_string os
+  | None -> ""
+
+module LazyMaildirEmail : LazyEmail_intf with type c = Email.t =
+  struct
+    (* plain content *)
+    type c = Email.t
+
+    type t = Email.t
+
+    let create c = c
+
+    let empty = Email.empty ()
+
+    let header ?(incl=`Map MapStr.empty) ?(excl=MapStr.empty) t =
+      List.filter (fun (n,_) ->
+        let dont_incl =
+        match incl with
+        | `Map incl -> 
+          MapStr.is_empty incl = false && MapStr.mem (String.lowercase n) incl = false
+        | `Regx incl ->
+          Regex.match_regex ~case:false ~regx:incl n = false
+        in
+        (dont_incl = true ||
+          MapStr.is_empty excl = false && MapStr.mem (String.lowercase n) excl = true) = false
+      ) (Header.to_list (Email.header t))
+
+    let header_to_str ?(incl=`Map MapStr.empty) ?(excl=MapStr.empty) t =
+      List.fold_left (fun str (n,v) ->
+        str ^ n ^ ":" ^ v ^ Email_parse.crlf
+      ) "" (header ~incl ~excl t)
+
+    let content t =
+      return (
+        match (Email.content t) with
+        | `Data _ -> `Data (_raw_content t)
+        | `Message m -> `Message m
+        | `Multipart lm -> `Multipart lm
+      )
+      
+    let raw_content t =
+      return (_raw_content t)
+
+    let to_string ?(incl=`Map MapStr.empty) ?(excl=MapStr.empty) t =
+      let headers = header_to_str ~incl ~excl t in
+      raw_content t >>= fun content ->
+      return (headers ^ Email_parse.crlf ^ content)
+
+    let lines t =
+      Utils.lines (_raw_content t)
+
+    let size t =
+      Bytes.length (_raw_content t)
+
+  end
+
+type maildir_accessor = Mailbox.Message.t * mailbox_message_metadata
+
+module LazyMaildirMessage : LazyMessage_intf with type c = maildir_accessor =
+  struct
+    type c = maildir_accessor
+    type t = maildir_accessor
+
+    let create c = c
+
+    let get_postmark t =
+      let (msg,_) = t in
+      return (Mailbox.Postmark.to_string msg.postmark)
+
+    let get_headers_block t =
+      let (msg,_) = t in
+      return (String_monoid.to_string (Header.to_string_monoid (Email.header msg.email)))
+
+    let get_content_block t =
+      let (msg,_) = t in
+      return (_raw_content msg.email)
+
+    let get_email t =
+      let (msg,_) = t in
+      return (build_lazy_email_inst (module LazyMaildirEmail) msg.email)
+
+    let get_message_metadata t =
+      let (_,meta) = t in
+      return meta
+  end
 
 module MaildirPath : sig 
   type t
@@ -497,25 +586,11 @@ struct
         let message = Mailbox.Message.t_of_sexp (Sexp.of_string buffer) in
         let (internal_date,_,modseq,flags) = message_file_name_to_data t.mailbox file in
         let metadata = {uid;modseq;internal_date;size;flags} in
-        return (`Ok (message,metadata))
+        return (`Ok (Lazy_message.build_lazy_message_inst (module LazyMaildirMessage)
+          (message,metadata)))
       )
     | `Eof -> return `Eof
     | `NotFound -> return `NotFound
-
-  (* search selected mailbox *)
-  let search t keys buid =
-    fetch_uidlist t >>= fun uids ->
-    Lwt_list.fold_right_s (fun (uid,file) (seq,acc) ->
-      if (Interpreter.check_search_seq ~seq ~uid keys) = false then
-        return (seq+1,acc)
-      else (
-        fetch_ t (`Sequence seq) uids >>= function
-        | `Ok (message,message_metadata) 
-          when Interpreter.exec_search message.email keys message_metadata seq ->
-          return (seq+1,if buid then uid :: acc else seq :: acc)
-        | _ -> return (seq+1,acc)
-      )
-    ) uids (1,[]) >>= fun (_,acc) -> return acc
 
   (* fetch messages from selected mailbox *)
   let fetch t position =
@@ -553,7 +628,13 @@ struct
   let copy t pos t2 message_metadata =
     fetch t pos >>= function
     | `Eof | `NotFound -> return ()
-    | `Ok (message,_) ->
+    | `Ok (module LazyMessage) ->
+      LazyMessage.LazyMessage.get_postmark LazyMessage.this >>= fun postmark ->
+      LazyMessage.LazyMessage.get_email LazyMessage.this >>= fun (module LE:LazyEmail_inst) ->
+      LE.LazyEmail.to_string LE.this >>= fun email ->
+      let message = 
+        { postmark=Mailbox.Postmark.of_string postmark;
+          email=Email.of_string email} in
       append t2 message message_metadata
 
   let commit t =

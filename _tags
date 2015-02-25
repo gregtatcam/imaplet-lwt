@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: d36a6109f980f11580af5d080db3fb98)
+# DO NOT EDIT (digest: 90a41f35923a09b9f59da3634f39ba79)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -89,7 +89,6 @@ true: annot, bin_annot
 "imaplet.native": pkg_tls.lwt
 "imaplet.native": use_email_message
 <*.ml{,i,y}>: pkg_cstruct.unix
-<*.ml{,i,y}>: pkg_tls.lwt
 # Executable imaplet_lmtp
 "imaplet_lmtp.native": pkg_lwt
 "imaplet_lmtp.native": pkg_lwt.syntax
@@ -97,7 +96,6 @@ true: annot, bin_annot
 "imaplet_lmtp.native": pkg_sexplib.syntax
 "imaplet_lmtp.native": pkg_str
 "imaplet_lmtp.native": pkg_threads
-<*.ml{,i,y}>: pkg_lwt.syntax
 # Executable imaplet_irmin_read
 "imaplet_irmin_read.native": pkg_fieldslib.syntax
 "imaplet_irmin_read.native": pkg_irmin.unix
@@ -120,23 +118,30 @@ true: annot, bin_annot
 "imaplet_irmin_build.native": pkg_threads
 "imaplet_irmin_build.native": use_email_message
 <*.ml{,i,y}>: pkg_irmin.unix
-<*.ml{,i,y}>: pkg_nocrypto
 # Executable imaplet_maildir_index
 "imaplet_maildir_index.native": pkg_fieldslib.syntax
 "imaplet_maildir_index.native": pkg_lwt
+"imaplet_maildir_index.native": pkg_lwt.syntax
 "imaplet_maildir_index.native": pkg_lwt.unix
+"imaplet_maildir_index.native": pkg_nocrypto
 "imaplet_maildir_index.native": pkg_re2
 "imaplet_maildir_index.native": pkg_sexplib.syntax
 "imaplet_maildir_index.native": pkg_str
 "imaplet_maildir_index.native": pkg_threads
+"imaplet_maildir_index.native": pkg_tls.lwt
+"imaplet_maildir_index.native": pkg_zip
 "imaplet_maildir_index.native": use_email_message
 <*.ml{,i,y}>: pkg_fieldslib.syntax
 <*.ml{,i,y}>: pkg_lwt
+<*.ml{,i,y}>: pkg_lwt.syntax
 <*.ml{,i,y}>: pkg_lwt.unix
+<*.ml{,i,y}>: pkg_nocrypto
 <*.ml{,i,y}>: pkg_re2
 <*.ml{,i,y}>: pkg_sexplib.syntax
 <*.ml{,i,y}>: pkg_str
 <*.ml{,i,y}>: pkg_threads
+<*.ml{,i,y}>: pkg_tls.lwt
+<*.ml{,i,y}>: pkg_zip
 <*.ml{,i,y}>: use_email_message
 # OASIS_STOP
 true: use_menhir

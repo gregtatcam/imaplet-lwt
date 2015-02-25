@@ -45,9 +45,11 @@ let init_unix_socket file =
   let socket = socket Unix.PF_UNIX Unix.SOCK_STREAM 0 in
   setsockopt socket Unix.SO_REUSEADDR true;
   bind socket sockaddr;
+  catch (fun () ->
   getpwnam "postfix" >>= fun (pw:Lwt_unix.passwd_entry) ->
   chown file pw.pw_uid pw.pw_gid >>= fun () ->
-  chmod file  0o777 >>= fun () ->
+  chmod file  0o777)
+  (fun _ -> Printf.printf "warning: postfix is not installed\n%!"; return ()) >>
   return socket
 
 let create_srv_socket addr = 

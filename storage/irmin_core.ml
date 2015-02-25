@@ -22,7 +22,8 @@ open Server_config
 open Imaplet_types
 open Storage_meta
 open Utils
-open Sexplib.Std
+open Sexplib.Conv
+open Lazy_message
 
 exception KeyDoesntExist
 exception DuplicateUID
@@ -30,6 +31,169 @@ exception InvalidKey of string
 
 module Store = Irmin.Basic (Irmin_git.FS) (Irmin.Contents.String)
 module View = Irmin.View(Store)
+module MapStr = Map.Make(String)
+
+type irmin_accessors =
+  (unit -> bytes Lwt.t) * (* postmark *)
+  (unit -> (Email_parse.email_map * bytes) Lwt.t) * (* headers *)
+  (unit -> bytes Lwt.t) * (* content *)
+  (bytes -> bytes Lwt.t) * (* attachment *) 
+  (unit -> mailbox_message_metadata Lwt.t)
+
+type irmin_accessors_rec = {
+  postmark:bytes Lwt.t lazy_t;
+  headers:(Email_parse.email_map * bytes) Lwt.t lazy_t;
+  content:bytes Lwt.t lazy_t;
+  attachment:(bytes -> bytes Lwt.t);
+  metadata:mailbox_message_metadata Lwt.t lazy_t;
+}
+
+type email_irmin_accessors =
+  Email_parse.email_map * bytes * (bytes Lwt.t lazy_t) * 
+    (bytes Lwt.t lazy_t Map.Make(String).t)
+
+module LazyIrminEmail : LazyEmail_intf with type c = email_irmin_accessors =
+  struct 
+    open Email_parse
+    type c = email_irmin_accessors
+    type t = {
+      email:email_map;
+      headers: bytes;
+      content: bytes Lwt.t lazy_t;
+      attachment: bytes Lwt.t lazy_t Map.Make(String).t;
+    }
+
+    let empty = {
+      email = {part={size=0;lines=0};header={offset=0;length=0};content=`Data_map {offset=0;length=0}};
+      headers = "";
+      content = Lazy.from_fun (fun () -> return "");
+      attachment = MapStr.empty;
+    }
+
+    let create c =
+      let (email,headers,content,attachment) = c in
+      {email;headers;content;attachment}
+
+    let header ?(incl=`Map MapStr.empty) ?(excl=MapStr.empty) t =
+      let sexp = Sexp.of_string (Bytes.sub t.headers t.email.header.offset t.email.header.length) in
+      List.filter (fun (n,_) ->
+        let dont_incl =
+        match incl with
+        | `Map incl -> 
+          MapStr.is_empty incl = false && MapStr.mem (String.lowercase n) incl = false
+        | `Regx incl ->
+          Regex.match_regex ~case:false ~regx:incl n = false
+        in
+        (* exclude if it is not on included list or is on excluded list *)
+        (dont_incl = true ||
+          MapStr.is_empty excl = false && MapStr.mem (String.lowercase n) excl = true) = false
+      ) (list_of_sexp (fun sexp -> pair_of_sexp string_of_sexp string_of_sexp sexp) sexp)
+
+    let header_to_str ?(incl=`Map MapStr.empty) ?(excl=MapStr.empty) t =
+      List.fold_left (fun str (n,v) ->
+        str ^ n ^ ":" ^ v ^ crlf
+      ) "" (header ~incl ~excl t)
+
+    let convert t =
+      match t.email.content with
+      | `Data_map dd -> 
+        Lazy.force t.content >>= fun content ->
+        return (`Data (Bytes.sub content dd.offset dd.length)) 
+      | `Attach_map contid -> 
+        Lazy.force (MapStr.find contid t.attachment) >>= fun attachment ->
+        return (`Data attachment)
+      | `Message_map email -> 
+        return (`Message {t with email})
+      | `Multipart_map (boundary,lemail) -> 
+        return (`Multipart_ (boundary,(List.map (fun email -> {t with email}) lemail)))
+
+    let content t =
+      convert t >>= fun c ->
+      match c with
+      | `Data d -> return (`Data d)
+      | `Message m -> return (`Message m)
+      | `Multipart_ (_,lemail) -> return (`Multipart lemail)
+
+    let raw_content t =
+      let buffer = Buffer.create 100 in
+      let rec _raw_content t with_header last_crlf =
+        let header t buffer with_header = 
+          if with_header then 
+            Buffer.add_string buffer ((header_of_sexp_str 
+              (Bytes.sub t.headers t.email.header.offset t.email.header.length)) ^ crlf)
+        in
+        convert t >>= fun c ->
+        header t buffer with_header;
+        match c with
+        | `Data data -> Buffer.add_string buffer (data ^ crlf); return ()
+        | `Message email -> _raw_content email true crlf
+        | `Multipart_ (boundary,lemail) ->
+          Buffer.add_string buffer crlf;
+          Lwt_list.iter_s (fun email ->
+            Buffer.add_string buffer (boundary ^ crlf);
+            _raw_content email true crlf
+          ) lemail >>= fun () ->
+          Buffer.add_string buffer (boundary ^ "--" ^ crlf ^ last_crlf);
+          return ()
+      in
+      _raw_content t false "" >>
+      return (Buffer.contents buffer)
+
+    let to_string ?(incl=`Map MapStr.empty) ?(excl=MapStr.empty) t =
+      let headers = header_to_str ~incl ~excl t in
+      raw_content t >>= fun content ->
+      return (headers ^ crlf ^ content)
+
+    let size t =
+      t.email.part.size
+
+    let lines t =
+      t.email.part.lines
+
+  end
+
+module LazyIrminMessage : LazyMessage_intf with type c = irmin_accessors =
+  struct
+    open Email_parse
+
+    type c = irmin_accessors
+
+    type t = irmin_accessors_rec
+
+    let create c =
+      let (postmark,headers,content,attachment,metadata) = c in
+      {postmark=Lazy.from_fun postmark;
+       headers=Lazy.from_fun headers;
+       content=Lazy.from_fun content;
+       attachment;
+       metadata=Lazy.from_fun metadata}
+
+    let get_postmark t =
+      Lazy.force t.postmark
+
+    let get_headers_block t =
+      Lazy.force t.headers >>= fun (_,headers) ->
+      return headers
+
+    let get_content_block (t:irmin_accessors_rec) =
+      Lazy.force t.content
+
+    let get_email t =
+      let rec walk email acc =
+        match email.content with
+        | `Data_map d -> acc
+        | `Attach_map contid -> MapStr.add contid (Lazy.from_fun (fun () -> t.attachment contid)) acc
+        | `Message_map email -> walk email acc
+        | `Multipart_map (_,lemail) -> 
+          List.fold_left (fun acc email -> walk email acc) acc lemail
+      in
+      Lazy.force t.headers >>= fun (email,headers) ->
+      return (build_lazy_email_inst (module LazyIrminEmail)
+        (email,headers,t.content,walk email MapStr.empty))
+
+    let get_message_metadata t =
+      Lazy.force t.metadata
+  end
 
 module Key_ :
   sig
@@ -169,7 +333,7 @@ module IrminIntf :
 
 
     let create () =
-      let config = Irmin_git.config ~root:srv_config.irmin_path ~bare:true () in
+      let config = Irmin_git.config ~root:srv_config.irmin_path ~bare:false () in
       Store.create config task 
 
     let remove store key =
@@ -429,7 +593,7 @@ module IrminMailbox :
       [`NotFound|`Eof|`Ok] Lwt.t
     val read_message : t -> ?filter:(searchKey) searchKeys -> 
       [`Sequence of int|`UID of int] ->
-      [`NotFound|`Eof|`Ok of (Mailbox.Message.t * mailbox_message_metadata)] Lwt.t
+      [`NotFound|`Eof|`Ok of (module Lazy_message.LazyMessage_inst)] Lwt.t
     val read_message_metadata : t -> [`Sequence of int|`UID of int] -> 
       [`NotFound|`Eof|`Ok of mailbox_message_metadata] Lwt.t
     val delete_message : t -> [`Sequence of int|`UID of int] -> unit Lwt.t
@@ -604,14 +768,14 @@ module IrminMailbox :
           (Sexp.to_string (sexp_of_mailbox_message_metadata metadata)) >>= fun () ->
         return `Ok
 
-    let get_attachment mbox uid contid =
-      IrminIntf_tr.read_exn mbox.trans (get_key (`Attachments (uid,Some contid)))
+    let get_attachment trans uid contid =
+      IrminIntf_tr.read_exn trans (get_key (`Attachments (uid,Some contid)))
 
-    let get_attachments mbox uid f =
-      IrminIntf_tr.list mbox.trans (get_key (`Attachments (uid,None))) >>= fun l ->
+    let get_attachments trans uid f =
+      IrminIntf_tr.list trans (get_key (`Attachments (uid,None))) >>= fun l ->
       Lwt_list.iter_s (fun key ->
         let contid = (List.nth key (List.length key - 1)) in
-        IrminIntf_tr.read_exn mbox.trans key >>= fun attachment ->
+        IrminIntf_tr.read_exn trans key >>= fun attachment ->
         f contid attachment
       ) l
 
@@ -620,31 +784,37 @@ module IrminMailbox :
       IrminIntf_tr.read_exn mbox.trans (get_key (`Postmark uid)) >>= fun postmark ->
       IrminIntf_tr.read_exn mbox.trans (get_key (`Email uid)) >>= fun email ->
       (* get_attachments mbox uid >>= fun attachments -> *)
-      return (postmark, headers, email, f mbox uid)
+      return (postmark, headers, email, f mbox.trans uid)
+
+    let get_message_metadata mbox uid =
+      IrminIntf_tr.read_exn mbox.trans (get_key (`Metamessage uid)) >>= fun sexp_str ->
+      return (mailbox_message_metadata_of_sexp (Sexp.of_string sexp_str))
 
     let read_message mbox ?filter position =
       get_uid mbox position >>= function
       | `Eof -> return `Eof
       | `NotFound -> return `NotFound
       | `Ok (seq,uid) -> 
-        (* redundant search but worth checking if search fails because of the
-         * sequence - then don't need to read the record 
-         *)
-        if filter <> None && (Interpreter.check_search_seq 
-            ~seq ~uid (option_value_exn filter)) = false then
-          return `NotFound
-        else (
-          IrminIntf_tr.read_exn mbox.trans (get_key (`Metamessage uid)) >>= fun sexp_str ->
-          let message_metadata = mailbox_message_metadata_of_sexp (Sexp.of_string sexp_str) in
-          get_message_only_raw mbox uid get_attachment >>= fun (postmark, headers, content, attachments) ->
-          Email_parse.restore ~get_message:(fun () -> 
-            return (postmark,headers,content)
-          )  ~get_attachment:attachments >>= fun message ->
-          if filter = None ||
-            Interpreter.exec_search (message.email) (option_value_exn filter) message_metadata seq = true then
-              return (`Ok (message,message_metadata))
-            else
-              return `NotFound
+        return (`Ok (
+          build_lazy_message_inst
+            (module LazyIrminMessage)
+            ((fun () ->
+              IrminIntf_tr.read_exn mbox.trans (get_key (`Postmark uid)) >>= fun postmark ->
+              Email_parse.do_decrypt postmark 
+            ),
+            (fun () ->
+              IrminIntf_tr.read_exn mbox.trans (get_key (`Headers uid)) >>= fun headers ->
+              Email_parse.do_decrypt_headers headers 
+            ),
+            (fun () ->
+              IrminIntf_tr.read_exn mbox.trans (get_key (`Email uid)) >>= fun content ->
+              Email_parse.do_decrypt_content content 
+            ),
+            (Email_parse.get_decrypt_attachment (get_attachment mbox.trans uid)),
+            (fun () ->
+              get_message_metadata mbox uid
+            ))
+          )
         )
 
     let read_message_metadata mbox position =
@@ -652,8 +822,9 @@ module IrminMailbox :
       | `Eof -> return `Eof
       | `NotFound -> return `NotFound
       | `Ok (seq,uid) -> 
-        IrminIntf_tr.read_exn mbox.trans (get_key (`Metamessage uid)) >>= fun sexp_str ->
-        return (`Ok (mailbox_message_metadata_of_sexp (Sexp.of_string sexp_str)))
+        get_message_metadata mbox uid >>= fun meta ->
+        return (`Ok meta)
+
 
     (*
     let get_min_max_uid uids =

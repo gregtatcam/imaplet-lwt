@@ -47,6 +47,8 @@ val eol : string
 
 val optional : string -> string
 
+val orx : string -> string -> string
+
 val orxl : string list -> string
 
 val all_of_it : string -> string

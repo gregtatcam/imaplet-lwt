@@ -13,25 +13,24 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
+open Lwt
 open Email_message
 open Imaplet_types
 open Storage_meta
 
 exception InvalidSequence
 
-val exec_search : Email.t -> (searchKey) searchKeys -> mailbox_message_metadata -> int -> bool
+val exec_search : (module Lazy_message.LazyMessage_inst) -> (searchKey) searchKeys -> int -> bool Lwt.t
 
 val get_sequence : string -> (seq_set list)
 
-val exec_fetch : int -> sequence -> Mailbox.Message.t ->
-  mailbox_message_metadata -> fetch -> int64 option -> bool -> string option
+val exec_fetch : int -> sequence -> (module Lazy_message.LazyMessage_inst) -> 
+  fetch -> int64 option -> bool -> string option Lwt.t
 
 val exec_store : mailbox_message_metadata->int -> sequence ->
   storeFlags -> mailboxFlags list -> Int64.t option -> bool -> 
   [`Ok of mailbox_message_metadata*string|`Silent of mailbox_message_metadata|`Modseqfailed of int |`None]
 
 val exec_seq : sequence -> int -> bool
-
-val check_search_seq : (searchKey) searchKeys -> seq:int -> uid:int -> bool
 
 val has_key : (searchKey) searchKeys -> (searchKey -> bool) -> bool

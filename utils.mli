@@ -44,3 +44,5 @@ val with_file : string -> flags:Lwt_unix.open_flag list ->
   f:('a Lwt_io.channel -> 'b Lwt.t) -> 'b Lwt.t 
 
 val exists : string -> Lwt_unix.file_kind -> bool Lwt.t
+
+val lines : string -> int

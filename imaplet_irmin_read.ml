@@ -23,6 +23,7 @@ open Regex
 open Dates
 open Email_message
 open Email_message.Mailbox
+open Lazy_message
 
 exception InvalidCmd
 exception Quit
@@ -125,9 +126,12 @@ let rec selected user mailbox mbox =
     (
     let pos = int_of_string pos in
     IrminMailbox.read_message mbox (`Sequence pos) >>= function
-    | `Ok (message,meta) ->
+    | `Ok (module LM:LazyMessage_inst) ->
+      LM.LazyMessage.get_message_metadata LM.this >>= fun meta ->
+      LM.LazyMessage.get_email LM.this >>= fun (module LE:LazyEmail_inst) ->
+      LE.LazyEmail.to_string LE.this >>= fun email ->
       Printf.printf "%s\n%!" (Sexp.to_string (sexp_of_mailbox_message_metadata meta));
-      Printf.printf "%s\n%!" (Mailbox.Message.to_string message);
+      Printf.printf "%s\n%!" email;
       return ()
     | `NotFound -> Printf.printf "not found\n%!"; return ()
     | `Eof -> Printf.printf "eof\n%!"; return ()

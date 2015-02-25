@@ -82,15 +82,6 @@ struct
   let delete_message t position = 
     IrminMailbox.delete_message t.mailbox position
 
-  (* search selected mailbox *)
-  let search t keys buid =
-    IrminMailbox.read_index_uid t.mailbox >>= fun uids ->
-    Lwt_list.fold_right_s (fun uid (seq,acc) ->
-      IrminMailbox.read_message t.mailbox (`UID uid) ?filter:(Some keys) >>= function
-      | `Ok _ -> return (if buid then (seq+1,uid :: acc) else (seq+1, seq :: acc))
-      | _ -> return (seq+1,acc)
-    ) uids (1,[]) >>= fun (_,acc) -> return acc
-
   (* fetch messages from selected mailbox *)
   let fetch t position =
     IrminMailbox.read_message t.mailbox position

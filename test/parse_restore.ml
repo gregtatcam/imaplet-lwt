@@ -1,6 +1,8 @@
 open Lwt
 open Email_message
 open Utils
+open Lazy_message
+open Email_parse
 
 module MapStr = Map.Make(String)
 
@@ -52,15 +54,31 @@ let rec walk email part =
     Printf.fprintf stderr "---------------------------------------- multipart %d\n%!" (List.length lpart);
     List.iteri (fun i email -> walk email (Some i)) lpart
 
+let get_attachments map =
+  MapStr.fold (fun key data m ->
+    let key = Regex.replace ~regx:"^[0-9]+-" ~tmpl:"" key in
+    if Regex.match_regex ~regx:"^postmark\\|headers\\|content" key = false then
+      MapStr.add key (Lazy.from_fun (fun () -> do_decrypt data)) m
+    else
+      m
+  ) map MapStr.empty
+
+let get_arg () =
+  if Sys.argv.(1) = "-lazy" then
+    true,Sys.argv.(2)
+  else
+    false,Sys.argv.(1)
+
 let () =
   Lwt_main.run (
-    let wseq = Mailbox.With_seq.t_of_file Sys.argv.(1) in
+    let (lzy,file) = get_arg() in
+    let wseq = Mailbox.With_seq.t_of_file file in
     let map = ref MapStr.empty in
     Mailbox.With_seq.fold_message wseq ~f:(fun cnt message ->
       Printf.fprintf stderr "---------------------------------------- new message\n%!";
       (*walk message.email None;*)
       cnt >>= fun cnt ->
-      Email_parse.parse message ~save_message:(fun postmark headers content ->
+      parse message ~save_message:(fun postmark headers content ->
         map := MapStr.add (key "postmark" cnt) postmark !map;
         map := MapStr.add (key "headers" cnt) headers !map;
         map := MapStr.add (key "content" cnt) content !map;
@@ -69,17 +87,40 @@ let () =
       ~save_attachment:(fun contid attachment ->
         map := MapStr.add (key contid cnt) attachment !map;
         return ()
-      ) >>
-      Email_parse.restore ~get_message:(fun () -> 
+      ) >>= fun () ->
+      (if lzy then (
         let postmark = get map (key "postmark" cnt) in
         let headers = get map (key "headers" cnt) in
         let content = get map (key "content" cnt) in
-        return (postmark,headers,content)
-      )  
-      ~get_attachment:(fun contid -> 
-        return (get map (key contid cnt))
-      ) >>= fun message ->
-      Printf.printf "%s" (Mailbox.Message.to_string message);
+        do_decrypt postmark >>= fun postmark ->
+        do_decrypt_headers headers >>= fun (m,headers) ->
+        do_decrypt_content content >>= fun content ->
+        let (module LE:LazyEmail_inst) = build_lazy_email_inst
+          (module Irmin_core.LazyIrminEmail)
+          (
+            m,
+            headers,
+            Lazy.from_fun (fun () -> return content),
+            get_attachments !map
+          ) in
+        LE.LazyEmail.to_string LE.this >>= fun str ->
+  
+        Printf.printf "%s\n%s%!" postmark str;
+        return ()
+      ) else (
+        restore ~get_message:(fun () -> 
+         let postmark = get map (key "postmark" cnt) in
+         let headers = get map (key "headers" cnt) in
+         let content = get map (key "content" cnt) in
+         return (postmark,headers,content)
+        )  
+        ~get_attachment:(fun contid -> 
+          return (get map (key contid cnt))
+        ) >>= fun message ->
+        Printf.printf "%s" (Mailbox.Message.to_string message);
+        return ()
+      )) >>= fun () ->
+
       map := MapStr.empty;
       return (cnt+1)
     ) ~init:(return (0)) >>= fun _ ->

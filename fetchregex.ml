@@ -33,7 +33,7 @@ let text_regex = all_of_it (group (orxl
 let sec_part_regex = (group number) ^ (group ("\\." ^ nz_number)) ^ "*"
 
 let parse_header_list (str:string) : (string list) =
-  let str = replace "(" "" str in
+  let str = replace "(" "" (String.lowercase str) in
   let str = replace ")" "" str in
   Str.split (Str.regexp " ") str
 

@@ -100,4 +100,4 @@ Executable imaplet_maildir_index
   CompiledObject  : native
   BuildTools	  : ocamlbuild
   MainIs	  : imaplet_maildir_index.ml
-  BuildDepends	  : lwt,lwt.unix,str,threads,sexplib.syntax,email_message
+  BuildDepends	  : lwt,lwt.unix,lwt.syntax,zip,tls.lwt,str,threads,sexplib.syntax,email_message,nocrypto

@@ -157,3 +157,16 @@ let exists file tp =
   let open Lwt in
   Lwt_unix.stat file >>= fun st ->
   return (st.Unix.st_kind = tp)
+
+let lines str =
+  let rec lines_ str l i =
+  try
+    let index = String.index_from str i '\n' in
+    lines_ str (l+1) (index+1)
+  with Not_found -> 
+    if i < (String.length str) then 
+      l+1 
+    else 
+      l
+  in
+  lines_ str 0 0

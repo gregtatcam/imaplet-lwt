@@ -65,12 +65,9 @@ sig
    *)
   val delete_message : t -> [`Sequence of int|`UID of int] -> unit Lwt.t
 
-  (* search selected mailbox *)
-  val search : t -> (searchKey) searchKeys -> bool -> int list Lwt.t
-
   (* fetch messages from selected mailbox *)
   val fetch : t -> [`Sequence of int|`UID of int] ->
-    [`NotFound|`Eof|`Ok of (Mailbox.Message.t * mailbox_message_metadata)] Lwt.t
+    [`NotFound|`Eof|`Ok of (module Lazy_message.LazyMessage_inst)] Lwt.t
 
   (* fetch messages from selected mailbox *)
   val fetch_message_metadata : t -> [`Sequence of int|`UID of int] ->
@@ -98,6 +95,7 @@ sig
   (* get sequence # for the given uid *)
   val uid_to_seq : t -> int -> int option Lwt.t
 end
+
 module type Storage_inst =
 sig
   module MailboxStorage : Storage_intf

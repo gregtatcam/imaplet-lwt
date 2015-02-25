@@ -382,19 +382,6 @@ let get_selected_mailbox ?mailbox2 mailboxt =
 
 (* search mailbox *)
 let search mailboxt resp_prefix keys buid =
-  match (selected_mbox mailboxt) with
-  | None -> return (`Error "Not selected")
-  | Some name ->
-  factory mailboxt name >>= fun (module Mailbox) ->
-  Mailbox.MailboxStorage.exists Mailbox.this >>= function
-  | `No -> return (`NotExists)
-  | `Folder -> return (`NotSelectable)
-  | `Mailbox -> 
-    resp_prefix () >>
-    Mailbox.MailboxStorage.search Mailbox.this keys buid >>= fun acc -> 
-    return (`Ok acc)
-    
-let search mailboxt resp_prefix keys buid =
   let open Email_message.Mailbox.Message in
   get_selected_mailbox mailboxt >>= function 
   | `NotExists -> return `NotExists
@@ -407,8 +394,11 @@ let search mailboxt resp_prefix keys buid =
       Mailbox.MailboxStorage.fetch Mailbox.this pos >>= function
       | `Eof -> return (`Eof (modseq,acc))
       | `NotFound -> return (`Ok (modseq,acc))
-      | `Ok (message,metadata) -> 
-        if Interpreter.exec_search message.email keys metadata seq = true then (
+      | `Ok message -> 
+        Interpreter.exec_search message keys seq >>= fun res ->
+        if res then (
+          let (module LazyMessage) = message in
+          LazyMessage.LazyMessage.get_message_metadata LazyMessage.this >>= fun metadata ->
           let modseq = if (Int64.compare metadata.modseq modseq) > 0 then metadata.modseq else modseq in
           return (`Ok (modseq,(if buid then metadata.uid else seq) :: acc))
         ) else
@@ -450,10 +440,10 @@ let fetch mailboxt resp_prefix resp_writer sequence fetchattr changedsince buid 
       Mailbox.MailboxStorage.fetch Mailbox.this pos >>= function
       | `Eof -> return (`Eof acc)
       | `NotFound -> return (`Ok acc)
-      | `Ok (message,metadata) -> 
+      | `Ok message -> 
         (* need more efficient exec_fetch since sequence is already tested
          by the iterator *)
-        let res = Interpreter.exec_fetch seq sequence message metadata fetchattr changedsince buid in
+        Interpreter.exec_fetch seq sequence message fetchattr changedsince buid >>= fun res ->
         match res with
         | Some res -> resp_writer res; return (`Ok acc)
         | None -> return (`Ok acc)
