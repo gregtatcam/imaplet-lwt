@@ -74,3 +74,7 @@ val fixregx_mbox : string -> string
 val smtp_date_regex : string
 
 val sys_date_time_regex : string
+
+val mon : string
+
+val dayofweek : string

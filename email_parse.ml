@@ -126,8 +126,10 @@ let email_content attachment email =
       pub_key () >>= fun pub ->
       let (contid,content) = conv_encrypt ~compress:srv_config.compress content pub in
       return (contid,content,size,lines)
-    ) else
-      return ("",content,size,lines)
+    ) else (
+      let hash = hash content in
+      return (hash,content,size,lines)
+    )
   | None -> return ("","",0,0) 
 
 let do_encrypt data =

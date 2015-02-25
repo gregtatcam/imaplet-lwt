@@ -178,32 +178,53 @@ let append_archive_messages user path flags =
   Printf.printf "#### appending archive messages %s\n%!" path;
   let open Email_message in
   let open Email_message.Mailbox in
-  let wseq = With_seq.t_of_file path in
-  With_seq.fold_message wseq ~f:(fun acc message ->
-    acc >>= fun (cnt, prev_mailbox, prev_ist) ->
-    let size = String.length (Email.to_string message.email) in
-    let headers = String_monoid.to_string (Header.to_string_monoid (Email.header message.email)) in
-    let (mailbox,fl) = mailbox_of_gmail_label headers in
-    Printf.printf "-- processing message %d, mailbox %s\n%!" cnt mailbox;
-    begin
-    if prev_ist = None then (
-      gmail_mailboxes := MapStr.add mailbox "" !gmail_mailboxes;
-      create_mailbox user mailbox 
-    ) else if prev_mailbox <> mailbox then (
-      IrminStorage.commit (Utils.option_value_exn prev_ist) >>
-      if MapStr.exists (fun mb _ -> mailbox = mb) !gmail_mailboxes then
-        IrminStorage.create user mailbox
-      else (
-        gmail_mailboxes := MapStr.add mailbox "" !gmail_mailboxes;
-        create_mailbox user mailbox
+  Lwt_io.with_file ~mode:Lwt_io.Input path (fun ic ->
+    let buffer = Buffer.create 10000 in
+    let rec loop ic buffer cnt prev_mailbox prev_ist f = 
+      Lwt_io.read_line_opt ic >>= function
+      | Some line ->
+      let line = line ^ "\n" in
+      let regx = "^from [^ ]+ " ^ Regex.dayofweek ^ " " ^ Regex.mon ^ " " ^
+        "[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] [0-9]+" in
+      if Regex.match_regex line ~case:false ~regx && Buffer.length buffer > 0 then (
+        f cnt prev_mailbox prev_ist (Buffer.contents buffer) >>= fun (cnt,prev_mailbox,prev_ist) ->
+        Buffer.clear buffer;
+        Buffer.add_string buffer line;
+        loop ic buffer cnt prev_mailbox prev_ist f
+      ) else (
+        Buffer.add_string buffer line;
+        loop ic buffer cnt prev_mailbox prev_ist f
       )
-    ) else (
-      return (Utils.option_value_exn prev_ist)
-    ) 
-    end >>= fun ist ->
-    append ist message size (List.concat [flags;fl]) mailbox >>
-    return (cnt + 1,mailbox,Some ist)
-  ) ~init:(return(1,"",None)) >>= fun (_,_,ist) ->
+      | None -> f cnt prev_mailbox prev_ist (Buffer.contents buffer)
+    in
+    loop ic buffer 1 "" None (fun cnt prev_mailbox prev_ist content  ->
+      let wseq = With_seq.of_string content in
+      With_seq.fold_message wseq ~f:(fun _ message ->
+        let size = String.length (Email.to_string message.email) in
+        let headers = String_monoid.to_string (Header.to_string_monoid (Email.header message.email)) in
+        let (mailbox,fl) = mailbox_of_gmail_label headers in
+        Printf.printf "-- processing message %d, mailbox %s\n%!" cnt mailbox;
+        begin
+        if prev_ist = None then (
+          gmail_mailboxes := MapStr.add mailbox "" !gmail_mailboxes;
+          create_mailbox user mailbox 
+        ) else if prev_mailbox <> mailbox then (
+          IrminStorage.commit (Utils.option_value_exn prev_ist) >>
+          if MapStr.exists (fun mb _ -> mailbox = mb) !gmail_mailboxes then
+            IrminStorage.create user mailbox
+          else (
+            gmail_mailboxes := MapStr.add mailbox "" !gmail_mailboxes;
+            create_mailbox user mailbox
+          )
+        ) else (
+          return (Utils.option_value_exn prev_ist)
+        ) 
+        end >>= fun ist ->
+        append ist message size (List.concat [flags;fl]) mailbox >>
+        return (cnt + 1,mailbox,Some ist)
+      ) ~init:(return(cnt,prev_mailbox,prev_ist))
+    )
+  ) >>= fun (_,_,ist) ->
   match ist with
   | None -> return ()
   | Some ist -> IrminStorage.commit ist

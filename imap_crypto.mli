@@ -22,3 +22,5 @@ val decrypt : ?compressed:bool -> string -> Rsa.priv -> string
 val conv_encrypt : ?compress:bool -> string -> Rsa.pub -> string * string
 
 val conv_decrypt : ?compressed:bool -> string -> Rsa.priv -> string
+
+val hash : string -> string
