@@ -34,23 +34,23 @@ module View = Irmin.View(Store)
 module MapStr = Map.Make(String)
 
 type irmin_accessors =
-  (unit -> bytes Lwt.t) * (* postmark *)
-  (unit -> (Email_parse.email_map * bytes) Lwt.t) * (* headers *)
-  (unit -> bytes Lwt.t) * (* content *)
-  (bytes -> bytes Lwt.t) * (* attachment *) 
+  (unit -> string Lwt.t) * (* postmark *)
+  (unit -> (Email_parse.email_map * string) Lwt.t) * (* headers *)
+  (unit -> string Lwt.t) * (* content *)
+  (string -> string Lwt.t) * (* attachment *) 
   (unit -> mailbox_message_metadata Lwt.t)
 
 type irmin_accessors_rec = {
-  postmark:bytes Lwt.t lazy_t;
-  headers:(Email_parse.email_map * bytes) Lwt.t lazy_t;
-  content:bytes Lwt.t lazy_t;
-  attachment:(bytes -> bytes Lwt.t);
+  postmark:string Lwt.t lazy_t;
+  headers:(Email_parse.email_map * string) Lwt.t lazy_t;
+  content:string Lwt.t lazy_t;
+  attachment:(string -> string Lwt.t);
   metadata:mailbox_message_metadata Lwt.t lazy_t;
 }
 
 type email_irmin_accessors =
-  Email_parse.email_map * bytes * (bytes Lwt.t lazy_t) * 
-    (bytes Lwt.t lazy_t Map.Make(String).t)
+  Email_parse.email_map * string * (string Lwt.t lazy_t) * 
+    (string Lwt.t lazy_t Map.Make(String).t)
 
 module LazyIrminEmail : LazyEmail_intf with type c = email_irmin_accessors =
   struct 
@@ -58,9 +58,9 @@ module LazyIrminEmail : LazyEmail_intf with type c = email_irmin_accessors =
     type c = email_irmin_accessors
     type t = {
       email:email_map;
-      headers: bytes;
-      content: bytes Lwt.t lazy_t;
-      attachment: bytes Lwt.t lazy_t Map.Make(String).t;
+      headers: string;
+      content: string Lwt.t lazy_t;
+      attachment: string Lwt.t lazy_t Map.Make(String).t;
     }
 
     let empty = {
