@@ -95,10 +95,25 @@ let get_hdr_attrs headers =
           attach
       in
       let boundary =
-        if match_regex ~case:false v ~regx:"multipart" && 
-            match_regex ~case:false v ~regx:"boundary=\"?\\([^\"]+\\)\"?$" then
-          ("--" ^ Str.matched_group 1 v)
-        else
+        if match_regex ~case:false v ~regx:"multipart" then (
+          if match_regex ~case:false v ~regx:"boundary=\"\\([^\"]+\\)\"" then
+            ("--" ^ Str.matched_group 1 v)
+          else (
+            let l = Str.split (Str.regexp ";") v in
+            let b = List.fold_left (fun b i ->
+              let i = String.trim i in
+              if match_regex ~case:false i ~regx:"^boundary=\\(.+\\)$" then
+                ("--" ^ Str.matched_group 1 i)
+              else
+                b
+            ) "" l
+            in
+            if b <> "" then
+              b
+            else
+              boundary
+          )
+        ) else
           boundary
       in
       boundary,attach,rfc822
@@ -127,7 +142,7 @@ let email_content attachment email =
       let (contid,content) = conv_encrypt ~compress:srv_config.compress content pub in
       return (contid,content,size,lines)
     ) else (
-      let hash = hash content in
+      let hash = get_hash content in
       return (hash,content,size,lines)
     )
   | None -> return ("","",0,0) 
