@@ -163,7 +163,7 @@ let lines str =
   try
     let index = String.index_from str i '\n' in
     lines_ str (l+1) (index+1)
-  with Not_found -> 
+  with _ -> 
     if i < (String.length str) then 
       l+1 
     else 
