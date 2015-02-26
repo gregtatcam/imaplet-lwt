@@ -26,13 +26,13 @@ module type LazyEmail_intf =
     val empty : t
     val create : c -> t
     val header : ?incl:[`Regx of string|`Map of unit Map.Make(String).t] -> ?excl:unit Map.Make(String).t -> 
-      t -> (bytes * bytes) list 
+      t -> (string * string) list 
     val header_to_str : ?incl:[`Regx of string|`Map of unit Map.Make(String).t] -> 
-      ?excl:unit Map.Make(String).t -> t -> bytes
-    val content : t -> [`Data of bytes|`Message of t|`Multipart of t list] Lwt.t
-    val raw_content : t -> bytes Lwt.t
+      ?excl:unit Map.Make(String).t -> t -> string
+    val content : t -> [`Data of string|`Message of t|`Multipart of t list] Lwt.t
+    val raw_content : t -> string Lwt.t
     val to_string : ?incl:[`Regx of string|`Map of unit Map.Make(String).t] -> ?excl:unit Map.Make(String).t -> 
-      t -> bytes Lwt.t
+      t -> string Lwt.t
     val size : t -> int
     val lines : t -> int
   end
@@ -51,9 +51,9 @@ module type LazyMessage_intf =
      * parts of the message are retrieved by the storage implementation
      *)
     val create : c -> t
-    val get_postmark : t -> bytes Lwt.t
-    val get_headers_block : t -> bytes Lwt.t
-    val get_content_block : t -> bytes Lwt.t
+    val get_postmark : t -> string Lwt.t
+    val get_headers_block : t -> string Lwt.t
+    val get_content_block : t -> string Lwt.t
     val get_email : t ->  (module LazyEmail_inst) Lwt.t
     val get_message_metadata : t -> mailbox_message_metadata Lwt.t
     
