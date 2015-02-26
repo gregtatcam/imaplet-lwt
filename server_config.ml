@@ -17,7 +17,8 @@ type imapConfig = {
   rebuild_irmin : bool; (* rebuild irminsule database on start up, default false *)
   inbox_path : string ref; (* inbox location, default /var/mail *)
   mail_path : string ref; (* mailboxes location, default /Users/user-name/mail *)
-  irmin_path : string; (* irminsule location, default / *)
+  irmin_path : string; (* irminsule location, default /tmp/irmin/test *)
+  irmin_expand : bool; (* expand the contents of the database to the filesystem, default false *)
   max_msg_size : int;
   imap_name : string; (* greeting name, default imaplet *)
   lmtp_addr : string; (* lmtp server address, default 127.0.0.1 *)
@@ -68,6 +69,7 @@ let srv_config =
     inbox_path = ref "";(*"/var/mail";*)
     mail_path = ref "";(*"/Users/@/mail";*)
     irmin_path = "/tmp/irmin/test";
+    irmin_expand = false;
     max_msg_size = 0;
     imap_name = "imaplet";
     lmtp_addr = "127.0.0.1";
@@ -108,6 +110,7 @@ let srv_config =
       | "inbox_path" -> {acc with inbox_path = ref v}
       | "mail_path" -> {acc with mail_path = ref v}
       | "irmin_path" -> {acc with irmin_path = v}
+      | "irmin_expand" -> {acc with irmin_expand = bval n v false}
       | "max_msg_size" -> {acc with max_msg_size = ival n v 10_000_000}
       | "lmtp_addr" -> {acc with lmtp_addr = v}
       | "lmtp_port" -> {acc with lmtp_port = ival n v 24}

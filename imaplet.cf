@@ -9,6 +9,9 @@ imap_name imaplet
 # irminsule location
 irmin_path /tmp/irmin/test
 
+# expand the contents of the database to the filesystem, default false
+irmin_expand false
+
 # lmtp server address, always the loopback
 lmtp_addr 127.0.0.1
 
