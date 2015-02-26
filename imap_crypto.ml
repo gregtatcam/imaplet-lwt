@@ -83,7 +83,7 @@ let encrypt ?(compress=false) data pub =
 let decrypt ?(compressed=false) data priv =
   aes_decrypt ~compressed data priv
 
-let hash data =
+let get_hash data =
   let contid = Cstruct.to_string (Base64.encode (Hash.SHA1.digest (Cstruct.of_string data))) in
   Str.global_replace (Str.regexp "/") "o057" contid
 

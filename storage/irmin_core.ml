@@ -331,9 +331,9 @@ module IrminIntf :
       let owner = "imaplet <imaplet@openmirage.org>" in
       Irmin.Task.create ~date ~owner msg
 
-
     let create () =
-      let config = Irmin_git.config ~root:srv_config.irmin_path ~bare:false () in
+      let config = Irmin_git.config ~root:srv_config.irmin_path 
+        ~bare:(srv_config.irmin_expand=false) () in
       Store.create config task 
 
     let remove store key =
