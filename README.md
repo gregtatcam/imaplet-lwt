@@ -22,3 +22,7 @@ Where 'imaplet' is the user name, {PLAIN} is the only supported authentication, 
   then run this command in the data folder to import email from maildir: sudo imaplet_irmin_build -u imaplet -m maildir:./Maildir
 
 Run the server as: sudo imaplet. You can set some configuration parameters from the command line, for instance: sudo imaplet -port 143 -ssl false -tls false -net 0.0.0.0
+
+To make the IMAP server work with an SMTP server you need to configure local delivery agent in the SMTP server. If you are using postfix then you need to add this line to /etc/postfix/main.cf: mailbox_transport = lmtp:inet:localhost:24. Then restart postfix with 'sudo postfix reload'.
+
+After you start the IMAP server you can connect with your email client to the server. Since the server runs on your local machine, the email address is going to be 'imaplet@localhost' and the IMAP/SMTP address is 'localhost'.
