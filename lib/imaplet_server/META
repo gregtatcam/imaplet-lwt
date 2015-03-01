@@ -1,0 +1,13 @@
+# OASIS_START
+# DO NOT EDIT (digest: 48678abee307c0c671016294ee4fd502)
+version = "0.1.8"
+description = "IMAP server"
+requires =
+"lwt lwt.unix lwt.syntax tls.lwt sexplib.syntax threads str cstruct.unix irmin.unix nocrypto imaplet_email"
+archive(byte) = "imaplet_server.cma"
+archive(byte, plugin) = "imaplet_server.cma"
+archive(native) = "imaplet_server.cmxa"
+archive(native, plugin) = "imaplet_server.cmxs"
+exists_if = "imaplet_server.cma"
+# OASIS_STOP
+

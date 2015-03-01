@@ -1,0 +1,12 @@
+# OASIS_START
+# DO NOT EDIT (digest: aa03e1a3d0cb98e10f96d2d7bae819fb)
+version = "0.1.8"
+description = "IMAP server"
+requires = "re2 str oUnit threads"
+archive(byte) = "imaplet_email.cma"
+archive(byte, plugin) = "imaplet_email.cma"
+archive(native) = "imaplet_email.cmxa"
+archive(native, plugin) = "imaplet_email.cmxs"
+exists_if = "imaplet_email.cma"
+# OASIS_STOP
+

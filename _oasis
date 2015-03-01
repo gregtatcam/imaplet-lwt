@@ -1,16 +1,16 @@
 OASISFormat: 0.4
 Name:        imaplet
-Version:     1.0.0
+Version:     0.1.8
 Synopsis:    IMAP server
 Authors:     Gregory Tsipenyuk
 License:     GPL
-Plugins:     DevFiles (0.4)
-PreBuildCommand: ocaml inst.ml $bindir $datadir > install.ml
+Plugins:     META (0.4), DevFiles (0.4)
+PreBuildCommand: ocaml inst.ml $bindir $datadir > lib/imaplet_server/install.ml
 
-Library email_message
-  Path		  : lib/email_message
+Library imaplet_email
+  Path		  : lib/imaplet_email
   Pack		  : true
-  Install	  : false
+  Install	  : true
   Modules	  : Bigstringable,
                     Bigstring_extended,
                     Boundary,
@@ -43,9 +43,56 @@ Library email_message
                     sexplib.syntax,
                     threads,
                     str
-  XMETARequires	  : str,
-                    re2,
+  XMETARequires   : re2,
+                    str,
+                    oUnit,
                     threads
+
+Library imaplet_server
+  Path		  : lib/imaplet_server
+  Pack		  : true
+  Install	  : true
+  Modules	  : Account,
+                    Amailbox,
+                    Configuration,
+                    Connections,
+                    Context,
+                    Dates,
+                    Email_parse,
+                    Fetchregex,
+                    Imap_cmd,
+                    Imap_crypto,
+                    Imaplet_types,
+                    storage/Irmin_core,
+                    storage/Irmin_storage,
+                    Install,
+                    Interpreter,
+                    Lazy_message,
+                    storage/Mailbox_storage,
+                    storage/Maildir_storage,
+                    Regex,
+                    Response,
+                    Seq_iterator,
+                    Server,
+                    Server_config,
+                    Ssl_,
+                    storage/Storage,
+                    storage/Storage_meta,
+                    Utils
+  InternalModules : Lex,
+                    Parser
+  BuildTools	  : ocamlbuild, camlp4o
+  BuildDepends	  : lwt,
+                    lwt.unix,
+                    lwt.syntax,
+                    tls.lwt,
+                    sexplib.syntax,
+                    threads,
+                    str,
+                    cstruct.unix,
+                    irmin.unix,
+                    nocrypto,
+                    imaplet_email
 
 Executable parse_restore
   Build		  : true
@@ -54,50 +101,53 @@ Executable parse_restore
   CompiledObject  : native
   BuildTools	  : ocamlbuild
   MainIs	  : parse_restore.ml
-  BuildDepends	  : lwt,lwt.unix,lwt.syntax,tls.lwt,sexplib.syntax,threads,str,cstruct.unix,irmin.unix,email_message,nocrypto
+  BuildDepends	  : lwt,lwt.unix,lwt.syntax,tls.lwt,sexplib.syntax,threads,str,cstruct.unix,irmin.unix,imaplet_email,nocrypto,imaplet_server
 
 Executable imaplet
   Build		  : true
   Install	  : true
-  Path		  : .
+  Path		  : servers
   CompiledObject  : native
   BuildTools	  : ocamlbuild
   MainIs	  : imaplet.ml
-  BuildDepends	  : lwt,lwt.unix,lwt.syntax,tls.lwt,sexplib.syntax,threads,str,cstruct.unix,irmin.unix,email_message,nocrypto
-  DataFiles	  : certificates/server.pem($datadir/imaplet),certificates/server.key($datadir/imaplet),imaplet.cf($datadir/imaplet),users($datadir/imaplet)
+  BuildDepends	  : lwt,lwt.unix,lwt.syntax,tls.lwt,sexplib.syntax,threads,str,cstruct.unix,irmin.unix,nocrypto,imaplet_server
+  DataFiles	  : ../certificates/server.pem($datadir/imaplet),
+                    ../certificates/server.key($datadir/imaplet),
+                    ../config/imaplet.cf($datadir/imaplet),
+                    ../config/users($datadir/imaplet)
 
 Executable imaplet_lmtp
   Build		  : true
   Install	  : true
-  Path		  : .
+  Path		  : servers
   CompiledObject  : native
   BuildTools	  : ocamlbuild
   MainIs	  : imaplet_lmtp.ml
-  BuildDepends	  : lwt,lwt.unix,lwt.syntax,str,threads,sexplib.syntax
+  BuildDepends	  : lwt,lwt.unix,lwt.syntax,str,threads,sexplib.syntax,imaplet_email,imaplet_server
 
 Executable imaplet_irmin_read
   Build		  : true
   Install	  : true
-  Path		  : .
+  Path		  : servers
   CompiledObject  : native
   BuildTools	  : ocamlbuild
   MainIs	  : imaplet_irmin_read.ml
-  BuildDepends	  : lwt,irmin.unix,sexplib.syntax,str,email_message,threads,nocrypto
+  BuildDepends	  : lwt,irmin.unix,sexplib.syntax,str,imaplet_email,threads,nocrypto,imaplet_server
 
 Executable imaplet_irmin_build
   Build		  : true
   Install	  : true
-  Path		  : .
+  Path		  : servers
   CompiledObject  : native
   BuildTools	  : ocamlbuild
   MainIs	  : imaplet_irmin_build.ml
-  BuildDepends	  : lwt,lwt.unix,email_message,str,sexplib.syntax,threads,irmin.unix,nocrypto
+  BuildDepends	  : lwt,lwt.unix,imaplet_email,str,sexplib.syntax,threads,irmin.unix,nocrypto,imaplet_server
 
 Executable imaplet_maildir_index
   Build		  : true
   Install	  : true
-  Path		  : .
+  Path		  : servers
   CompiledObject  : native
   BuildTools	  : ocamlbuild
   MainIs	  : imaplet_maildir_index.ml
-  BuildDepends	  : lwt,lwt.unix,lwt.syntax,zip,tls.lwt,str,threads,sexplib.syntax,email_message,nocrypto
+  BuildDepends	  : lwt,lwt.unix,lwt.syntax,zip,tls.lwt,str,threads,sexplib.syntax,nocrypto,imaplet_server
