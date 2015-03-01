@@ -138,32 +138,37 @@ let create config =
   let open Connections in
   let open Server_config in
   let open Context in
-  init_all config >>= fun (cert,sock,unix_sock) ->
-  let rec connect f msgt sock cert =
-    accept_conn msgt sock cert;
-    >>= fun (msgt,sock_c,(netr,netw)) ->
-    let id = next_id () in
-    f (
-      fun () ->
-      catch(
+  validate_config config >>= function
+  | `Ok ->
+    begin
+    init_all config >>= fun (cert,sock,unix_sock) ->
+    let rec connect f msgt sock cert =
+      accept_conn msgt sock cert;
+      >>= fun (msgt,sock_c,(netr,netw)) ->
+      let id = next_id () in
+      f (
         fun () ->
-          init_connection msgt netw >>= fun() ->
-          let ctx =
-            {id;connections=ref [];commands=ref (Stack.create());
-              netr=ref netr;netw=ref netw;state=ref
-              Imaplet_types.State_Notauthenticated;mailbox=ref (Amailbox.empty());
-              starttls=starttls config sock_c;highestmodseq=ref `None;
-              capability=ref [];config} in
-          Imap_cmd.client_requests msgt ctx >>= fun _ ->
-          rem_id id;
-          try_close ctx.!netr >> try_close ctx.!netw >> try_close_sock sock_c 
-      )
-      (function _ -> rem_id id; try_close netr >> try_close netw >>
-      try_close_sock sock_c) >>= fun () ->
-      return ()
-    ); 
-    connect f msgt sock cert
-  in
-  let f a = a () in
-  async (fun() -> connect f `Lmtp unix_sock None);
-  connect async `Client sock cert
+        catch(
+          fun () ->
+            init_connection msgt netw >>= fun() ->
+            let ctx =
+              {id;connections=ref [];commands=ref (Stack.create());
+                netr=ref netr;netw=ref netw;state=ref
+                Imaplet_types.State_Notauthenticated;mailbox=ref (Amailbox.empty());
+                starttls=starttls config sock_c;highestmodseq=ref `None;
+                capability=ref [];config} in
+            Imap_cmd.client_requests msgt ctx >>= fun _ ->
+            rem_id id;
+            try_close ctx.!netr >> try_close ctx.!netw >> try_close_sock sock_c 
+        )
+        (function _ -> rem_id id; try_close netr >> try_close netw >>
+        try_close_sock sock_c) >>= fun () ->
+        return `Ok
+      ); 
+      connect f msgt sock cert
+    in
+    let f a = a () in
+    async (fun() -> connect f `Lmtp unix_sock None);
+    connect async `Client sock cert
+    end
+  | `Error e -> return (`Error e)

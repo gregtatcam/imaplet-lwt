@@ -65,10 +65,9 @@ let validate_config config =
   let err res msg =
     begin
     if res = false then (
-      Printf.printf "%s %s\n%!" msg Install.config_path;
-      assert (false)
+      return (`Error (Printf.sprintf "%s %s\n%!" msg Install.config_path))
     ) else
-      return ()
+      return `Ok
     end
   in
   match config.data_store with

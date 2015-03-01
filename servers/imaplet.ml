@@ -46,7 +46,7 @@ let rec args i net port ssl tls store =
     | _ -> raise InvalidCommand
 
 let usage () =
-  Printf.printf "usage: imaplet -net [interface] -port [port] -ssl [true|false]
+  Printf.fprintf stderr "usage: imaplet -net [interface] -port [port] -ssl [true|false]
   -tls [true|false] -store[irmin;mbox:inboxpath,mailboxpath;maildir:maildirpath\n%!"
 
 let commands f =
@@ -66,13 +66,14 @@ let () =
       (fun net port ssl tls store ->
         Lwt_main.run (catch(fun() ->
             let config = update_config srv_config net port ssl tls store in
-            validate_config config >>
-            Server.create config 
+            Server.create config >>= function
+            | `Ok -> return ()
+            | `Error e -> Printf.fprintf stderr "%s" e; return ()
           )
-          (fun ex -> Printf.printf "imaplet: fatal exception: %s %s"
+          (fun ex -> Printf.fprintf stderr "imaplet: fatal exception: %s %s"
             (Printexc.to_string ex) (Printexc.get_backtrace()); return()
           )
         )
       )
   with Exit -> 
-    Printf.printf "imaplet: terminated: %s" (Printexc.get_backtrace())
+    Printf.fprintf stderr "imaplet: terminated: %s" (Printexc.get_backtrace())

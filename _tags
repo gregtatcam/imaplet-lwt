@@ -236,4 +236,4 @@ true: use_menhir
 <storage/*.ml{,i}>: pkg_threads
 <storage/*.ml{,i}>: pkg_tls.lwt
 <storage/*.ml{,i}>: pkg_irmin.unix
-<storage/*.ml{,i}>: use_email_message
+<storage/*.ml{,i}>: use_imaplet_email

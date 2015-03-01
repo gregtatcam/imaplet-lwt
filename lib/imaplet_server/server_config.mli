@@ -40,7 +40,7 @@ type imapConfig = {
 
 val default_config : imapConfig
 
-val validate_config : imapConfig -> unit Lwt.t
+val validate_config : imapConfig -> [`Ok|`Error of string] Lwt.t
 
 val update_config : imapConfig -> string option -> int option -> bool option ->
   bool option -> ([`Irmin|`Mailbox|`Maildir] * string * string) option -> imapConfig

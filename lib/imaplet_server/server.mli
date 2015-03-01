@@ -15,4 +15,4 @@
  *)
 open Lwt
 
-val create : Server_config.imapConfig -> unit Lwt.t
+val create : Server_config.imapConfig -> [`Ok|`Error of string] Lwt.t
