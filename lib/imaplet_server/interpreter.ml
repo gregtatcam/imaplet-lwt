@@ -79,9 +79,6 @@ let exclude = map_of_alist
 (** get crlf'ed message and the message size **)
 let email_to_str (module LE:LazyEmail_inst) =
   LE.LazyEmail.to_string ~excl:exclude LE.this >>= fun str ->
-  let oc = open_out_gen [Open_append;Open_creat] 0o666 "./data/runt.mbox" in
-  Printf.fprintf oc "%s%!" str;
-  close_out oc;
   return (str,String.length str)
 
 let find_header_opt ?(default="") headers (key:string) : (string) =
@@ -180,9 +177,9 @@ let exec_fetch_rfc822text (module LE:LazyEmail_inst) =
   return ("RFC822.TEXT {" ^ (string_of_int (String.length str)) ^ "}" ^ crlf ^ str)
 
 (** fetch rfc822 text **)
-let exec_fetch_rfc822size email =
-  email_to_str email >>= fun (_,length) ->
-  return ("RFC822.SIZE " ^ (string_of_int length))
+let exec_fetch_rfc822size (module LE:LazyEmail_inst) =
+  let size = LE.LazyEmail.size LE.this in
+  return ("RFC822.SIZE " ^ (string_of_int size))
   
 (** get seq_number from the string **)
 let get_seq_number_exn (number:string) : (seq_number) =
