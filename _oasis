@@ -1,6 +1,6 @@
 OASISFormat: 0.4
 Name:        imaplet
-Version:     0.1.8
+Version:     0.1.9
 Synopsis:    IMAP server
 Authors:     Gregory Tsipenyuk
 License:     GPL
