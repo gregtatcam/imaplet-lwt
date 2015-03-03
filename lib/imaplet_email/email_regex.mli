@@ -9,8 +9,6 @@ module type Creators_intf = sig
   (* Creates regexes using several combinations of the PCRE options.
      Raises exceptions if string is not a valid Regexp *)
   val create : string -> t
-  val create_i : string -> t
-  val create_im : string -> t
   val create_m : string -> t
 
   module Template : sig
@@ -28,7 +26,7 @@ module type Accessors_intf = sig
   module Match : sig
     type t
     val by_index : t -> int -> string
-    val by_name : t -> string -> string
+    val by_name : t -> string -> int -> string
   end
 
   module Template : sig

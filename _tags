@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: 16e70425ab18c00a465984a8729e02f2)
+# DO NOT EDIT (digest: eeb035123b3dc7d6a7d9a698711cd18b)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -43,7 +43,7 @@ true: annot, bin_annot
 "lib/imaplet_email/string_monoidable.cmx": for-pack(Imaplet_email)
 "lib/imaplet_email/string_monoid.cmx": for-pack(Imaplet_email)
 <lib/imaplet_email/*.ml{,i,y}>: pkg_fieldslib.syntax
-<lib/imaplet_email/*.ml{,i,y}>: pkg_re2
+<lib/imaplet_email/*.ml{,i,y}>: pkg_re
 <lib/imaplet_email/*.ml{,i,y}>: pkg_sexplib.syntax
 <lib/imaplet_email/*.ml{,i,y}>: pkg_str
 <lib/imaplet_email/*.ml{,i,y}>: pkg_threads
@@ -85,7 +85,7 @@ true: annot, bin_annot
 <lib/imaplet_server/*.ml{,i,y}>: pkg_lwt.syntax
 <lib/imaplet_server/*.ml{,i,y}>: pkg_lwt.unix
 <lib/imaplet_server/*.ml{,i,y}>: pkg_nocrypto
-<lib/imaplet_server/*.ml{,i,y}>: pkg_re2
+<lib/imaplet_server/*.ml{,i,y}>: pkg_re
 <lib/imaplet_server/*.ml{,i,y}>: pkg_sexplib.syntax
 <lib/imaplet_server/*.ml{,i,y}>: pkg_str
 <lib/imaplet_server/*.ml{,i,y}>: pkg_threads
@@ -98,7 +98,7 @@ true: annot, bin_annot
 <lib/imaplet_server/storage/*.ml{,i,y}>: pkg_lwt.syntax
 <lib/imaplet_server/storage/*.ml{,i,y}>: pkg_lwt.unix
 <lib/imaplet_server/storage/*.ml{,i,y}>: pkg_nocrypto
-<lib/imaplet_server/storage/*.ml{,i,y}>: pkg_re2
+<lib/imaplet_server/storage/*.ml{,i,y}>: pkg_re
 <lib/imaplet_server/storage/*.ml{,i,y}>: pkg_sexplib.syntax
 <lib/imaplet_server/storage/*.ml{,i,y}>: pkg_str
 <lib/imaplet_server/storage/*.ml{,i,y}>: pkg_threads
@@ -112,7 +112,7 @@ true: annot, bin_annot
 "test/parse_restore.native": pkg_lwt.syntax
 "test/parse_restore.native": pkg_lwt.unix
 "test/parse_restore.native": pkg_nocrypto
-"test/parse_restore.native": pkg_re2
+"test/parse_restore.native": pkg_re
 "test/parse_restore.native": pkg_sexplib.syntax
 "test/parse_restore.native": pkg_str
 "test/parse_restore.native": pkg_threads
@@ -126,7 +126,7 @@ true: annot, bin_annot
 <test/*.ml{,i,y}>: pkg_lwt.syntax
 <test/*.ml{,i,y}>: pkg_lwt.unix
 <test/*.ml{,i,y}>: pkg_nocrypto
-<test/*.ml{,i,y}>: pkg_re2
+<test/*.ml{,i,y}>: pkg_re
 <test/*.ml{,i,y}>: pkg_sexplib.syntax
 <test/*.ml{,i,y}>: pkg_str
 <test/*.ml{,i,y}>: pkg_threads
@@ -141,7 +141,7 @@ true: annot, bin_annot
 "servers/imaplet.native": pkg_lwt.syntax
 "servers/imaplet.native": pkg_lwt.unix
 "servers/imaplet.native": pkg_nocrypto
-"servers/imaplet.native": pkg_re2
+"servers/imaplet.native": pkg_re
 "servers/imaplet.native": pkg_sexplib.syntax
 "servers/imaplet.native": pkg_str
 "servers/imaplet.native": pkg_threads
@@ -156,7 +156,7 @@ true: annot, bin_annot
 "servers/imaplet_lmtp.native": pkg_lwt.syntax
 "servers/imaplet_lmtp.native": pkg_lwt.unix
 "servers/imaplet_lmtp.native": pkg_nocrypto
-"servers/imaplet_lmtp.native": pkg_re2
+"servers/imaplet_lmtp.native": pkg_re
 "servers/imaplet_lmtp.native": pkg_sexplib.syntax
 "servers/imaplet_lmtp.native": pkg_str
 "servers/imaplet_lmtp.native": pkg_threads
@@ -171,7 +171,7 @@ true: annot, bin_annot
 "servers/imaplet_irmin_read.native": pkg_lwt.syntax
 "servers/imaplet_irmin_read.native": pkg_lwt.unix
 "servers/imaplet_irmin_read.native": pkg_nocrypto
-"servers/imaplet_irmin_read.native": pkg_re2
+"servers/imaplet_irmin_read.native": pkg_re
 "servers/imaplet_irmin_read.native": pkg_sexplib.syntax
 "servers/imaplet_irmin_read.native": pkg_str
 "servers/imaplet_irmin_read.native": pkg_threads
@@ -186,7 +186,7 @@ true: annot, bin_annot
 "servers/imaplet_irmin_build.native": pkg_lwt.syntax
 "servers/imaplet_irmin_build.native": pkg_lwt.unix
 "servers/imaplet_irmin_build.native": pkg_nocrypto
-"servers/imaplet_irmin_build.native": pkg_re2
+"servers/imaplet_irmin_build.native": pkg_re
 "servers/imaplet_irmin_build.native": pkg_sexplib.syntax
 "servers/imaplet_irmin_build.native": pkg_str
 "servers/imaplet_irmin_build.native": pkg_threads
@@ -201,7 +201,7 @@ true: annot, bin_annot
 "servers/imaplet_maildir_index.native": pkg_lwt.syntax
 "servers/imaplet_maildir_index.native": pkg_lwt.unix
 "servers/imaplet_maildir_index.native": pkg_nocrypto
-"servers/imaplet_maildir_index.native": pkg_re2
+"servers/imaplet_maildir_index.native": pkg_re
 "servers/imaplet_maildir_index.native": pkg_sexplib.syntax
 "servers/imaplet_maildir_index.native": pkg_str
 "servers/imaplet_maildir_index.native": pkg_threads
@@ -216,7 +216,7 @@ true: annot, bin_annot
 <servers/*.ml{,i,y}>: pkg_lwt.syntax
 <servers/*.ml{,i,y}>: pkg_lwt.unix
 <servers/*.ml{,i,y}>: pkg_nocrypto
-<servers/*.ml{,i,y}>: pkg_re2
+<servers/*.ml{,i,y}>: pkg_re
 <servers/*.ml{,i,y}>: pkg_sexplib.syntax
 <servers/*.ml{,i,y}>: pkg_str
 <servers/*.ml{,i,y}>: pkg_threads

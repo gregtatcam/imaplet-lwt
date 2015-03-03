@@ -30,8 +30,8 @@ end
   open Email_regex.Creators;;
 
   (* Tokens *)
-  let several str = "((" ^ str ^ ")+)";;
-  let maybe str = "((" ^ str ^ ")?)";;
+  let several str = "(" ^ str ^ "+)";;
+  let maybe str = "(" ^ str ^ "?)";;
   let wsp = "[\t ]";;
   let wsp' = several wsp;;
   let no_wsp = "[^\t ]";;
@@ -42,7 +42,8 @@ end
   let digit = "[0-9]";;
   let digit' = several digit;;
 
-  let cg name pattern = (Printf.sprintf "(?P<%s>%s)" name pattern);;
+(*  let cg name pattern = (Printf.sprintf "(?P<%s>%s)" name pattern);; *)
+  let cg name pattern = pattern;;
   let of_list = String.concat "";;
 
   (* Regexen for parsing postmarks *)
@@ -73,11 +74,6 @@ end
     Template.create
     ~regex:(create_m ("^From(" ^ wsp ^ ")"))
     ~template:">From\\1"
-
-  let __UNUSED_VALUE__unix_line_terminator =
-    Template.create
-      ~regex:(create_m "\r\n")
-      ~template:"\n"
 
   include Email_regex.Accessors;;
 end
@@ -151,18 +147,18 @@ module Postmark = struct
     >>= (fun m ->
       try
         let module Match = Regexp.Match in
-        let from = Match.by_name m "from" in
+        let from = Match.by_name m "from" 2 in
 
         (*let _weekday = Core_kernel.Day_of_week.of_string (Match.by_name m "w") * in*)
-        let y = Pervasives.int_of_string (Match.by_name m "y") in
+        let y = Pervasives.int_of_string (Match.by_name m "y" 14) in
         (*let month = Core_kernel.Month.of_string (Match.by_name m "m") in*)
-        let month = mon_to_int (Match.by_name m "m") in
-        let d = Pervasives.int_of_string (Match.by_name m "d") in
+        let month = mon_to_int (Match.by_name m "m" 6) in
+        let d = Pervasives.int_of_string (Match.by_name m "d" 8) in
         (*let date = Date.create_exn ~y ~m:month ~d in*)
 
-        let hr = Pervasives.int_of_string (Match.by_name m "h") in
-        let min = Pervasives.int_of_string (Match.by_name m "i") in
-        let sec = Pervasives.int_of_string (Match.by_name m "s") in
+        let hr = Pervasives.int_of_string (Match.by_name m "h" 10) in
+        let min = Pervasives.int_of_string (Match.by_name m "i" 11) in
+        let sec = Pervasives.int_of_string (Match.by_name m "s" 12) in
         (*let ofday = Core.Ofday.create ~hr ~min ~sec () in*)
 
         (*let time = Time.of_date_ofday Time.Zone.utc date ofday  in*)

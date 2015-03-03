@@ -38,14 +38,13 @@ Library imaplet_email
                     String_monoidable,
                     String_monoid
   BuildTools	  : ocamlbuild, camlp4o
-  BuildDepends	  : re2,
+  BuildDepends	  : re,
                     fieldslib.syntax,
                     sexplib.syntax,
                     threads,
                     str
-  XMETARequires   : re2,
+  XMETARequires   : re,
                     str,
-                    oUnit,
                     threads
 
 Library imaplet_server

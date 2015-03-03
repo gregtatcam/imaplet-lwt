@@ -1,6 +1,6 @@
 open Core_replace
 
-type t = Re2.Regex.t
+type t = Re.re
 type regex = t
 
 module Template = struct
@@ -9,8 +9,6 @@ end
 
 module type Creators_intf = sig
   val create : string -> t
-  val create_i : string -> t
-  val create_im : string -> t
   val create_m : string -> t
 
   module Template : sig
@@ -28,7 +26,7 @@ module type Accessors_intf = sig
   module Match : sig
     type t
     val by_index : t -> int -> string
-    val by_name : t -> string -> string
+    val by_name : t -> string -> int -> string
   end
 
   module Template : sig
@@ -42,44 +40,33 @@ module type Accessors_intf = sig
 end
 
 module Accessors : Accessors_intf = struct
-  let matches t str = Re2.Regex.matches t str;;
-  let apply t str = List.hd (Re2.Regex.get_matches_exn ~max:1 t str)
-  let split_at t str = Re2.Regex.split t str
+  let matches t str = Re.execp t str;;
+  let apply t str = try Some (Re.exec t str) with Not_found -> None
+  let split_at t str = Re.split t str
 
   module Infix = struct
-    let (=~) = Re2.Regex.Infix.(=~);;
+    let (=~) str t = Re.execp t str;;
   end
 
   module Match = struct
-    type t = Re2.Regex.Match.t
-    let by_index m i = Re2.Regex.Match.get_exn ~sub:(`Index i) m
-    let by_name m n = Re2.Regex.Match.get_exn ~sub:(`Name n) m
+    type t = Re.substrings
+    let by_index m i = Re.get m i
+    let by_name m n i = Re.get m i
   end
 
   module Template = struct
     let apply (regex, template) str =
-      (Re2.Regex.rewrite_exn regex ~template str)
+      (Re.replace_string regex ~by:template str)
     ;;
   end
 end
 
 module Creators = struct
-  let create = Re2.Regex.create_exn ~options:[];;
-  let create_i =
-    Re2.Regex.create_exn ~options:[`Case_sensitive false]
-  ;;
-  let create_im =
-    Re2.Regex.create_exn
-      ~options:[
-        `Case_sensitive false;
-        `Posix_syntax true;
-        `One_line false;
-      ]
-  ;;
+  let create = Re_posix.compile_pat ~opts:[`ICase];;
   let create_m =
-    Re2.Regex.create_exn ~options:[
-      `Posix_syntax true;
-      `One_line false;
+    Re_posix.compile_pat ~opts:[
+      `ICase;
+      `Newline;
     ]
   ;;
 
@@ -87,10 +74,8 @@ module Creators = struct
     type t = Template.t;;
 
     let create ~regex ~(template : string) : t =
-      if Re2.Regex.valid_rewrite_template regex ~template then
+      (* how to check for validity (in re2 valid_rewrite_template ) *)
         (regex, template)
-      else
-        invalid_arg "Template.create"
   end
 end
 
