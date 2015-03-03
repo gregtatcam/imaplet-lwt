@@ -9,6 +9,7 @@ PreBuildCommand: ocaml inst.ml $bindir $datadir > lib/imaplet_server/install.ml
 
 Library imaplet_email
   Path		  : lib/imaplet_email
+  FindlibName     : imaplet_email
   Pack		  : true
   Install	  : true
   Modules	  : Bigstringable,
@@ -49,6 +50,7 @@ Library imaplet_email
 
 Library imaplet_server
   Path		  : lib/imaplet_server
+  FindlibName     : imaplet_server
   Pack		  : true
   Install	  : true
   Modules	  : Account,
