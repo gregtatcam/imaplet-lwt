@@ -443,7 +443,6 @@ let exec_fetch_uid metadata =
 
 (** 4.3.2.1. **)
 let section_part_str (l:int list) : string =
-  let str =
   List.fold_left
   (fun acc i -> 
     let i = string_of_int i in 
@@ -451,11 +450,14 @@ let section_part_str (l:int list) : string =
       i 
     else 
       acc ^ "." ^ i
-  ) "" l in
+  ) "" l
+  (* is this needed TBD
+  in
   if str <> "" then
     str ^ "."
   else
     str
+  *)
 
 (** <x> {xxx},substr **)
 let body_part_str (l:int list) (str:string) : (string*string) =
@@ -508,15 +510,49 @@ let exec_fetch_msgtext email (msgtext:sectionMsgtext) (sec:sectionPart) (part:bo
   return (body_template_str prefix str sec part)
 
 let exec_fetch_mime email (sec:sectionPart) (part:bodyPart) =
-  (* future mime headers may be added, should start with ^content- TBD *)
   let incl = `Regx "^content-" in
   let str = exec_fetch_header ~incl email in
   body_template_str "MIME" str sec part
 
-let exec_fetch_email_body email (sec:sectionPart) (part:bodyPart) =
-  email_to_str email >>= fun (str,_) ->
-  return (body_template_str "" str sec part)
+let secpart_to_str secPart =
+  List.fold_left (fun acc i ->
+    if acc = "" then
+      string_of_int i
+    else
+      acc ^ ":" ^ (string_of_int i)
+  ) "" secPart
 
+let exec_fetch_email_body (module LE:LazyEmail_inst) (sec:sectionPart) (part:bodyPart) =
+  begin
+  if sec = [] then
+    LE.LazyEmail.to_string LE.this
+  else
+    LE.LazyEmail.raw_content LE.this
+  end >>= fun content ->
+  return (body_template_str "" content sec part)
+
+let content_type (module LE:LazyEmail_inst) =
+  let headers = LE.LazyEmail.header ~incl:(`Regx "^content-type") LE.this in
+  let (n,v) = List.hd headers in
+  let v = Regex.replace ~regx:"\n" ~tmpl:"" (String.trim v) in
+  let v = Regex.replace ~regx:"[ \t]+" ~tmpl:" " v in
+  v
+
+let rec walk_debug lazy_email =
+  let rec _walk_debug (module LE:LazyEmail_inst) indnt multi =
+    let ctype = content_type (module LE) in
+    Printf.fprintf stderr "%s%s %s\n%!" indnt multi ctype;
+    LE.LazyEmail.content LE.this >>= function
+    | `Data _ -> Printf.fprintf stderr "%scontent\n%!" indnt; return ()
+    | `Message m -> Printf.fprintf stderr "%smessage\n%!" indnt;
+      _walk_debug (lazy_email_of_t (module LE.LazyEmail) m) (indnt ^ "  ") ""
+    | `Multipart lemail -> Printf.fprintf stderr "%smultipart:%d\n%!" indnt (List.length lemail);
+      Lwt_list.iteri_s (fun i m ->
+        _walk_debug (lazy_email_of_t (module LE.LazyEmail) m) (indnt ^ "  ")
+        (string_of_int (i+1))
+      ) lemail
+  in _walk_debug lazy_email "" ""
+  
 exception SectionDone
 (** find the requested section, return empty email if not found **)
 let find_fetch_section email secPart =
@@ -524,32 +560,49 @@ let find_fetch_section email secPart =
     catch ( fun () ->
       match secPart with
       | [] -> raise SectionDone
+      | hd :: [] ->
+        begin
+        LE.LazyEmail.content LE.this >>= function
+        | `Data _ ->
+          if hd = 1 then
+            return (module LE:LazyEmail_inst)
+          else
+            raise SectionDone
+        | `Message m ->
+          let lazy_email = lazy_email_of_t (module LE.LazyEmail) m in
+          let ctype = content_type lazy_email in
+          if match_regex ~case:false ~regx:"multipart" ctype then
+            walk (lazy_email_of_t (module LE.LazyEmail) m) secPart
+          else if hd = 1 then
+            return (module LE:LazyEmail_inst)
+          else
+            raise SectionDone
+        | `Multipart lemail ->
+          if hd > List.length lemail then
+            raise SectionDone
+          else
+            return (lazy_email_of_t (module LE.LazyEmail) (List.nth lemail (hd - 1)))
+        end
       | hd :: tl ->
-        if hd = 1 && tl = [] then
-          return (module LE:LazyEmail_inst)
-        else (
-          LE.LazyEmail.content LE.this >>= fun content ->
-          match content with
-          | `Data _ -> raise SectionDone
-          | `Message m -> 
-            if hd = 1 then
-              walk (module LE:LazyEmail_inst) tl 
-            else
-              raise SectionDone
-          | `Multipart lemail -> 
-            if hd >= List.length lemail then
-              raise SectionDone
-            else if tl = [] then
-              return (lazy_email_of_t (module LE.LazyEmail) (List.nth lemail hd))
-            else
-              walk (lazy_email_of_t (module LE.LazyEmail) (List.nth lemail hd)) tl
-         )
-    ) (fun _ -> return (lazy_email_of_t (module LE.LazyEmail) LE.LazyEmail.empty))
+        LE.LazyEmail.content LE.this >>= function
+        | `Data _ -> raise SectionDone
+        | `Message m -> 
+          walk (lazy_email_of_t (module LE.LazyEmail) m) secPart
+        | `Multipart lemail ->
+          if hd > List.length lemail then
+            raise SectionDone
+          else
+            walk (lazy_email_of_t (module LE.LazyEmail) (List.nth lemail (hd - 1))) tl
+
+    ) (fun ex -> 
+      Printf.fprintf stderr "%s\n%!" (Printexc.to_string ex);
+      return (lazy_email_of_t (module LE.LazyEmail) LE.LazyEmail.empty))
   in
   walk email secPart
 
 let exec_fetch_sectext email (secPart:sectionPart) (secText:sectionText option)
 (spec:sectionSpec) (part:bodyPart) =
+  (*walk_debug email >>*)
   find_fetch_section email secPart >>= fun email -> 
   match secText with 
   | None -> exec_fetch_email_body email secPart part

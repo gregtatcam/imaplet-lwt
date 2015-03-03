@@ -184,7 +184,12 @@ let do_encrypt_content config email save_attachment =
       if multipart && rfc822 then (
         let email = Email.of_string (email_raw_content email) in
         walk email multipart 2 totsize totlines >>= fun (content,size,lines) ->
-        let part = {size=header_part.size+size;lines=header_part.lines+lines} in
+        let part = 
+          if multipart then 
+            {size=size;lines=lines}
+          else
+            {size=header_part.size+size+1;lines=header_part.lines+lines+1}
+        in
         return (
           {
             part;
@@ -196,7 +201,12 @@ let do_encrypt_content config email save_attachment =
         if attach then ( (* consider adding Content-type: message/external-body...  *)
           save_attachment contid content >>= fun () ->
           (* +1 for crlf - header crlf content *)
-          let part = {size=header_part.size+size+1;lines=header_part.lines+lines+1} in
+          let part = 
+          if multipart then 
+            {size=size;lines=lines}
+          else
+            {size=header_part.size+size+1;lines=header_part.lines+lines+1}
+          in
           return (
             {
               part;
@@ -207,7 +217,12 @@ let do_encrypt_content config email save_attachment =
           let offset = Buffer.length content_buff in
           let length = Bytes.length content in
           Buffer.add_string content_buff content;
-          let part = {size=header_part.size+size+1;lines=header_part.lines+lines+1} in
+          let part = 
+          if multipart then 
+            {size=size;lines=lines}
+          else
+            {size=header_part.size+size+1;lines=header_part.lines+lines+1}
+          in
           return (
             {
               part;
@@ -228,7 +243,11 @@ let do_encrypt_content config email save_attachment =
       let size = size + (Bytes.length boundary) + last_crlf in (* boundary ends
       with 2 crlf, last outermost with 1 *)
       let lines = lines + 2 in
-      let part={size=header_part.size+size;lines=header_part.lines+lines} in
+      let part=
+        if multipart then 
+          {size=size;lines=lines}
+        else
+          {size=header_part.size+size+1;lines=header_part.lines+lines+1} in
       return (
         {
           part;
