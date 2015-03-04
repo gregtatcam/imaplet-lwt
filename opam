@@ -9,7 +9,11 @@ build: [
   [make]
 ]
 install: [make "install"]
-remove: [make "uninstall"]
+remove: [
+  ["ocamlfind" "remove" "imaplet_email"]
+  ["ocamlfind" "remove" "imaplet_server"]
+  ["rm" "-f" "%{bin}%/imaplet*"]
+]
 depends: [
   "ocamlfind" {build}
   "lwt"

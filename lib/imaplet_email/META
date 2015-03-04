@@ -1,8 +1,8 @@
 # OASIS_START
-# DO NOT EDIT (digest: 78aadb39194396cf8d711ea91e881743)
+# DO NOT EDIT (digest: 6fcbfa9c1029f67f1d9e8ae7446af676)
 version = "0.1.9"
 description = "IMAP server"
-requires = "re str threads"
+requires = "re re.posix str threads"
 archive(byte) = "imaplet_email.cma"
 archive(byte, plugin) = "imaplet_email.cma"
 archive(native) = "imaplet_email.cmxa"

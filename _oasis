@@ -40,11 +40,13 @@ Library imaplet_email
                     String_monoid
   BuildTools	  : ocamlbuild, camlp4o
   BuildDepends	  : re,
+                    re.posix,
                     fieldslib.syntax,
                     sexplib.syntax,
                     threads,
                     str
   XMETARequires   : re,
+                    re.posix,
                     str,
                     threads
 
