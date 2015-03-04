@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: eeb035123b3dc7d6a7d9a698711cd18b)
+# DO NOT EDIT (digest: 909d06efa497069cfcc268a0df2f42c7)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -60,21 +60,21 @@ true: annot, bin_annot
 "lib/imaplet_server/imap_cmd.cmx": for-pack(Imaplet_server)
 "lib/imaplet_server/imap_crypto.cmx": for-pack(Imaplet_server)
 "lib/imaplet_server/imaplet_types.cmx": for-pack(Imaplet_server)
-"lib/imaplet_server/storage/irmin_core.cmx": for-pack(Imaplet_server)
-"lib/imaplet_server/storage/irmin_storage.cmx": for-pack(Imaplet_server)
+"lib/imaplet_server/irmin_core.cmx": for-pack(Imaplet_server)
+"lib/imaplet_server/irmin_storage.cmx": for-pack(Imaplet_server)
 "lib/imaplet_server/install.cmx": for-pack(Imaplet_server)
 "lib/imaplet_server/interpreter.cmx": for-pack(Imaplet_server)
 "lib/imaplet_server/lazy_message.cmx": for-pack(Imaplet_server)
-"lib/imaplet_server/storage/mailbox_storage.cmx": for-pack(Imaplet_server)
-"lib/imaplet_server/storage/maildir_storage.cmx": for-pack(Imaplet_server)
+"lib/imaplet_server/mailbox_storage.cmx": for-pack(Imaplet_server)
+"lib/imaplet_server/maildir_storage.cmx": for-pack(Imaplet_server)
 "lib/imaplet_server/regex.cmx": for-pack(Imaplet_server)
 "lib/imaplet_server/response.cmx": for-pack(Imaplet_server)
 "lib/imaplet_server/seq_iterator.cmx": for-pack(Imaplet_server)
 "lib/imaplet_server/server.cmx": for-pack(Imaplet_server)
 "lib/imaplet_server/server_config.cmx": for-pack(Imaplet_server)
 "lib/imaplet_server/ssl_.cmx": for-pack(Imaplet_server)
-"lib/imaplet_server/storage/storage.cmx": for-pack(Imaplet_server)
-"lib/imaplet_server/storage/storage_meta.cmx": for-pack(Imaplet_server)
+"lib/imaplet_server/storage.cmx": for-pack(Imaplet_server)
+"lib/imaplet_server/storage_meta.cmx": for-pack(Imaplet_server)
 "lib/imaplet_server/utils.cmx": for-pack(Imaplet_server)
 "lib/imaplet_server/lex.cmx": for-pack(Imaplet_server)
 "lib/imaplet_server/parser.cmx": for-pack(Imaplet_server)
@@ -91,19 +91,6 @@ true: annot, bin_annot
 <lib/imaplet_server/*.ml{,i,y}>: pkg_threads
 <lib/imaplet_server/*.ml{,i,y}>: pkg_tls.lwt
 <lib/imaplet_server/*.ml{,i,y}>: use_imaplet_email
-<lib/imaplet_server/storage/*.ml{,i,y}>: pkg_cstruct.unix
-<lib/imaplet_server/storage/*.ml{,i,y}>: pkg_fieldslib.syntax
-<lib/imaplet_server/storage/*.ml{,i,y}>: pkg_irmin.unix
-<lib/imaplet_server/storage/*.ml{,i,y}>: pkg_lwt
-<lib/imaplet_server/storage/*.ml{,i,y}>: pkg_lwt.syntax
-<lib/imaplet_server/storage/*.ml{,i,y}>: pkg_lwt.unix
-<lib/imaplet_server/storage/*.ml{,i,y}>: pkg_nocrypto
-<lib/imaplet_server/storage/*.ml{,i,y}>: pkg_re
-<lib/imaplet_server/storage/*.ml{,i,y}>: pkg_sexplib.syntax
-<lib/imaplet_server/storage/*.ml{,i,y}>: pkg_str
-<lib/imaplet_server/storage/*.ml{,i,y}>: pkg_threads
-<lib/imaplet_server/storage/*.ml{,i,y}>: pkg_tls.lwt
-<lib/imaplet_server/storage/*.ml{,i,y}>: use_imaplet_email
 # Executable parse_restore
 "test/parse_restore.native": pkg_cstruct.unix
 "test/parse_restore.native": pkg_fieldslib.syntax
@@ -226,14 +213,3 @@ true: annot, bin_annot
 <servers/*.ml{,i,y}>: use_imaplet_server
 # OASIS_STOP
 true: use_menhir
-<storage/*.ml{,i}>: pkg_cstruct.unix
-<storage/*.ml{,i}>: pkg_lwt
-<storage/*.ml{,i}>: pkg_lwt.syntax
-<storage/*.ml{,i}>: pkg_lwt.unix
-<storage/*.ml{,i}>: pkg_sexplib
-<storage/*.ml{,i}>: pkg_sexplib.syntax
-<storage/*.ml{,i}>: pkg_str
-<storage/*.ml{,i}>: pkg_threads
-<storage/*.ml{,i}>: pkg_tls.lwt
-<storage/*.ml{,i}>: pkg_irmin.unix
-<storage/*.ml{,i}>: use_imaplet_email

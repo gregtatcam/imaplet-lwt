@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: 44d6f709fc8ae6fb5437c63530182312)
+# DO NOT EDIT (digest: 6674862912af900ee7d765b45fa7afa7)
 Account
 Amailbox
 Configuration
@@ -11,21 +11,21 @@ Fetchregex
 Imap_cmd
 Imap_crypto
 Imaplet_types
-storage/Irmin_core
-storage/Irmin_storage
+Irmin_core
+Irmin_storage
 Install
 Interpreter
 Lazy_message
-storage/Mailbox_storage
-storage/Maildir_storage
+Mailbox_storage
+Maildir_storage
 Regex
 Response
 Seq_iterator
 Server
 Server_config
 Ssl_
-storage/Storage
-storage/Storage_meta
+Storage
+Storage_meta
 Utils
 Lex
 Parser
