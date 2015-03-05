@@ -25,4 +25,4 @@ depends: [
   "tls" {>= "0.3.0"}
   "menhir"
 ]
-ocaml-version: [>= "4.01.0"]
+ocaml-version: [ >= "4.01.0" ]
