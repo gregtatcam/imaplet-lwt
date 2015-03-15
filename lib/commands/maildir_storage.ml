@@ -19,9 +19,8 @@ open Sexplib.Conv
 open Storage
 open Storage_meta
 open Imaplet_types
-open Imaplet_email
-open Imaplet_email.Mailbox.Message
 open Lazy_message
+open Parsemail
 
 module MapStr = Map.Make(String)
 module MapFlag = Map.Make(
@@ -88,6 +87,12 @@ module LazyMaildirEmail : LazyEmail_intf with type c = Email.t =
 
   end
 
+let _email msg =
+  msg.Mailbox.Message.email
+
+let _postmark msg = 
+  msg.Mailbox.Message.postmark
+
 type maildir_accessor = Mailbox.Message.t * mailbox_message_metadata
 
 module LazyMaildirMessage : LazyMessage_intf with type c = maildir_accessor =
@@ -99,19 +104,20 @@ module LazyMaildirMessage : LazyMessage_intf with type c = maildir_accessor =
 
     let get_postmark t =
       let (msg,_) = t in
-      return (Mailbox.Postmark.to_string msg.postmark)
+      return (Mailbox.Postmark.to_string (_postmark msg))
 
     let get_headers_block t =
       let (msg,_) = t in
-      return (String_monoid.to_string (Header.to_string_monoid (Email.header msg.email)))
+      let header = Email.header (_email msg) in
+      return (String_monoid.to_string (Header.to_string_monoid header))
 
     let get_content_block t =
       let (msg,_) = t in
-      return (_raw_content msg.email)
+      return (_raw_content (_email msg))
 
     let get_email t =
       let (msg,_) = t in
-      return (build_lazy_email_inst (module LazyMaildirEmail) msg.email)
+      return (build_lazy_email_inst (module LazyMaildirEmail) (_email msg))
 
     let get_message_metadata t =
       let (_,meta) = t in
@@ -634,8 +640,8 @@ struct
       LazyMessage.LazyMessage.get_email LazyMessage.this >>= fun (module LE:LazyEmail_inst) ->
       LE.LazyEmail.to_string LE.this >>= fun email ->
       let message = 
-        { postmark=Mailbox.Postmark.of_string postmark;
-          email=Email.of_string email} in
+        { Mailbox.Message.postmark=Mailbox.Postmark.of_string postmark;
+          Mailbox.Message.email=Email.of_string email} in
       append t2 message message_metadata
 
   let commit t =

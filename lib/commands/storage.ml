@@ -16,8 +16,8 @@
 open Lwt
 open Storage_meta
 open Imaplet_types
-open Imaplet_email
 open Server_config
+open Parsemail
 
 module type Storage_intf = 
 sig

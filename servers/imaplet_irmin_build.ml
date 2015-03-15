@@ -14,12 +14,15 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 open Lwt
+open Imaplet
+open Commands
 open Imaplet_types
 open Regex
 open Storage_meta
 open Irmin_core
 open Irmin_storage
 open Server_config
+open Parsemail
 
 exception InvalidCommand
 exception InvalidInput
@@ -161,11 +164,9 @@ let mailbox_of_gmail_label message =
 
 let append_messages ist path flags =
   Printf.printf "#### appending messages %s\n%!" path;
-  let open Imaplet_email in
-  let open Imaplet_email.Mailbox in
-  let wseq = With_seq.t_of_file path in
-  With_seq.fold_message wseq ~f:(fun _ (message:Mailbox.Message.t) ->
-    if Regex.match_regex (Postmark.to_string message.postmark) ~regx:"^From[ ]+MAILER_DAEMON" then 
+  let wseq = Mailbox.With_seq.t_of_file path in
+  Mailbox.With_seq.fold_message wseq ~f:(fun _ (message:Mailbox.Message.t) ->
+    if Regex.match_regex (Mailbox.Postmark.to_string message.postmark) ~regx:"^From[ ]+MAILER_DAEMON" then 
       return ()
     else (
       let size = String.length (Email.to_string message.email) in
@@ -177,8 +178,6 @@ let gmail_mailboxes = ref MapStr.empty
 
 let append_archive_messages user path flags =
   Printf.printf "#### appending archive messages %s\n%!" path;
-  let open Imaplet_email in
-  let open Imaplet_email.Mailbox in
   Lwt_io.with_file ~mode:Lwt_io.Input path (fun ic ->
     let buffer = Buffer.create 10000 in
     let rec loop ic buffer cnt prev_mailbox prev_ist f = 
@@ -199,8 +198,8 @@ let append_archive_messages user path flags =
       | None -> f cnt prev_mailbox prev_ist (Buffer.contents buffer)
     in
     loop ic buffer 1 "" None (fun cnt prev_mailbox prev_ist content  ->
-      let wseq = With_seq.of_string content in
-      With_seq.fold_message wseq ~f:(fun _ message ->
+      let wseq = Mailbox.With_seq.of_string content in
+      Mailbox.With_seq.fold_message wseq ~f:(fun _ message ->
         let size = String.length (Email.to_string message.email) in
         let headers = String_monoid.to_string (Header.to_string_monoid (Email.header message.email)) in
         let (mailbox,fl) = mailbox_of_gmail_label headers in
@@ -232,7 +231,6 @@ let append_archive_messages user path flags =
 
 let append_maildir_message ist ?uid path flags =
   Printf.printf "#### appending maildir message %s\n%!" path;
-  let open Imaplet_email.Mailbox in
   Lwt_io.file_length path >>= fun size ->
   let size = Int64.to_int size in
   let buffer = String.create size in

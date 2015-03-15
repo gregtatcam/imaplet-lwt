@@ -14,7 +14,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 open Lwt
-open Imaplet_email
 open Imaplet_types
 open Storage_meta
 

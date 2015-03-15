@@ -384,7 +384,6 @@ let get_selected_mailbox ?mailbox2 mailboxt =
 
 (* search mailbox *)
 let search mailboxt resp_prefix keys buid =
-  let open Imaplet_email.Mailbox.Message in
   get_selected_mailbox mailboxt >>= function 
   | `NotExists -> return `NotExists
   | `NotSelectable -> return `NotSelectable

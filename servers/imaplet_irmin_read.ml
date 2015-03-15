@@ -21,10 +21,9 @@ open Imaplet_types
 open Utils
 open Regex
 open Dates
-open Imaplet_email
-open Imaplet_email.Mailbox
 open Lazy_message
 open Server_config
+open Parsemail
 
 exception InvalidCmd
 exception Quit
@@ -87,7 +86,7 @@ let postmark = replace ~regx:"FROM" ~tmpl:from_ postmark in
   let message = replace ~regx:"ID" ~tmpl:id_ message in
   let postmark = Mailbox.Postmark.of_string postmark in
   let email = Email.of_string message in
-  {Message.postmark;email}
+  {Mailbox.Message.postmark;Mailbox.Message.email}
 
 let append user mailbox =
   let open Storage_meta in
@@ -101,7 +100,6 @@ let append user mailbox =
 
 let rec selected user mailbox mbox =
   let open Storage_meta in
-  let open Imaplet_email in
   try
   prompt (user ^ ":" ^ mailbox ^ ": ") >>= function 
   | "help" -> Printf.printf

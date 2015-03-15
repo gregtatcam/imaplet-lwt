@@ -83,10 +83,9 @@ let concat_path a1 a2 =
     a2
 
 let message_of_string postmark email =
-  let open Imaplet_email in
-  let open Imaplet_email.Mailbox in
-  {Message.postmark=Postmark.of_string postmark; 
-   Message.email = Email.of_string email}
+  let open Parsemail in
+  {Mailbox.Message.postmark=Mailbox.Postmark.of_string postmark; 
+   Mailbox.Message.email = Email.of_string email}
 
 let make_email_message message =
   let size = String.length message in

@@ -17,8 +17,8 @@ open Lwt
 open Nocrypto
 open Imap_crypto
 open Server_config
-open Imaplet_email
 open Regex
+open Parsemail
 open Sexplib
 open Sexplib.Conv
 

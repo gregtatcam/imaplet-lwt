@@ -1,5 +1,5 @@
 (* OASIS_START *)
-(* DO NOT EDIT (digest: c0035fa45a4f55f130cda61c9089b328) *)
+(* DO NOT EDIT (digest: 513dd595f834210abce267b157490765) *)
 module OASISGettext = struct
 (* # 22 "src/oasis/OASISGettext.ml" *)
 
@@ -609,31 +609,18 @@ let package_default =
   {
      MyOCamlbuildBase.lib_ocaml =
        [
-          ("imaplet_email", ["lib/imaplet_email"], []);
-          ("imaplet_server",
-            ["lib/imaplet_server"; "lib/imaplet_server/storage"],
-            [])
+          ("parsemail", ["lib/parsemail"], []);
+          ("commands", ["lib/commands"], []);
+          ("imaplet", ["lib"], [])
        ];
      lib_c = [];
      flags = [];
      includes =
        [
-          ("test",
-            [
-               "lib/imaplet_email";
-               "lib/imaplet_server";
-               "lib/imaplet_server/storage"
-            ]);
-          ("servers",
-            [
-               "lib/imaplet_email";
-               "lib/imaplet_server";
-               "lib/imaplet_server/storage"
-            ]);
-          ("lib/imaplet_server/storage",
-            ["lib/imaplet_email"; "lib/imaplet_server"]);
-          ("lib/imaplet_server",
-            ["lib/imaplet_email"; "lib/imaplet_server/storage"])
+          ("test", ["lib"; "lib/commands"; "lib/parsemail"]);
+          ("servers", ["lib"; "lib/commands"; "lib/parsemail"]);
+          ("lib/commands", ["lib/parsemail"]);
+          ("lib", ["lib/commands"; "lib/parsemail"])
        ]
   }
   ;;
@@ -642,6 +629,6 @@ let conf = {MyOCamlbuildFindlib.no_automatic_syntax = false}
 
 let dispatch_default = MyOCamlbuildBase.dispatch_default conf package_default;;
 
-# 646 "myocamlbuild.ml"
+# 633 "myocamlbuild.ml"
 (* OASIS_STOP *)
 Ocamlbuild_plugin.dispatch dispatch_default;;

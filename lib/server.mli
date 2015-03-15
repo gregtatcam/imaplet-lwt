@@ -14,5 +14,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 open Lwt
+open Commands
 
 val create : Server_config.imapConfig -> [`Ok|`Error of string] Lwt.t

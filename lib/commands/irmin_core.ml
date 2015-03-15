@@ -16,14 +16,13 @@
 open Lwt
 open Irmin_unix
 open Sexplib
-open Imaplet_email
-open Imaplet_email.Mailbox.Message
 open Server_config
 open Imaplet_types
 open Storage_meta
 open Utils
 open Sexplib.Conv
 open Lazy_message
+open Parsemail
 
 exception KeyDoesntExist
 exception DuplicateUID

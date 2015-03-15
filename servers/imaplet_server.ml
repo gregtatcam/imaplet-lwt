@@ -14,7 +14,9 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 open Lwt
-open Server_config
+open Imaplet
+open Commands
+open Commands.Server_config
 
 exception InvalidCommand
 

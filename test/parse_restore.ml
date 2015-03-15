@@ -1,8 +1,9 @@
 open Lwt
-open Imaplet_email
-open Utils
-open Lazy_message
-open Email_parse
+open Commands
+open Commands.Utils
+open Commands.Lazy_message
+open Parsemail
+open Commands.Email_parse
 
 module MapStr = Map.Make(String)
 

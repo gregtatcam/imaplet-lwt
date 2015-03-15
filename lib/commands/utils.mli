@@ -14,6 +14,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 open Sexplib
+open Parsemail
 
 val formated_capability : string -> string
 
@@ -29,7 +30,7 @@ val substr : string -> start:int -> size:(int option)-> string
 
 val concat_path : string -> string -> string
 
-val make_email_message : string -> Imaplet_email.Mailbox.Message.t
+val make_email_message : string -> Mailbox.Message.t
 
 val option_value : 'a option -> default:'a -> 'a
 

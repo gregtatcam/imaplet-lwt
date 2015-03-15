@@ -18,6 +18,7 @@ open Sexplib
 open Maildir_storage
 open Storage_meta
 open Imaplet_types
+open Parsemail
 
 exception InvalidCommand
 
@@ -68,16 +69,15 @@ let get_message file =
   ~f:(fun ci ->
     Lwt_io.read ci >>= fun message ->
       if Regex.match_regex ~regx:",M=[0-9]+:2,[a-zA-Z]+$" file then
-      return (Imaplet_email.Mailbox.Message.t_of_sexp (Sexp.of_string message))
+      return (Mailbox.Message.t_of_sexp (Sexp.of_string message))
     else
       return (Utils.make_email_message message)
   ) 
 
 let write_message file message =
-  let open Imaplet_email in
   Utils.with_file file ~flags:[Unix.O_WRONLY;Unix.O_TRUNC] ~perms:0o660 ~mode:Lwt_io.Output 
   ~f:(fun co ->
-    let sexp = Imaplet_email.Mailbox.Message.sexp_of_t message in
+    let sexp = Mailbox.Message.sexp_of_t message in
     Lwt_io.write co (Sexp.to_string sexp)
   ) 
 
