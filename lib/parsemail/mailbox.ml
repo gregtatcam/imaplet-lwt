@@ -240,7 +240,7 @@ module Parser' = struct
     | `Token line ->
       if current = [] && line =~ Regexp.blank then
         C.continue t
-      else if Regexp.(line =~ postmark) then
+      else if Regexp.(line =~ postmark') then
         (* Check if beginning of message *)
         match Postmark.parse line with
         | Result_.Error msg    -> C.warning t ~msg

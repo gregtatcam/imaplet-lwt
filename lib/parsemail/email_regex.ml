@@ -66,7 +66,7 @@ module Creators = struct
   let create_m =
     Re_posix.compile_pat ~opts:[
       `ICase;
-      `Newline;
+      (*`Newline;*)
     ]
   ;;
 
