@@ -38,8 +38,14 @@ let get_mailbox_structure str =
     let dir = (Str.matched_group 1 str) in
     let fs = try let _ = Str.matched_group 2 str in true with _ -> false in
     `Maildir (dir,fs)
-  ) else if match_regex str ~regx:"^archive:\\([^:]+\\)$" then (
-    `Archive (Str.matched_group 1 str)
+  ) else if match_regex str ~regx:"^archive:\\([^:]+\\)\\(:\\([0-9]+\\)\\)?$" then (
+    let cnt = 
+      try 
+        let cnt = Str.matched_group 3 str in
+        (int_of_string cnt)
+      with _ -> max_int
+    in
+    `Archive ((Str.matched_group 1 str),cnt)
   ) else 
     raise InvalidCommand
 
@@ -176,12 +182,18 @@ let append_messages ist path flags =
   
 let gmail_mailboxes = ref MapStr.empty
 
-let append_archive_messages user path flags =
+let append_archive_messages user path maxmsg flags =
   Printf.printf "#### appending archive messages %s\n%!" path;
   Lwt_io.with_file ~mode:Lwt_io.Input path (fun ic ->
     let buffer = Buffer.create 10000 in
     let rec loop ic buffer cnt prev_mailbox prev_ist f = 
-      Lwt_io.read_line_opt ic >>= function
+      let read ic cnt maxmsg =
+        if cnt > maxmsg then
+          return None
+        else
+          Lwt_io.read_line_opt ic
+      in
+      read ic cnt maxmsg >>= function
       | Some line ->
       let line = line ^ "\n" in
       let regx = "^from [^ ]+ " ^ Regex.dayofweek ^ " " ^ Regex.mon ^ " " ^
@@ -412,8 +424,8 @@ let create_maildir user mailboxes fs =
     (Printexc.get_backtrace());return())
   )
 
-let create_archive_maildir user mailbox =
-  append_archive_messages user mailbox []
+let create_archive_maildir user mailbox cnt =
+  append_archive_messages user mailbox cnt []
 
 let () =
   commands (fun user mbx ->
@@ -428,10 +440,10 @@ let () =
           Printf.printf "porting from maildir\n%!";
           create_account user (Filename.concat mailboxes "subscriptions") >>
           create_maildir user mailboxes fs
-        | `Archive mailbox ->
+        | `Archive (mailbox,cnt) ->
           Printf.printf "porting from archive\n%!";
           create_account user (Filename.concat mailbox "subscriptions") >>
-          create_archive_maildir user mailbox 
+          create_archive_maildir user mailbox cnt
       )
       (fun ex -> Printf.fprintf stderr "exception: %s %s\n%!" (Printexc.to_string ex)
       (Printexc.get_backtrace());return())
