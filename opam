@@ -10,8 +10,7 @@ build: [
 ]
 install: [make "install"]
 remove: [
-  ["ocamlfind" "remove" "imaplet_email"]
-  ["ocamlfind" "remove" "imaplet_server"]
+  ["ocamlfind" "remove" "imaplet"]
   ["rm" "-f" "%{bin}%/imaplet*"]
 ]
 depends: [
