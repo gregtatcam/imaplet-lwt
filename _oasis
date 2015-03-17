@@ -10,6 +10,10 @@ PreBuildCommand:    ocaml inst.ml $bindir $datadir > lib/commands/install.ml
 PreInstallCommand:  ocaml unix.cma pre_inst.ml $datadir $pkg_version
 PostInstallCommand: ocaml unix.cma post_inst.ml $datadir $pkg_version $rm
 
+Flag utils
+  Description: build utilities
+  Default: false
+
 Library imaplet
   Path		  : lib/
   Pack            : true
@@ -169,3 +173,11 @@ Executable imaplet_maildir_index
   CompiledObject  : native
   MainIs	  : imaplet_maildir_index.ml
   BuildDepends	  : lwt,lwt.unix,lwt.syntax,zip,tls.lwt,str,threads,sexplib.syntax,nocrypto,imaplet.commands,imaplet.parsemail
+
+Executable get_messages
+  Build$:           flag(utils)
+  Install	  : false
+  Path		  : utils
+  CompiledObject  : native
+  MainIs	  : get_messages.ml
+  BuildDepends	  : lwt,lwt.unix,lwt.syntax,str,threads,sexplib.syntax,imaplet,imaplet.commands

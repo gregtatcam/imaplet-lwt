@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: e8dba0de2e0eff4623acb14dce8279c4)
+# DO NOT EDIT (digest: 616ce67d4218d9a1a9c56ffa2c4969c7)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -243,5 +243,38 @@ true: annot, bin_annot
 <servers/*.ml{,i,y}>: pkg_zip
 <servers/*.ml{,i,y}>: use_commands
 <servers/*.ml{,i,y}>: use_parsemail
+# Executable get_messages
+"utils/get_messages.native": pkg_cstruct.unix
+"utils/get_messages.native": pkg_fieldslib.syntax
+"utils/get_messages.native": pkg_irmin.unix
+"utils/get_messages.native": pkg_lwt
+"utils/get_messages.native": pkg_lwt.syntax
+"utils/get_messages.native": pkg_lwt.unix
+"utils/get_messages.native": pkg_nocrypto
+"utils/get_messages.native": pkg_re
+"utils/get_messages.native": pkg_re.posix
+"utils/get_messages.native": pkg_sexplib.syntax
+"utils/get_messages.native": pkg_str
+"utils/get_messages.native": pkg_threads
+"utils/get_messages.native": pkg_tls.lwt
+"utils/get_messages.native": use_commands
+"utils/get_messages.native": use_imaplet
+"utils/get_messages.native": use_parsemail
+<utils/*.ml{,i,y}>: pkg_cstruct.unix
+<utils/*.ml{,i,y}>: pkg_fieldslib.syntax
+<utils/*.ml{,i,y}>: pkg_irmin.unix
+<utils/*.ml{,i,y}>: pkg_lwt
+<utils/*.ml{,i,y}>: pkg_lwt.syntax
+<utils/*.ml{,i,y}>: pkg_lwt.unix
+<utils/*.ml{,i,y}>: pkg_nocrypto
+<utils/*.ml{,i,y}>: pkg_re
+<utils/*.ml{,i,y}>: pkg_re.posix
+<utils/*.ml{,i,y}>: pkg_sexplib.syntax
+<utils/*.ml{,i,y}>: pkg_str
+<utils/*.ml{,i,y}>: pkg_threads
+<utils/*.ml{,i,y}>: pkg_tls.lwt
+<utils/*.ml{,i,y}>: use_commands
+<utils/*.ml{,i,y}>: use_imaplet
+<utils/*.ml{,i,y}>: use_parsemail
 # OASIS_STOP
 true: use_menhir
