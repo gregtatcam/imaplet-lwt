@@ -181,3 +181,11 @@ Executable get_messages
   CompiledObject  : native
   MainIs	  : get_messages.ml
   BuildDepends	  : lwt,lwt.unix,lwt.syntax,str,threads,sexplib.syntax,imaplet,imaplet.commands
+
+Executable client
+  Build$:           flag(utils)
+  Install	  : false
+  Path		  : utils
+  CompiledObject  : native
+  MainIs	  : client.ml
+  BuildDepends	  : lwt,lwt.unix,lwt.syntax,re,re.posix,threads,tls.lwt

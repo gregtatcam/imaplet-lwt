@@ -1,0 +1,7 @@
+a login imaplet imaplet
+^[^ ]+ (OK|BAD|NO)
+a select inbox
+^[^* ]+ (OK|BAD|NO)
+a fetch 1:* all
+^[^* ]+ (OK|BAD|NO)
+a logout

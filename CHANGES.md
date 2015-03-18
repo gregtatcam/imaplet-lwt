@@ -5,3 +5,4 @@
 * added utility to extract X:Y messages from mbox
 * fixed postmark parsing
 * added option to import cnt messages from mbox file
+* added client utility to test IMAP commands

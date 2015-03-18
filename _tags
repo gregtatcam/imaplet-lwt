@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: 616ce67d4218d9a1a9c56ffa2c4969c7)
+# DO NOT EDIT (digest: 852045ab9cdb3e5bd2eda5d2fe147071)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -263,18 +263,26 @@ true: annot, bin_annot
 <utils/*.ml{,i,y}>: pkg_cstruct.unix
 <utils/*.ml{,i,y}>: pkg_fieldslib.syntax
 <utils/*.ml{,i,y}>: pkg_irmin.unix
-<utils/*.ml{,i,y}>: pkg_lwt
-<utils/*.ml{,i,y}>: pkg_lwt.syntax
-<utils/*.ml{,i,y}>: pkg_lwt.unix
 <utils/*.ml{,i,y}>: pkg_nocrypto
-<utils/*.ml{,i,y}>: pkg_re
-<utils/*.ml{,i,y}>: pkg_re.posix
 <utils/*.ml{,i,y}>: pkg_sexplib.syntax
 <utils/*.ml{,i,y}>: pkg_str
-<utils/*.ml{,i,y}>: pkg_threads
-<utils/*.ml{,i,y}>: pkg_tls.lwt
 <utils/*.ml{,i,y}>: use_commands
 <utils/*.ml{,i,y}>: use_imaplet
 <utils/*.ml{,i,y}>: use_parsemail
+# Executable client
+"utils/client.native": pkg_lwt
+"utils/client.native": pkg_lwt.syntax
+"utils/client.native": pkg_lwt.unix
+"utils/client.native": pkg_re
+"utils/client.native": pkg_re.posix
+"utils/client.native": pkg_threads
+"utils/client.native": pkg_tls.lwt
+<utils/*.ml{,i,y}>: pkg_lwt
+<utils/*.ml{,i,y}>: pkg_lwt.syntax
+<utils/*.ml{,i,y}>: pkg_lwt.unix
+<utils/*.ml{,i,y}>: pkg_re
+<utils/*.ml{,i,y}>: pkg_re.posix
+<utils/*.ml{,i,y}>: pkg_threads
+<utils/*.ml{,i,y}>: pkg_tls.lwt
 # OASIS_STOP
 true: use_menhir
