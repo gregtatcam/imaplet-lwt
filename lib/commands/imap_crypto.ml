@@ -74,6 +74,7 @@ let aes_decrypt ?(compressed=false) data priv =
   let data = Bytes.sub decrypted 0 ((Bytes.length decrypted) - pad_size) in
   if compressed then do_uncompress data else data
 
+(* have to use different IV every time TBD!!!*)
 let encrypt ?(compress=false) data pub =
   let (_,_,e) = 
     aes_encrypt ~compress data pub (fun _ -> 
