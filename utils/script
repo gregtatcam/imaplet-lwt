@@ -1,7 +1,10 @@
+echo true
 a login imaplet imaplet
 ^[^ ]+ (OK|BAD|NO)
 a select inbox
 ^[^* ]+ (OK|BAD|NO)
+timer_start fetching data
 a fetch 1:* all
 ^[^* ]+ (OK|BAD|NO)
+timer_stop fetching data
 a logout

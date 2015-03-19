@@ -18,10 +18,25 @@ open Lwt
 (*
  structure of the script file
  server command, like: a1 select inbox
- clien response regex: [^ ]+ \\(OK\\|BAD\\|NO\\)
+ client response regex: [^ ]+ \\(OK\\|BAD\\|NO\\)
  all client responses are red untilf the regex is matched, 
  each server command should follow by the client response regex
+ meta lines: 
+   timer_start name
+   timer_stop name
+   echo [true,false]
+ timer_start/stop measures the time lapse, outputs the measurement at the end
+ echo outputs the data on the wire
+ met can preceed the first command
  *)
+
+module MapStr = Map.Make(String)
+
+module Meta =
+  struct
+    let timers = ref MapStr.empty
+    let echo = ref true
+  end
 
 exception InvalidCommand
 
@@ -38,6 +53,46 @@ let rec args i script addr port ssl =
 
 let usage () =
   Printf.fprintf stderr "usage: client -s [path] -a [address] -p [port]\n%!"
+
+let process_meta line = 
+  let re = Re_posix.compile_pat ~opts:[`ICase] "^(timer_start|timer_stop|echo)[ \t]+(.*)$" in
+  try
+    let subs = Re.exec re line in
+    let meta = Re.get subs 1 in
+    match meta with
+    | "timer_start" ->
+      Meta.timers := MapStr.add (Re.get subs 2) (Unix.gettimeofday ()) !Meta.timers;
+      `Ok
+    | "timer_stop" ->
+      let t = MapStr.find (Re.get subs 2) !Meta.timers in
+      Meta.timers := MapStr.add (Re.get subs 2) (Unix.gettimeofday () -. t) !Meta.timers;
+      `Ok
+    | "echo" ->
+      Meta.echo := bool_of_string (Re.get subs 2);
+      `Ok
+    | _ -> `Done
+  with Not_found -> `Done
+
+let rec read_script strm =
+  Lwt_stream.get strm >>= function
+  | None -> return None
+  | Some line ->
+    match process_meta line with
+    | `Ok -> read_script strm
+    | `Done -> return (Some line)
+
+let get_script file =
+  let strm = Lwt_io.read_lines file in
+  let rec header strm =
+    Lwt_stream.peek strm >>= function
+    | None -> return ()
+    | Some line ->
+      match process_meta line with
+      | `Ok -> Lwt_stream.junk strm >> header strm
+      | `Done -> return ()
+  in
+  header strm >>
+  return strm
 
 let commands f =
   try 
@@ -69,30 +124,31 @@ let connect addr port ssl =
   else
     socket addr port
 
-let read file =
-  Lwt_io.read_line_opt file
-
-let read_line_echo ic =
+let read_net_echo ic =
   Lwt_io.read_line_opt ic >>= function
   | None -> return None
-  | Some line -> Printf.printf "%s\n%!" line; return (Some line)
+  | Some line -> 
+    if !Meta.echo then
+      Printf.printf "%s\n%!" line;
+    return (Some line)
 
 let write_echo oc command =
   let command = command ^ "\r\n" in
-  Printf.printf "%s%!" command;
+  if !Meta.echo then
+    Printf.printf "%s%!" command;
   Lwt_io.write oc command >> Lwt_io.flush oc
 
-let exec_command file oc =
-  Lwt_io.read_line_opt file >>= function
+let exec_command strm oc =
+  read_script strm >>= function
   | None -> return `Done
   | Some command -> write_echo oc command >> return `Ok
 
-let read_response file ic =
-  Lwt_io.read_line_opt file >>= function
+let read_response strm ic =
+  read_script strm >>= function
   | None -> return `Done
   | Some regex ->
   let rec read ic =
-    read_line_echo ic >>= function
+    read_net_echo ic >>= function
     | None -> return `Ok
     | Some line ->
         if Re.execp (Re_posix.compile_pat ~opts:[`ICase] regex) line then (
@@ -103,20 +159,29 @@ let read_response file ic =
   in
   read ic
 
+let output_meta () =
+  Printf.printf "---- timers\n%!";
+  MapStr.iter (fun key value ->
+    Printf.printf "%s %04f\n%!" key value
+  ) !Meta.timers
+
 let () =
   commands (fun script addr port ssl ->
     Lwt_main.run (catch(fun() ->
-        connect addr port ssl >>= fun (ic,oc) ->
-        read_line_echo ic >>= fun _ -> 
-        Lwt_io.with_file ~mode:Lwt_io.Input script (fun file ->
-          let rec exec () =
-            exec_command file oc >>= function
+        let rec exec strm ic oc =
+          exec_command strm oc >>= function
+          | `Done -> return ()
+          | `Ok -> read_response strm ic >>= function
             | `Done -> return ()
-            | `Ok -> read_response file ic >>= function
-              | `Done -> return ()
-              | `Ok -> exec ()
-          in
-          exec ()
+            | `Ok -> exec strm ic oc 
+        in
+        Lwt_io.with_file ~mode:Lwt_io.Input script (fun file ->
+          get_script file >>= fun strm ->
+          connect addr port ssl >>= fun (ic,oc) ->
+          read_net_echo ic >>= fun _ -> 
+          exec strm ic oc >>= fun () ->
+          output_meta ();
+          return ()
         )
       )
       (fun ex -> Printf.fprintf stderr "client: fatal exception: %s %s"
