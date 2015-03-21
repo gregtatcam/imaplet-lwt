@@ -31,6 +31,20 @@ exception Done
 module MapChar = Map.Make(Char)
 module MapStr = Map.Make(String)
 
+let timer = ref 0.
+
+let timer_start () =
+  timer := !timer -. Unix.gettimeofday ()
+
+let timer_stop () =
+  timer := !timer +. Unix.gettimeofday ()
+
+let with_timer f =
+  timer_start (); 
+  f() >>= fun res ->
+  timer_stop ();
+  return res
+
 let get_mailbox_structure str =
   if match_regex str ~regx:"^mbox:\\([^:]+\\):\\(.+\\)$" then
     `Mbox (Str.matched_group 1 str,Str.matched_group 2 str)
@@ -98,8 +112,10 @@ let rec listdir path mailbox f =
 
 let create_mailbox user ?uidvalidity mailbox =
   Printf.printf "############# creating mailbox %s %s\n%!" user mailbox;
+  with_timer (fun() -> 
   IrminStorage.create srv_config user mailbox >>= fun ist ->
   IrminStorage.create_mailbox ist >>
+  return ist) >>= fun ist ->
   match uidvalidity with
   | Some uidvalidity ->
     let metadata = empty_mailbox_metadata ~uidvalidity () in
@@ -109,7 +125,7 @@ let create_mailbox user ?uidvalidity mailbox =
 
 let append ist ?uid message size flags mailbox =
   catch (fun () ->
-  IrminStorage.status ist >>= fun mailbox_metadata ->
+  with_timer (fun() -> IrminStorage.status ist) >>= fun mailbox_metadata ->
   let modseq = Int64.add mailbox_metadata.modseq Int64.one in
   let uid = match uid with None -> mailbox_metadata.uidnext|Some uid -> uid in
   let message_metadata = {
@@ -132,8 +148,9 @@ let append ist ?uid message size flags mailbox =
     nunseen = mailbox_metadata.nunseen + 1 ;
     modseq
   } in
+  with_timer (fun() -> 
   IrminStorage.store_mailbox_metadata ist mailbox_metadata >>
-  IrminStorage.append ist message message_metadata 
+  IrminStorage.append ist message message_metadata)
   )
   (fun ex -> Printf.fprintf stderr "append exception: %s %s\n%!" (Printexc.to_string ex) (Printexc.get_backtrace()); return ())
 
@@ -221,9 +238,9 @@ let append_archive_messages user path maxmsg flags =
           gmail_mailboxes := MapStr.add mailbox "" !gmail_mailboxes;
           create_mailbox user mailbox 
         ) else if prev_mailbox <> mailbox then (
-          IrminStorage.commit (Utils.option_value_exn prev_ist) >>
+          with_timer (fun () -> IrminStorage.commit (Utils.option_value_exn prev_ist)) >>
           if MapStr.exists (fun mb _ -> mailbox = mb) !gmail_mailboxes then
-            IrminStorage.create srv_config user mailbox
+            with_timer (fun() -> IrminStorage.create srv_config user mailbox)
           else (
             gmail_mailboxes := MapStr.add mailbox "" !gmail_mailboxes;
             create_mailbox user mailbox
@@ -239,7 +256,7 @@ let append_archive_messages user path maxmsg flags =
   ) >>= fun (_,_,ist) ->
   match ist with
   | None -> return ()
-  | Some ist -> IrminStorage.commit ist
+  | Some ist -> with_timer(fun() -> IrminStorage.commit ist)
 
 let append_maildir_message ist ?uid path flags =
   Printf.printf "#### appending maildir message %s\n%!" path;
@@ -330,7 +347,7 @@ let create_inbox user inbx =
   Printf.printf "creating mailbox: INBOX\n%!";
   create_mailbox user "INBOX" >>= fun ist ->
   populate_mbox_msgs ist inbx >>
-  IrminStorage.commit ist
+  with_timer(fun() -> IrminStorage.commit ist)
 
 let create_account user subscriptions =
   let ac = UserAccount.create srv_config user in
@@ -393,7 +410,7 @@ let create_mbox user inbox mailboxes =
     else
       populate_mbox_msgs ist path
     end >>
-    IrminStorage.commit ist
+    with_timer(fun() -> IrminStorage.commit ist)
   )
 
 let maildir_flags flagsmap =
@@ -418,7 +435,7 @@ let create_maildir user mailboxes fs =
       flagsmap) (MapStr.cardinal uidmap) (Utils.option_value uidvalidity ~default:"");
       create_mailbox user ?uidvalidity mailbox >>= fun ist ->
       populate_maildir_msgs ist path flagsmap uidmap >>= fun () ->
-      IrminStorage.commit ist
+      with_timer(fun() -> IrminStorage.commit ist)
     )
     ( fun ex -> Printf.fprintf stderr "create_maildir exception: %s %s\n%!" (Printexc.to_string ex)
     (Printexc.get_backtrace());return())
@@ -448,4 +465,5 @@ let () =
       (fun ex -> Printf.fprintf stderr "exception: %s %s\n%!" (Printexc.to_string ex)
       (Printexc.get_backtrace());return())
     )
-  )
+  );
+  Printf.printf "total irmin time: %04f\n%!" !timer
