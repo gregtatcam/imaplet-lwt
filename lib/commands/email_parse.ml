@@ -183,7 +183,7 @@ let do_encrypt_content config email save_attachment =
        * expected rfc822 in multipart to have `Message type, so here is a hack *)
       if multipart && rfc822 then (
         let email = Email.of_string (email_raw_content email) in
-        walk email multipart 2 totsize totlines >>= fun (content,size,lines) ->
+        walk email multipart 2 0 0 >>= fun (content,size,lines) ->
         let part = 
           if multipart then 
             {size=size;lines=lines}
@@ -235,10 +235,10 @@ let do_encrypt_content config email save_attachment =
     | `Multipart elist ->
       assert (boundary <> "");
       Lwt_list.fold_left_s (fun (map,size,lines) email ->
-        let size = size + (Bytes.length boundary) + 1 in
-        let lines = lines + 1 in
-        walk email true 2 size lines >>= fun (email_map,size,lines) ->
-        return (email_map :: map,size,lines)
+        let size_ = size + (Bytes.length boundary) + 1 in
+        let lines_ = lines + 1 in
+        walk email true 2 0 0 >>= fun (email_map,size,lines) ->
+        return (email_map :: map,size_+size,lines_+lines)
       ) ([],1,1) elist >>= fun (map,size,lines) -> (* 1 because first boundary starts with crlf *)
       let size = size + (Bytes.length boundary) + last_crlf in (* boundary ends
       with 2 crlf, last outermost with 1 *)
@@ -258,7 +258,7 @@ let do_encrypt_content config email save_attachment =
   walk email false 1 0 0 >>= fun (map,_,_) ->
   let map_sexp_str = Sexp.to_string (sexp_of_email_map map) in
   let content = Buffer.contents content_buff in
-  let headers = Printf.sprintf "%04d%s%s" 
+  let headers = Printf.sprintf "%07d%s%s" 
     (Bytes.length map_sexp_str) map_sexp_str (Buffer.contents headers_buff) in
   do_encrypt config headers >>= fun headers ->
   do_encrypt config content >>= fun content ->
@@ -332,10 +332,10 @@ let do_decrypt_content config content =
 
 let do_decrypt_headers config headers =
   do_decrypt config headers >>= fun headers ->
-  let len = int_of_string (Bytes.sub headers 0 4) in
-  let map_sexp_str = Bytes.sub headers 4 len in
+  let len = int_of_string (Bytes.sub headers 0 7) in
+  let map_sexp_str = Bytes.sub headers 7 len in
   let map = email_map_of_sexp (Sexp.of_string map_sexp_str) in
-  return (map,Bytes.sub headers (4 + len) (Bytes.length headers - 4 - len))
+  return (map,Bytes.sub headers (7 + len) (Bytes.length headers - 7 - len))
 
 let restore config ~get_message ~get_attachment  =
   catch (fun () ->
