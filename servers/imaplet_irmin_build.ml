@@ -52,43 +52,48 @@ let get_mailbox_structure str =
     let dir = (Str.matched_group 1 str) in
     let fs = try let _ = Str.matched_group 2 str in true with _ -> false in
     `Maildir (dir,fs)
-  ) else if match_regex str ~regx:"^archive:\\([^:]+\\)\\(:\\([0-9]+\\)\\)?$" then (
-    let cnt = 
-      try 
-        let cnt = Str.matched_group 3 str in
-        (int_of_string cnt)
-      with _ -> max_int
-    in
-    `Archive ((Str.matched_group 1 str),cnt)
+  ) else if match_regex str ~regx:"^archive:\\([^:]+\\)$" then (
+    `Archive (Str.matched_group 1 str)
   ) else 
     raise InvalidCommand
+
+let get_filter str =
+  let p = Str.split (Str.regexp ":") str in
+  List.fold_left (fun (cnt,folders) n ->
+    if match_regex ~regx:"^[0-9]+$" n then
+      (int_of_string n,folders)
+    else 
+      (cnt, Str.split (Str.regexp ",") n)
+  ) (max_int,[]) p
 
 (* -u : user
  * -m : mailbox structure
  *      mbox:inbox-path:mailboxes-path
  *      maildir:maildir-path
  *)
-let rec args i user mailbox =
+let rec args i user mailbox filter =
   if i >= Array.length Sys.argv then
-    user,mailbox
+    user,mailbox,filter
   else
     match Sys.argv.(i) with 
-    | "-m" -> args (i+2) user (Some (get_mailbox_structure Sys.argv.(i+1)))
-    | "-u" -> args (i+2) (Some Sys.argv.(i+1)) mailbox
+    | "-m" -> args (i+2) user (Some (get_mailbox_structure Sys.argv.(i+1))) filter
+    | "-u" -> args (i+2) (Some Sys.argv.(i+1)) mailbox filter
+    | "-f" -> args (i+2) user mailbox (get_filter Sys.argv.(i+1))
     | _ -> raise InvalidCommand
 
 let usage () =
   Printf.printf "usage: imaplet_irmin_build -u [user] -m
-  [mbox:inbox-path:mailboxes-path|maildir:mailboxes-path|archive:mbox-path]\n%!"
+  [mbox:inbox-path:mailboxes-path|maildir:mailboxes-path|archive:mbox-path]
+  -f [maxmsg:folder,...,folder]\n%!"
 
 let commands f =
   try 
-    let user,mbx = args 1 None None in
+    let user,mbx,filter = args 1 None None (max_int,[]) in
     if user = None || mbx = None then
       usage ()
     else
       try 
-        f (Utils.option_value_exn user) (Utils.option_value_exn mbx)
+        f (Utils.option_value_exn user) (Utils.option_value_exn mbx) filter
       with ex -> Printf.printf "%s\n%!" (Printexc.to_string ex)
   with _ -> usage ()
 
@@ -199,61 +204,94 @@ let append_messages ist path flags =
   
 let gmail_mailboxes = ref MapStr.empty
 
-let append_archive_messages user path maxmsg flags =
-  Printf.printf "#### appending archive messages %s\n%!" path;
-  Lwt_io.with_file ~mode:Lwt_io.Input path (fun ic ->
-    let buffer = Buffer.create 10000 in
-    let rec loop ic buffer cnt prev_mailbox prev_ist f = 
-      let read ic cnt maxmsg =
-        if cnt > maxmsg then
-          return None
-        else
-          Lwt_io.read_line_opt ic
-      in
-      read ic cnt maxmsg >>= function
-      | Some line ->
-      let line = line ^ "\n" in
-      let regx = "^from [^ ]+ " ^ Regex.dayofweek ^ " " ^ Regex.mon ^ " " ^
-        "[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] [0-9]+" in
-      if Regex.match_regex line ~case:false ~regx && Buffer.length buffer > 0 then (
-        f cnt prev_mailbox prev_ist (Buffer.contents buffer) >>= fun (cnt,prev_mailbox,prev_ist) ->
-        Buffer.clear buffer;
-        Buffer.add_string buffer line;
-        loop ic buffer cnt prev_mailbox prev_ist f
-      ) else (
-        Buffer.add_string buffer line;
-        loop ic buffer cnt prev_mailbox prev_ist f
-      )
-      | None -> f cnt prev_mailbox prev_ist (Buffer.contents buffer)
-    in
-    loop ic buffer 1 "" None (fun cnt prev_mailbox prev_ist content  ->
-      let wseq = Mailbox.With_seq.of_string content in
-      Mailbox.With_seq.fold_message wseq ~f:(fun _ message ->
-        let size = String.length (Email.to_string message.email) in
-        let headers = String_monoid.to_string (Header.to_string_monoid (Email.header message.email)) in
-        let (mailbox,fl) = mailbox_of_gmail_label headers in
-        Printf.printf "-- processing message %d, mailbox %s\n%!" cnt mailbox;
-        begin
-        if prev_ist = None then (
-          gmail_mailboxes := MapStr.add mailbox "" !gmail_mailboxes;
-          create_mailbox user mailbox 
-        ) else if prev_mailbox <> mailbox then (
-          with_timer (fun () -> IrminStorage.commit (Utils.option_value_exn prev_ist)) >>
-          if MapStr.exists (fun mb _ -> mailbox = mb) !gmail_mailboxes then
-            with_timer (fun() -> IrminStorage.create srv_config user mailbox)
-          else (
-            gmail_mailboxes := MapStr.add mailbox "" !gmail_mailboxes;
-            create_mailbox user mailbox
-          )
+let postmark = "^from [^ ]+ " ^ Regex.dayofweek ^ " " ^ Regex.mon ^ " " ^
+  "[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] [0-9]+"
+
+let is_postmark line =
+  Regex.match_regex ~case:false ~regx:postmark line
+
+let filter_folder folders f =
+  let lowercase s = String.lowercase s in
+  if folders = [] then
+    false
+  else
+    List.exists (fun n -> (lowercase (Regex.dequote n)) = (lowercase f)) folders = false
+
+let parse_message content =
+  let wseq = Mailbox.With_seq.of_string content in
+  Mailbox.With_seq.fold_message wseq ~f:(fun _ message ->
+    let headers = String_monoid.to_string (Header.to_string_monoid (Email.header message.email)) in
+    let (mailbox,fl) = mailbox_of_gmail_label headers in
+    let size = String.length (Email.to_string message.email) in
+    (Some (mailbox,size,fl,message))
+  ) ~init:None
+
+let rec get_message ic buffer folders =
+  Lwt_io.read_line_opt ic >>= function
+  | None -> return None
+  | Some line ->
+    let line = line ^ "\n" in
+    if is_postmark line then (
+      let content = Buffer.contents buffer in
+      Buffer.clear buffer;
+      Buffer.add_string buffer line;
+      match parse_message content with
+      | None -> get_message ic buffer folders
+      | Some (mailbox,size,flags,message) ->
+        if filter_folder folders mailbox then (
+          get_message ic buffer folders
         ) else (
-          return (Utils.option_value_exn prev_ist)
-        ) 
-        end >>= fun ist ->
-        append ist message size (List.concat [flags;fl]) mailbox >>
-        return (cnt + 1,mailbox,Some ist)
-      ) ~init:(return(cnt,prev_mailbox,prev_ist))
+          return (Some (mailbox,size,flags,message))
+        )
+    ) else (
+      Buffer.add_string buffer line;
+      get_message ic buffer folders
     )
-  ) >>= fun (_,_,ist) ->
+
+let fill path push_strm maxmsg folders =
+  Lwt_io.with_file ~mode:Lwt_io.Input path (fun ic ->
+    let buffer = Buffer.create 1000 in
+    let rec loop cnt =
+      get_message ic buffer folders >>= function
+      | None -> push_strm None; return ()
+      | Some (mailbox,size,flags,message) ->
+        if cnt > maxmsg then (
+          push_strm None; return ()
+        ) else (
+          push_strm (Some (cnt,mailbox,size,flags,message));
+          loop (cnt + 1)
+        )
+    in
+    loop 1
+  )
+
+let append_archive_messages user path filter flags =
+  Printf.printf "#### appending archive messages %s\n%!" path;
+  let (maxmsg,folders) = filter in
+  let (strm,push_strm) = Lwt_stream.create () in
+  async (fun () -> fill path push_strm maxmsg folders);
+  Lwt_stream.fold_s (fun (cnt,mailbox,size,fl,message) (prev_mailbox,prev_ist) ->
+    Printf.printf "-- processing message %d, mailbox %s\n%!" cnt mailbox;
+    begin
+    if prev_ist = None then (
+      gmail_mailboxes := MapStr.add mailbox "" !gmail_mailboxes;
+      create_mailbox user mailbox 
+    ) else if prev_mailbox <> mailbox then (
+      with_timer (fun () -> IrminStorage.commit (Utils.option_value_exn prev_ist)) >>
+      if MapStr.exists (fun mb _ -> mailbox = mb) !gmail_mailboxes then
+        with_timer (fun() -> IrminStorage.create srv_config user mailbox)
+      else (
+        gmail_mailboxes := MapStr.add mailbox "" !gmail_mailboxes;
+        create_mailbox user mailbox
+      )
+    ) else (
+      return (Utils.option_value_exn prev_ist)
+    ) 
+    end >>= fun ist ->
+    append ist message size (List.concat [flags;fl]) mailbox >>
+    return (mailbox,Some ist)
+ ) strm ("",None)
+  >>= fun (_,ist) ->
   match ist with
   | None -> return ()
   | Some ist -> with_timer(fun() -> IrminStorage.commit ist)
@@ -399,7 +437,7 @@ let get_dovecot_params path =
   (fun _ -> return (flagsmap,None,MapStr.empty))
 
 (* irmin supports both mailbox and folders under the mailbox *)
-let create_mbox user inbox mailboxes =
+let create_mbox user inbox mailboxes filter =
   create_inbox user inbox >>
   listdir mailboxes "/" (fun is_dir path mailbox ->
     Printf.printf "creating mailbox: %s\n%!" mailbox;
@@ -424,7 +462,7 @@ let maildir_flags flagsmap =
   in
   flagsmap
 
-let create_maildir user mailboxes fs =
+let create_maildir user mailboxes fs filter =
   let list = if fs then listdir mailboxes "/" else listdir_maildir mailboxes in
   list (fun _ path mailbox ->
     Printf.printf "#### listing %s %s\n%!" path mailbox;
@@ -441,26 +479,26 @@ let create_maildir user mailboxes fs =
     (Printexc.get_backtrace());return())
   )
 
-let create_archive_maildir user mailbox cnt =
-  append_archive_messages user mailbox cnt []
+let create_archive_maildir user mailbox filter =
+  append_archive_messages user mailbox filter []
 
 let () =
-  commands (fun user mbx ->
+  commands (fun user mbx filter ->
     Lwt_main.run (
       catch ( fun () ->
         match mbx with
         | `Mbox (inbox,mailboxes) -> 
           Printf.printf "porting from mbox\n%!";
           create_account user (Filename.concat mailboxes ".subscriptions") >>
-          create_mbox user inbox mailboxes
+          create_mbox user inbox mailboxes filter
         | `Maildir (mailboxes,fs) -> 
           Printf.printf "porting from maildir\n%!";
           create_account user (Filename.concat mailboxes "subscriptions") >>
-          create_maildir user mailboxes fs
-        | `Archive (mailbox,cnt) ->
+          create_maildir user mailboxes fs filter
+        | `Archive mailbox ->
           Printf.printf "porting from archive\n%!";
           create_account user (Filename.concat mailbox "subscriptions") >>
-          create_archive_maildir user mailbox cnt
+          create_archive_maildir user mailbox filter
       )
       (fun ex -> Printf.fprintf stderr "exception: %s %s\n%!" (Printexc.to_string ex)
       (Printexc.get_backtrace());return())
