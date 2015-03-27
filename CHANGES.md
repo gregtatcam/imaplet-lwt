@@ -6,3 +6,7 @@
 * fixed postmark parsing
 * added option to import cnt messages from mbox file
 * added client utility to test IMAP commands
+* fixed parsed email map header and size/lines in MIME parts
+* added timer to imaplet_irmin_build to measure time in Irmin functions
+* added count/folder filter to imaplet_irmin_build
+* fixed index and labels parsing
