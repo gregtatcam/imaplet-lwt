@@ -24,7 +24,7 @@ let parse_start_stop str =
   let start = int_of_string (Str.matched_group 1 str) in
   let stop = 
     try
-      let stop = Str.matched_group 3 Sys.argv.(2) in
+      let stop = Str.matched_group 3 str in
       if stop = "*" then
         max_int
       else
@@ -96,7 +96,7 @@ let filtered message labels =
     false
   else (
     let label = mailbox_of_gmail_label message in
-    (List.exists (fun l -> l = label) labels) = false
+    (List.exists (fun l -> (String.lowercase l) = (String.lowercase label)) labels) = false
   )
 
 let get_messages path start stop labels =
