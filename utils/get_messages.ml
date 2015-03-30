@@ -17,6 +17,10 @@ open Lwt
 open Imaplet
 open Commands
 
+module MapStr = Map.Make(String)
+
+let outfiles = ref MapStr.empty
+
 exception InvalidCommand
 
 let parse_start_stop str =
@@ -37,27 +41,29 @@ let parse_labels str =
   let labels = Str.split (Str.regexp ",") str in
   List.fold_left (fun acc l -> (Regex.dequote l) :: acc) [] labels
 
-let rec args i mbox index labels =
+let rec args i mbox index labels outdir =
   if i >= Array.length Sys.argv then
-    mbox, index,labels
+    mbox, index,labels, outdir
   else
     match Sys.argv.(i) with 
-    | "-archive" -> args (i+2) Sys.argv.(i+1) index labels
-    | "-index" -> args (i+2) mbox (parse_start_stop Sys.argv.(i+1)) labels
-    | "-labels" -> args (i+2) mbox index (parse_labels Sys.argv.(i+1))
+    | "-archive" -> args (i+2) Sys.argv.(i+1) index labels outdir
+    | "-index" -> args (i+2) mbox (parse_start_stop Sys.argv.(i+1)) labels outdir
+    | "-labels" -> args (i+2) mbox index (parse_labels Sys.argv.(i+1)) outdir
+    | "-split" -> args (i+2) mbox index labels (Some Sys.argv.(i+1))
     | _ -> raise InvalidCommand
 
 let usage () =
-  Printf.fprintf stderr "usage: get_messages -archive filename -index start[:stop] -folders [folder1,folder2]\n%!"
+  Printf.fprintf stderr "usage: get_messages -archive filename -index
+  start[:stop] -folders [folder1,folder2] -split [outdir]\n%!"
 
 let commands f =
   try 
-    let mbox,index,labels = args 1 "" (1,max_int) [] in
+    let mbox,index,labels,outdir = args 1 "" (1,max_int) [] None in
     if mbox = "" then
       raise InvalidCommand
     else
       try 
-        f mbox index labels
+        f mbox index labels outdir
       with ex -> Printf.printf "%s\n%!" (Printexc.to_string ex)
   with _ -> usage ()
 
@@ -86,20 +92,34 @@ let mailbox_of_gmail_label message =
       | Some label -> (label)
       end
     | Some label ->
-      let label = Regex.replace ~regx:"[Imap]/" ~tmpl:"" label in
+      let label = Regex.replace ~regx:"\\[Imap\\]/" ~tmpl:"" label in
       let label = Regex.replace ~case:false ~regx:"inbox" ~tmpl:"INBOX" label in
       (label)
   )
 
-let filtered message labels = 
+let filtered message label labels = 
   if labels = [] then
     false
   else (
-    let label = mailbox_of_gmail_label message in
     (List.exists (fun l -> (String.lowercase l) = (String.lowercase label)) labels) = false
   )
 
-let get_messages path start stop labels =
+let output message label = function
+  | None -> Lwt_io.fprintf Lwt_io.stdout "%s%!" message
+  | Some outdir ->
+    let label = Regex.replace ~regx:"/" ~tmpl:"." label in
+    let label = Regex.replace ~regx:" " ~tmpl:"." label in
+    catch (fun () ->
+      return (MapStr.find label !outfiles)
+    ) (fun _ ->
+      Lwt_io.open_file ~mode:Lwt_io.Output 
+        (Filename.concat outdir label) >>= fun co ->
+      outfiles := MapStr.add label co !outfiles;
+      return co
+    ) >>= fun co ->
+    Lwt_io.fprintf co "%s%!" message
+
+let get_messages path start stop labels outdir =
   Lwt_io.with_file ~mode:Lwt_io.Input path (fun ic ->
     let buffer = Buffer.create 10000 in
     let rec loop ic buffer cnt = 
@@ -116,14 +136,18 @@ let get_messages path start stop labels =
         "[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] [0-9]+" in
       if Regex.match_regex line ~case:false ~regx && Buffer.length buffer > 0 then (
         let message = Buffer.contents buffer in
-        let counting = 
-        if filtered message labels = false then (
+        let label = mailbox_of_gmail_label message in
+        begin
+        if filtered message label labels = false then (
+          begin
           if cnt >= start then
-            Printf.printf "%s%!" message;
-          true
+            output message label outdir
+          else
+            return ()
+          end >> return true
         ) else
-          false
-        in
+          return false
+        end >>= fun counting ->
         Buffer.clear buffer;
         Buffer.add_string buffer line;
         loop ic buffer (if counting then (cnt+1) else cnt)
@@ -134,11 +158,12 @@ let get_messages path start stop labels =
       | None -> return ()
     in
     loop ic buffer 1 
-  )
+  ) >>= fun () ->
+    MapStr.fold (fun _ oc _ -> Lwt_io.close oc) !outfiles (return ())
 
 let () =
-  commands (fun mbox (start,stop) labels ->
+  commands (fun mbox (start,stop) labels outdir ->
     Lwt_main.run (
-      get_messages mbox start stop labels
+      get_messages mbox start stop labels outdir
     )
   )
