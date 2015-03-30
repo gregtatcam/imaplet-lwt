@@ -52,7 +52,8 @@ let rec args i script addr port ssl =
     | _ -> raise InvalidCommand
 
 let usage () =
-  Printf.fprintf stderr "usage: client -s [path] -a [address] -p [port]\n%!"
+  Printf.fprintf stderr "usage: client -script [path] -address [address] -port
+  [port] -ssl\n%!"
 
 let process_meta line = 
   let re = Re_posix.compile_pat ~opts:[`ICase] "^(timer_start|timer_stop|echo)[ \t]+(.*)$" in
@@ -151,7 +152,9 @@ let read_response strm ic =
     read_net_echo ic >>= function
     | None -> return `Ok
     | Some line ->
-        if Re.execp (Re_posix.compile_pat ~opts:[`ICase] regex) line then (
+      if Re.execp (Re_posix.compile_pat ~opts:[`ICase] regex) line then (
+        if !Meta.echo = false then
+          Printf.printf "%s\n%!" line;
         return `Ok
       ) else (
         read ic
