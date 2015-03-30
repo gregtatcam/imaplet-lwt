@@ -339,6 +339,7 @@ let rec print_search_tree t indent =
 (** handle the charset TBD **)
 let handle_search context charset search buid =
   let resp_prefix = resp_highestmodseq false context in
+  let t = Unix.gettimeofday () in
   Amailbox.search context.!mailbox resp_prefix search buid >>= function 
     (** what do these two states mean in this contex? TBD **)
   | `NotExists -> response context None (Resp_No(None,"Mailbox doesn't exist")) None
@@ -357,17 +358,20 @@ let handle_search context charset search buid =
       else 
         s ^ " " ^ acc) "" r
     ) ^ modseq)) >>
-    response context None (Resp_Ok(None, "SEARCH completed")) None
+    let resp = Printf.sprintf "SEARCH completed %02fsec%!" (Unix.gettimeofday () -. t) in
+    response context None (Resp_Ok(None, resp)) None
 
 let handle_fetch context sequence fetchattr changedsince buid =
   let resp_prefix = resp_highestmodseq (changedsince <> None) context in
+  let t = Unix.gettimeofday () in
   Amailbox.fetch context.!mailbox resp_prefix (write_resp_untagged
       context.!netw) sequence fetchattr changedsince buid >>= function
   | `NotExists -> response context None (Resp_No(None,"Mailbox doesn't exist")) None
   | `NotSelectable ->  response context None (Resp_No(None,"Mailbox is not selectable")) None
   | `Error e -> response context None (Resp_No(None,e)) None
   | `Ok ->
-    response context None (Resp_Ok(None, "FETCH completed")) None
+    let resp = Printf.sprintf "FETCH completed %02fsec%!" (Unix.gettimeofday () -. t) in
+    response context None (Resp_Ok(None, resp)) None
 
 let handle_store context sequence flagsatt flagsval changedsince buid =
   let resp_prefix = resp_highestmodseq (changedsince <> None) context in
