@@ -1,10 +1,10 @@
-echo true
+echo false
 a login imaplet imaplet
 ^[^ ]+ (OK|BAD|NO)
 a select inbox
-^[^* ]+ (OK|BAD|NO)
+^a (OK|BAD|NO)
 timer_start fetching data
-a fetch 1:* all
-^[^* ]+ (OK|BAD|NO)
+a10195 fetch 1:* (flags body[header]<0.30> body[text]<0.30>)
+^a10195 (OK|BAD|NO)
 timer_stop fetching data
 a logout
