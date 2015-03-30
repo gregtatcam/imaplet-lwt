@@ -185,7 +185,7 @@ let mailbox_of_gmail_label message =
       | Some label -> (label,flags)
       end
     | Some label ->
-      let label = Regex.replace ~regx:"[Imap]/" ~tmpl:"" label in
+      let label = Regex.replace ~regx:"\\[Imap\\]/" ~tmpl:"" label in
       let label = Regex.replace ~case:false ~regx:"inbox" ~tmpl:"INBOX" label in
       (label,flags)
   )
@@ -255,11 +255,12 @@ let fill path push_strm maxmsg folders =
       get_message ic buffer folders >>= function
       | None -> push_strm None; return ()
       | Some (mailbox,size,flags,message) ->
-        if cnt > maxmsg then (
-          push_strm None; return ()
-        ) else (
-          push_strm (Some (cnt,mailbox,size,flags,message));
+        push_strm (Some (cnt,mailbox,size,flags,message));
+        if cnt < maxmsg then
           loop (cnt + 1)
+        else (
+          push_strm None;
+          return ()
         )
     in
     loop 1
@@ -291,7 +292,8 @@ let append_archive_messages user path filter flags =
     append ist message size (List.concat [flags;fl]) mailbox >>
     return (mailbox,Some ist)
  ) strm ("",None)
-  >>= fun (_,ist) ->
+  >>= fun (mailbox,ist) ->
+  Printf.printf "-- done, commiting last mailbox %s\n%!" mailbox;
   match ist with
   | None -> return ()
   | Some ist -> with_timer(fun() -> IrminStorage.commit ist)
