@@ -10,3 +10,5 @@
 * added timer to imaplet_irmin_build to measure time in Irmin functions
 * added count/folder filter to imaplet_irmin_build
 * fixed index and labels parsing
+* added timer to search/fetch
+* fixed import count filter
