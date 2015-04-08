@@ -121,20 +121,26 @@ let get_hdr_attrs headers =
       boundary,attach,rfc822
   ) ("",false,false) headers
 
-let headers_str_of_list headers =
-  List.fold_left (fun acc (n,v) ->
+let headers_str_of_list headers transform =
+  transform (`Headers (List.fold_left (fun acc (n,v) ->
     acc ^ n ^ ":" ^ v ^ crlf
-  ) "" headers
+  ) "" headers))
 
 let email_raw_content email =
   match (Email.raw_content email) with
   | Some rc -> Octet_stream.to_string rc
   | None -> ""
 
-let email_content config attachment email =
+let email_content config attachment email transform =
   match (Email.raw_content email) with
   | Some rc -> 
     let content = Octet_stream.to_string rc in
+    let content = 
+    if attachment then 
+      transform (`Attachment content) 
+    else 
+      transform (`Body content) 
+    in
     let size = Bytes.length content in
     let lines = Utils.lines content in
     if config.encrypt = true && attachment then (
@@ -154,9 +160,8 @@ let do_encrypt config data =
   else
     return data
 
-let get_header_descr email headers_buff =
-  let headers = Header.to_list (Email.header email) in
-  let headers_str = headers_str_of_list headers in
+let get_header_descr headers headers_buff transform =
+  let headers_str = headers_str_of_list headers transform in
   let headers_sexp_str = Sexp.to_string (sexp_of_list (fun (n,v) -> 
     sexp_of_pair sexp_of_string sexp_of_string (n,v)
   ) headers) in
@@ -171,12 +176,13 @@ let get_header_descr email headers_buff =
   Buffer.add_string headers_buff headers_sexp_str;
   (part,descr)
 
-let do_encrypt_content config email save_attachment =
+let do_encrypt_content config email save_attachment transform =
   let content_buff = Buffer.create 100 in
   let headers_buff = Buffer.create 100 in
   let rec walk email multipart last_crlf totsize totlines =
-    let (header_part,header_descr) = get_header_descr email headers_buff in
-    let boundary,attach,rfc822 = get_hdr_attrs (Header.to_list (Email.header email)) in
+    let headers = Header.to_list (Email.header email) in
+    let (header_part,header_descr) = get_header_descr headers headers_buff transform in
+    let boundary,attach,rfc822 = get_hdr_attrs headers in
     match (Email.content email) with
     | `Data _ -> 
       (* it seems that email_message doesn't parse rfc822??? I would have
@@ -197,7 +203,7 @@ let do_encrypt_content config email save_attachment =
             content = `Message_map content;
           },totsize+part.size,totlines+part.lines)
       ) else (
-        email_content config attach email >>= fun (contid,content,size,lines) -> 
+        email_content config attach email transform >>= fun (contid,content,size,lines) -> 
         if attach then ( (* consider adding Content-type: message/external-body...  *)
           save_attachment contid content >>= fun () ->
           (* +1 for crlf - header crlf content *)
@@ -264,9 +270,15 @@ let do_encrypt_content config email save_attachment =
   do_encrypt config content >>= fun content ->
   return (headers,content)
 
-let parse config (message:Mailbox.Message.t) ~save_message ~save_attachment =
-  do_encrypt config (Mailbox.Postmark.to_string message.postmark) >>= fun postmark ->
-  do_encrypt_content config message.email save_attachment >>= fun (headers,content) ->
+let default_transform = function
+  | `Postmark p -> p
+  | `Headers h -> h
+  | `Body b -> b
+  | `Attachment a -> a
+
+let parse ?(transform=default_transform) config (message:Mailbox.Message.t) ~save_message ~save_attachment =
+  do_encrypt config (transform (`Postmark (Mailbox.Postmark.to_string message.postmark))) >>= fun postmark ->
+  do_encrypt_content config message.email save_attachment transform >>= fun (headers,content) ->
   save_message postmark headers content
 
 (* there must be a better way to do it TBD *)
@@ -289,7 +301,7 @@ let get_decrypt_attachment config get_attachment contid =
 let header_of_sexp_str str =
   let sexp = Sexp.of_string str in
   let headers = list_of_sexp (fun sexp -> pair_of_sexp string_of_sexp string_of_sexp sexp) sexp in
-  headers_str_of_list headers
+  headers_str_of_list headers (function | `Headers h -> h)
 
 let reassemble_email config ~headers ~content ~map ~get_attachment =
   let buffer = Buffer.create 100 in
