@@ -12,3 +12,6 @@
 * fixed index and labels parsing
 * added timer to search/fetch
 * fixed import count filter
+* added option to transform email mime parts
+* fixed postmark to_string
+* added parse_restore option to generate N unique messages from an archive
