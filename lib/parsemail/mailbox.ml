@@ -113,7 +113,7 @@ module Postmark = struct
   let to_string t =
     let open Unix in
     let tm = gmtime t.time in
-    Printf.sprintf "From %s %s %s %2d %02d:%02d:%02d %4d"
+    Printf.sprintf "From %s %s %s %02d %02d:%02d:%02d %4d"
       t.from
       (day_of_week tm.tm_wday)
       (mon tm.tm_mon)
