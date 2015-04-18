@@ -32,7 +32,8 @@ module Store = Irmin.Basic (Irmin_git.FS) (Irmin.Contents.String)
 module View = Irmin.View(Store)
 module MapStr = Map.Make(String)
 
-type hashes = {postmark:string;headers:string;content:string;attachments:string list} with sexp
+type hashes =
+  {message:string;postmark:string;headers:string;content:string;attachments:int} with sexp
 
 type irmin_accessors =
   (unit -> string Lwt.t) * (* postmark *)
@@ -206,8 +207,8 @@ module Key_ :
     val add_path : t -> string -> t
     val add_list : t -> string list -> t
     val create_account : string -> t
-    val mailbox_of_path : ?user:string -> string -> (string*t)
-    val mailbox_of_list : ?user:string -> string list -> (string*t)
+    val mailbox_of_path : string -> (string*t)
+    val mailbox_of_list : string list -> (string*t)
     val mailboxes_of_mailbox : t -> t 
     val key_to_string : t -> string
     val key_to_path : t -> string
@@ -241,9 +242,8 @@ module Key_ :
     let add_list key l =
       List.concat [key;l]
 
-    let mailbox_of_list ?user l =
-      let mailbox,key = List.fold_right
-      (fun i (mailbox,acc) -> 
+    let mailbox_of_list l =
+      List.fold_right (fun i (mailbox,acc) -> 
         if i <> "" then (
           if List.length acc <> 0 then
             mailbox,"mailboxes" :: (i :: acc)
@@ -251,16 +251,12 @@ module Key_ :
             i,"mailboxes" :: (i :: acc)
         ) else
           mailbox,acc
-      ) l ("",[]) in
-      if user <> None then
-        mailbox,"imaplet" :: ((option_value_exn user) :: key)
-      else
-        mailbox,key
+      ) l ("",[])
 
     (* if user is None then relative path, otherwise root, i.e. /imaplet/user *)
-    let mailbox_of_path ?user path =
+    let mailbox_of_path path =
       let key = Str.split (Str.regexp "/") path in
-      mailbox_of_list ?user key
+      mailbox_of_list key
       
     let mailboxes_of_mailbox key =
       add_path key "mailboxes"
@@ -370,7 +366,7 @@ module IrminIntf :
           ) actions;
         Buffer.contents buf
       in
-      View.update_path (store msg) key view
+      View.merge_path_exn (store msg) key view
 
     let read_view store key =
       Key_.assert_key key;
@@ -573,7 +569,7 @@ module UserAccount :
   end
 
   type mailbox_ = {user:string;mailbox:string;trans:IrminIntf_tr.transaction;
-  index:int list option ref;config: Server_config.imapConfig}
+  index:int list option ref;config: Server_config.imapConfig;mbox_key: Key_.t}
 
 (* consistency TBD *)
 module IrminMailbox :
@@ -582,8 +578,6 @@ module IrminMailbox :
     val create : Server_config.imapConfig -> string -> string  -> t Lwt.t
     val commit : t -> unit Lwt.t
     val exists : t -> [`No|`Folder|`Mailbox] Lwt.t
-    val exists_path : t -> string -> [`No|`Folder|`Mailbox] Lwt.t
-    val exists_key : t -> Key_.t -> [`No|`Folder|`Mailbox] Lwt.t
     val create_mailbox : t -> unit Lwt.t
     val delete_mailbox : t -> unit Lwt.t
     val move_mailbox : t -> string -> unit Lwt.t
@@ -610,34 +604,34 @@ module IrminMailbox :
     (* user * mailbox * is-folder * irmin key including the mailbox *)
     type t = mailbox_
 
-    let get_key = function
-    | `Metamailbox -> Key_.t_of_path "meta"
-    | `Index -> Key_.t_of_path "index"
-    | `Messages -> Key_.t_of_path "messages"
-    | `Storage contid -> Key_.t_of_path ("messages/storage/" ^ contid)
-    | `Hashes uid -> Key_.t_of_path ("messages/" ^ (string_of_int uid) ^ "/hashes")
-    | `Metamessage uid -> Key_.t_of_path ("messages/" ^ (string_of_int uid) ^ "/meta")
-    | `Uid uid -> Key_.t_of_path ("messages/" ^ (string_of_int uid))
+    let get_key mbox_key = function
+    | `Metamailbox -> Key_.add_path mbox_key "meta"
+    | `Index -> Key_.add_path mbox_key "index"
+    | `Messages -> Key_.add_path mbox_key "messages"
+    | `Storage (user,msg_hash,contid) -> Key_.t_of_path ("storage/" ^ msg_hash ^ "/" ^ contid) 
+    | `Hashes uid -> Key_.add_path mbox_key ("messages/" ^ (string_of_int uid) ^ "/hashes")
+    | `Metamessage uid -> Key_.add_path mbox_key ("messages/" ^ (string_of_int uid) ^ "/meta")
+    | `Uid uid -> Key_.add_path mbox_key ("messages/" ^ (string_of_int uid))
 
     (* commit should be called explicitly on each created mailbox to have the
      * changes commited to Irmin
      *)
     let create config user path =
-      let (mailbox,key) = Key_.mailbox_of_path ?user:(Some user) path in
-      IrminIntf_tr.begin_transaction config key >>= fun trans ->
-        return {user;mailbox;trans;index=ref None;config}
+      let (mailbox,mbox_key) = Key_.mailbox_of_path path in
+      IrminIntf_tr.begin_transaction config (Key_.create_account user) >>= fun trans ->
+        return {user;mailbox;trans;index=ref None;config;mbox_key}
 
     let commit mbox =
       IrminIntf_tr.end_transaction mbox.trans
 
     (* create mailbox metadata and index stores *)
     let create_mailbox mbox =
-      let key = get_key `Metamailbox in
+      let key = get_key mbox.mbox_key `Metamailbox in
       let metadata = empty_mailbox_metadata ~uidvalidity:(new_uidvalidity())()
         ~selectable:true in
       let sexp = sexp_of_mailbox_metadata metadata in
       IrminIntf_tr.update mbox.trans key (Sexp.to_string sexp) >>= fun () ->
-      let key = get_key `Index in
+      let key = get_key mbox.mbox_key `Index in
       let sexp = sexp_of_list (fun i -> Sexp.of_string i) [] in
       IrminIntf_tr.update mbox.trans key (Sexp.to_string sexp) 
 
@@ -646,19 +640,19 @@ module IrminMailbox :
 
     (* how to make this the transaction? TBD *)
     let move_mailbox mbox path =
-      let (_,key2) = Key_.mailbox_of_path ?user:(Some mbox.user) path in
+      let (_,key2) = Key_.mailbox_of_path path in
       IrminIntf_tr.move_view mbox.trans key2 >>
       IrminIntf_tr.remove_view mbox.trans
 
     let read_mailbox_metadata mbox =
-      IrminIntf_tr.read_exn mbox.trans (get_key `Metamailbox) >>= fun sexp_str ->
+      IrminIntf_tr.read_exn mbox.trans (get_key mbox.mbox_key `Metamailbox) >>= fun sexp_str ->
       let sexp = Sexp.of_string sexp_str in
       return (mailbox_metadata_of_sexp sexp)
 
     let update_mailbox_metadata mbox metadata =
       (*Printf.printf "updating mailbox metadata %d\n%!" metadata.uidnext;*)
       let sexp = sexp_of_mailbox_metadata metadata in
-      let key = get_key `Metamailbox in
+      let key = get_key mbox.mbox_key `Metamailbox in
       IrminIntf_tr.update mbox.trans key (Sexp.to_string sexp)
 
     let exists mbox =
@@ -670,7 +664,7 @@ module IrminMailbox :
 
     let exists_key mbox key =
       catch (fun () ->
-        let key = Key_.add_path key "meta" in
+        let key = Key_.add_list mbox.mbox_key (Key_.add_path key "meta") in
         IrminIntf_tr.read_exn mbox.trans key >>= fun metadata_sexp_str ->
         let metadata_sexp = Sexp.of_string metadata_sexp_str in
         let metadata = mailbox_metadata_of_sexp metadata_sexp in
@@ -678,17 +672,13 @@ module IrminMailbox :
       )
       (fun _ -> return `No)
 
-    let exists_path mbox path =
-      let (_,key) = Key_.mailbox_of_path path in
-      exists_key mbox key
-
     let find_flag l fl =
       list_find l (fun f -> f = fl)
 
     let read_index_uid mbox =
       match mbox.!index with
       | None ->
-        IrminIntf_tr.read_exn mbox.trans (get_key `Index) >>= fun index_sexp_str ->
+        IrminIntf_tr.read_exn mbox.trans (get_key mbox.mbox_key `Index) >>= fun index_sexp_str ->
         let uids = list_of_sexp 
           (fun i -> int_of_string (Sexp.to_string i))
           (Sexp.of_string index_sexp_str) in
@@ -698,7 +688,7 @@ module IrminMailbox :
 
     let update_index_uids mbox uids = 
       mbox.index := Some uids;
-      IrminIntf_tr.update mbox.trans (get_key `Index) 
+      IrminIntf_tr.update mbox.trans (get_key mbox.mbox_key `Index) 
         (Sexp.to_string (sexp_of_list (fun i -> Sexp.of_string (string_of_int i)) uids ))
 
     let update_index_uid mbox uid =
@@ -717,41 +707,38 @@ module IrminMailbox :
       | None -> return None
       | Some (i,_) -> return (Some ((List.length uids) - i))
 
-    let get_hashes trans uid =
-      IrminIntf_tr.read_exn trans (get_key (`Hashes uid)) >>= fun h ->
+    let get_hashes mbox uid =
+      IrminIntf_tr.read_exn mbox.trans (get_key mbox.mbox_key (`Hashes uid)) >>= fun h ->
       return (hashes_of_sexp (Sexp.of_string h))
 
-    let update_hashes trans uid postmark headers content attachments =
+    let update_hashes mbox uid msg_hash postmark headers content attachments =
       let h = {
-        postmark = Imap_crypto.get_hash postmark;
-        headers = Imap_crypto.get_hash headers;
-        content = Imap_crypto.get_hash content;
+        message=msg_hash;
+        postmark = "0";
+        headers = "1";
+        content = "2";
         attachments;
       } in
-      IrminIntf_tr.update trans (get_key (`Hashes uid)) 
+      IrminIntf_tr.update mbox.trans (get_key mbox.mbox_key (`Hashes uid)) 
         (Sexp.to_string (sexp_of_hashes h)) >>
       return h
 
     let append_message_raw mbox ~parse message_metadata =
-      let update_with_test trans contid data =
-        let key = get_key (`Storage contid) in
-        IrminIntf_tr.mem trans key >>= fun res ->
-        if res then 
-          return ()
-        else
-          IrminIntf_tr.update trans key data
+      let update msg_hash contid data =
+        let key = get_key mbox.mbox_key (`Storage (mbox.user,msg_hash,contid)) in
+        IrminIntf_tr.update mbox.trans key data
       in
       let uid = message_metadata.uid in
-      parse ~save_message:(fun postmark headers content attachments ->
-        IrminIntf_tr.update mbox.trans (get_key (`Metamessage uid)) 
+      IrminIntf_tr.update mbox.trans (get_key mbox.mbox_key (`Metamessage uid)) 
           (Sexp.to_string (sexp_of_mailbox_message_metadata message_metadata)) >>
-        update_hashes mbox.trans uid postmark headers content attachments >>= fun h ->
-        update_with_test mbox.trans h.postmark postmark >>
-        update_with_test mbox.trans h.content content >>
-        update_with_test mbox.trans h.headers headers
+      parse ~save_message:(fun msg_hash postmark headers content attachments ->
+        update_hashes mbox uid msg_hash postmark headers content attachments >>= fun h ->
+        update h.message h.postmark postmark >>
+        update h.message h.content content >>
+        update h.message h.headers headers
       ) 
-      ~save_attachment:(fun contid attachment ->
-        update_with_test mbox.trans contid attachment
+      ~save_attachment:(fun msg_hash contid attachment ->
+        update msg_hash contid attachment
       ) >>
       update_index_uid mbox uid
 
@@ -783,50 +770,47 @@ module IrminMailbox :
       | `Eof -> return `Eof
       | `NotFound -> return `NotFound
       | `Ok (_,uid) ->
-        IrminIntf_tr.update mbox.trans (get_key (`Metamessage uid))
+        IrminIntf_tr.update mbox.trans (get_key mbox.mbox_key (`Metamessage uid))
           (Sexp.to_string (sexp_of_mailbox_message_metadata metadata)) >>= fun () ->
         return `Ok
 
-    let get_attachment trans contid =
-      IrminIntf_tr.read_exn trans (get_key (`Storage contid))
-
-    let get_message_only_raw mbox uid =
-      IrminIntf_tr.read_exn mbox.trans (get_key (`Hashes uid)) >>= fun h ->
-      let h = hashes_of_sexp (Sexp.of_string h) in
-      IrminIntf_tr.read_exn mbox.trans (get_key (`Storage h.headers)) >>= fun headers ->
-      IrminIntf_tr.read_exn mbox.trans (get_key (`Storage h.content)) >>= fun email ->
-      IrminIntf_tr.read_exn mbox.trans (get_key (`Storage h.postmark)) >>= fun postmark ->
-      return (postmark, headers, email, h.attachments)
+    let read_storage mbox msg_hash contid =
+      let key = get_key mbox.mbox_key (`Storage (mbox.user,msg_hash,contid)) in
+      IrminIntf_tr.read_exn mbox.trans key
 
     let get_message_metadata mbox uid =
-      IrminIntf_tr.read_exn mbox.trans (get_key (`Metamessage uid)) >>= fun sexp_str ->
+      IrminIntf_tr.read_exn mbox.trans (get_key mbox.mbox_key (`Metamessage uid)) >>= fun sexp_str ->
       return (mailbox_message_metadata_of_sexp (Sexp.of_string sexp_str))
+
+    let read_lazy_storage mbox lazy_hashes contid =
+      Lazy.force lazy_hashes >>= fun h ->
+      read_storage mbox h.message contid
 
     let read_message mbox ?filter position =
       get_uid mbox position >>= function
       | `Eof -> return `Eof
       | `NotFound -> return `NotFound
       | `Ok (seq,uid) -> 
-        let lazy_hashes = Lazy.from_fun (fun () -> get_hashes mbox.trans uid) in
+        let lazy_hashes = Lazy.from_fun (fun () -> get_hashes mbox uid) in
         return (`Ok (
           build_lazy_message_inst
             (module LazyIrminMessage)
             ((fun () ->
               Lazy.force lazy_hashes >>= fun h ->
-              IrminIntf_tr.read_exn mbox.trans (get_key (`Storage h.postmark)) >>= fun postmark ->
+              read_storage mbox h.message h.postmark >>= fun postmark ->
               Email_parse.do_decrypt mbox.config postmark 
             ),
             (fun () ->
               Lazy.force lazy_hashes >>= fun h ->
-              IrminIntf_tr.read_exn mbox.trans (get_key (`Storage h.headers)) >>= fun headers ->
+              read_storage mbox h.message h.headers >>= fun headers ->
               Email_parse.do_decrypt_headers mbox.config headers 
             ),
             (fun () ->
               Lazy.force lazy_hashes >>= fun h ->
-              IrminIntf_tr.read_exn mbox.trans (get_key (`Storage h.content)) >>= fun content ->
+              read_storage mbox h.message h.content >>= fun content ->
               Email_parse.do_decrypt_content mbox.config content 
             ),
-            (Email_parse.get_decrypt_attachment mbox.config (get_attachment mbox.trans)),
+            (Email_parse.get_decrypt_attachment mbox.config (read_lazy_storage mbox lazy_hashes)),
             (fun () ->
               get_message_metadata mbox uid
             ))
@@ -841,51 +825,40 @@ module IrminMailbox :
         get_message_metadata mbox uid >>= fun meta ->
         return (`Ok meta)
 
-
-    (*
-    let get_min_max_uid uids =
-      if List.length uids = 0 then
-        (0,0)
-      else
-        (List.nth uids 0),(List.last uids)
-
-    let get_min_max_seq mailbox_metadata =
-      (1, mailbox_metadata.count)
-
-    let get_min_max mailbox_metadata uids buid =
-      if buid then
-        get_min_max_uid uids
-      else
-        get_min_max_seq mailbox_metadata
-    *)
-
     let copy_mailbox mbox1 pos mbox2 message_metadata =
       get_uid mbox1 pos >>= function
       | `Eof -> return ()
       | `NotFound -> return ()
       | `Ok (seq,uid) ->
-        append_message_raw mbox2 ~parse:(fun ~save_message ~save_attachment -> 
-          get_message_only_raw mbox1 uid >>= fun (postmark,headers,content,attachments) ->
-          (save_message postmark headers content attachments) >>
-          Lwt_list.iter_s (fun contid ->
-            get_attachment mbox1.trans contid >>= fun attachment ->
-            save_attachment contid attachment
-          ) attachments
-        ) message_metadata 
+        get_hashes mbox1 uid >>= fun h ->
+        IrminIntf_tr.update mbox2.trans (get_key mbox2.mbox_key (`Hashes message_metadata.uid)) 
+          (Sexp.to_string (sexp_of_hashes h)) >>
+        IrminIntf_tr.update mbox2.trans (get_key mbox2.mbox_key (`Metamessage message_metadata.uid)) 
+          (Sexp.to_string (sexp_of_mailbox_message_metadata message_metadata)) >>
+        update_index_uid mbox2 message_metadata.uid
+
+    let remove_storage mbox msg_hash contid =
+      let key = get_key mbox.mbox_key (`Storage (mbox.user,msg_hash,contid)) in
+      IrminIntf_tr.remove mbox.trans key
 
     let delete_message mbox position =
       get_uid mbox position >>= function
       | `Ok (_,uid) -> 
-        get_hashes mbox.trans uid >>= fun h ->
-        IrminIntf_tr.remove mbox.trans (get_key (`Hashes uid)) >>
-        IrminIntf_tr.remove mbox.trans (get_key (`Storage h.postmark)) >>
-        IrminIntf_tr.remove mbox.trans (get_key (`Storage h.headers)) >>
-        IrminIntf_tr.remove mbox.trans (get_key (`Storage h.content)) >>
-        IrminIntf_tr.remove mbox.trans (get_key (`Metamessage uid)) >>
-        IrminIntf_tr.remove mbox.trans (get_key (`Uid uid)) >>
-        Lwt_list.iter_s (fun contid ->
-          IrminIntf_tr.remove mbox.trans (get_key (`Storage contid))
-        ) h.attachments >>
+        get_hashes mbox uid >>= fun h ->
+        IrminIntf_tr.remove mbox.trans (get_key mbox.mbox_key (`Hashes uid)) >>
+        remove_storage mbox h.message h.postmark >>
+        remove_storage mbox h.message h.headers >>
+        remove_storage mbox h.message h.content >>
+        IrminIntf_tr.remove mbox.trans (get_key mbox.mbox_key (`Metamessage uid)) >>
+        IrminIntf_tr.remove mbox.trans (get_key mbox.mbox_key (`Uid uid)) >>
+        let rec delattach i =
+          if i < h.attachments then
+            remove_storage mbox h.message (string_of_int (3 + i)) >>
+            delattach (i + 1)
+          else
+            return ()
+        in
+        delattach 0 >>
         read_index_uid mbox >>= fun uids ->
         let uids = List.fold_right (fun u uids ->
           if u = uid then
@@ -897,7 +870,7 @@ module IrminMailbox :
       |_ -> return ()
 
     let list_mailbox mbox key =
-      IrminIntf_tr.list mbox.trans (Key_.mailboxes_of_mailbox key)
+      IrminIntf_tr.list mbox.trans (Key_.add_list mbox.mbox_key (Key_.mailboxes_of_mailbox key))
 
     let is_folder mbox key =
       exists_key mbox key >>= function

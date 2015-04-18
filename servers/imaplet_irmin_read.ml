@@ -109,7 +109,8 @@ let rec selected user mailbox mbox =
   | "quit" -> raise Quit
   | "append" -> append user mailbox >>= fun () -> selected user mailbox mbox
   | "all" -> IrminMailbox.show_all mbox >>= fun () -> selected user mailbox mbox
-  | "tree" -> let (_,key) = Key_.mailbox_of_path ~user mailbox in
+  | "tree" -> let (_,key) = Key_.mailbox_of_path mailbox in
+    let key = "imaplet" :: (user :: key) in
     tree key "" >>= fun () -> selected user mailbox mbox
   | "exists" -> IrminMailbox.exists mbox >>= fun res ->
     (

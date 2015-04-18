@@ -131,7 +131,7 @@ let email_raw_content email =
   | Some rc -> Octet_stream.to_string rc
   | None -> ""
 
-let email_content config attachment email transform =
+let email_content config attachment get_contid email transform =
   match (Email.raw_content email) with
   | Some rc -> 
     let content = Octet_stream.to_string rc in
@@ -146,10 +146,19 @@ let email_content config attachment email transform =
     if config.encrypt = true && attachment then (
       pub_key config >>= fun pub ->
       let (contid,content) = conv_encrypt ~compress:config.compress content pub in
+      let contid =
+      match get_contid with
+      |None -> contid
+      |Some contid -> contid
+      in
       return (contid,content,size,lines)
     ) else (
-      let hash = get_hash content in
-      return (hash,content,size,lines)
+      let contid = 
+      match get_contid with
+      | None -> get_hash content
+      | Some contid -> contid
+      in
+      return (contid,content,size,lines)
     )
   | None -> return ("","",0,0) 
 
@@ -176,7 +185,7 @@ let get_header_descr headers headers_buff transform =
   Buffer.add_string headers_buff headers_sexp_str;
   (part,descr)
 
-let do_encrypt_content config email save_attachment transform =
+let do_encrypt_content config email save_attachment hash transform =
   let content_buff = Buffer.create 100 in
   let headers_buff = Buffer.create 100 in
   let rec walk email multipart last_crlf totsize totlines attachments =
@@ -203,9 +212,15 @@ let do_encrypt_content config email save_attachment transform =
             content = `Message_map content;
           },totsize+part.size,totlines+part.lines,attachments)
       ) else (
-        email_content config attach email transform >>= fun (contid,content,size,lines) -> 
+        (* don't need to key attachments or other parts by the content hash
+         * all parts have the root key - message hash, then the subkeys are
+         * the count, 0 - postmark, 1 - headers, 2 - content, 3+ - attachments
+         * just need to keep the number of attachments
+         *)
+        let get_contid = Some (string_of_int (3 + attachments)) in
+        email_content config attach get_contid email transform >>= fun (contid,content,size,lines) -> 
         if attach then ( (* consider adding Content-type: message/external-body...  *)
-          save_attachment contid content >>= fun () ->
+          save_attachment hash contid content >>= fun () ->
           (* +1 for crlf - header crlf content *)
           let part = 
           if multipart then 
@@ -218,7 +233,7 @@ let do_encrypt_content config email save_attachment transform =
               part;
               header=header_descr;
               content=`Attach_map contid 
-            },totsize+part.size,totlines+part.lines,contid::attachments)
+            },totsize+part.size,totlines+part.lines,1 + attachments)
         ) else (
           let offset = Buffer.length content_buff in
           let length = Bytes.length content in
@@ -261,7 +276,7 @@ let do_encrypt_content config email save_attachment transform =
           content = `Multipart_map (boundary,(List.rev map))
         },totsize+part.size,totlines+part.lines,attachments)
   in
-  walk email false 1 0 0 [] >>= fun (map,_,_,attachments) ->
+  walk email false 1 0 0 0 >>= fun (map,_,_,attachments) ->
   let map_sexp_str = Sexp.to_string (sexp_of_email_map map) in
   let content = Buffer.contents content_buff in
   let headers = Printf.sprintf "%07d%s%s" 
@@ -277,9 +292,10 @@ let default_transform = function
   | `Attachment a -> a
 
 let parse ?(transform=default_transform) config (message:Mailbox.Message.t) ~save_message ~save_attachment =
+  let hash = Imap_crypto.get_hash (Mailbox.Message.to_string message) in
   do_encrypt config (transform (`Postmark (Mailbox.Postmark.to_string message.postmark))) >>= fun postmark ->
-  do_encrypt_content config message.email save_attachment transform >>= fun (headers,content, attachments) ->
-  save_message postmark headers content attachments
+  do_encrypt_content config message.email save_attachment hash transform >>= fun (headers,content, attachments) ->
+  save_message hash postmark headers content attachments
 
 (* there must be a better way to do it TBD *)
 let rec printable buffer str =
