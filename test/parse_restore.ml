@@ -167,7 +167,7 @@ let () =
         Printf.fprintf stderr "---------------------------------------- new message %d\n%!" cnt;
         (*walk message.email None;*)
         let tr = (if unique = None then default_transform else transform cnt) in
-        parse ~transform:tr config message ~save_message:(fun postmark headers content ->
+        parse ~transform:tr config message ~save_message:(fun postmark headers content attachments ->
           map := MapStr.add (key "postmark" cnt) postmark !map;
           map := MapStr.add (key "headers" cnt) headers !map;
           map := MapStr.add (key "content" cnt) content !map;

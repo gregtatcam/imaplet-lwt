@@ -128,7 +128,7 @@ let init_connection msgt w =
 let starttls config sock () =
   Ssl_.init_ssl config >>= fun cert ->
   Tls_lwt.Unix.server_of_fd
-    (Tls.Config.server ~certificate:cert ())
+    (Tls.Config.server ~certificates:cert ())
     (Utils.option_value_exn sock) >>= fun srv ->
   return (Tls_lwt.of_t srv)
 

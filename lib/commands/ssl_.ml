@@ -20,7 +20,9 @@ let create_cert config =
   X509_lwt.private_of_pems
   ~cert:(Install.data_path ^ "/" ^ config.pem_name)
   ~priv_key:(Install.data_path ^ "/" ^ config.key_name)
+  
 
 let init_ssl config =  
   Tls_lwt.rng_init () >>
-  create_cert config 
+  create_cert config >>= fun cert ->
+  return (`Single cert)

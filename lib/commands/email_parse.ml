@@ -179,7 +179,7 @@ let get_header_descr headers headers_buff transform =
 let do_encrypt_content config email save_attachment transform =
   let content_buff = Buffer.create 100 in
   let headers_buff = Buffer.create 100 in
-  let rec walk email multipart last_crlf totsize totlines =
+  let rec walk email multipart last_crlf totsize totlines attachments =
     let headers = Header.to_list (Email.header email) in
     let (header_part,header_descr) = get_header_descr headers headers_buff transform in
     let boundary,attach,rfc822 = get_hdr_attrs headers in
@@ -189,7 +189,7 @@ let do_encrypt_content config email save_attachment transform =
        * expected rfc822 in multipart to have `Message type, so here is a hack *)
       if multipart && rfc822 then (
         let email = Email.of_string (email_raw_content email) in
-        walk email multipart 2 0 0 >>= fun (content,size,lines) ->
+        walk email multipart 2 0 0 attachments >>= fun (content,size,lines,attachments) ->
         let part = 
           if multipart then 
             {size=size;lines=lines}
@@ -201,7 +201,7 @@ let do_encrypt_content config email save_attachment transform =
             part;
             header=header_descr; 
             content = `Message_map content;
-          },totsize+part.size,totlines+part.lines)
+          },totsize+part.size,totlines+part.lines,attachments)
       ) else (
         email_content config attach email transform >>= fun (contid,content,size,lines) -> 
         if attach then ( (* consider adding Content-type: message/external-body...  *)
@@ -218,7 +218,7 @@ let do_encrypt_content config email save_attachment transform =
               part;
               header=header_descr;
               content=`Attach_map contid 
-            },totsize+part.size,totlines+part.lines)
+            },totsize+part.size,totlines+part.lines,contid::attachments)
         ) else (
           let offset = Buffer.length content_buff in
           let length = Bytes.length content in
@@ -234,18 +234,18 @@ let do_encrypt_content config email save_attachment transform =
               part;
               header=header_descr;
               content = `Data_map {offset;length};
-            },totsize+part.size,totlines+part.lines)
+            },totsize+part.size,totlines+part.lines,attachments)
         )
       )
     | `Message _ -> assert (false); (* email_parser doesn't make it??? *)
     | `Multipart elist ->
       assert (boundary <> "");
-      Lwt_list.fold_left_s (fun (map,size,lines) email ->
+      Lwt_list.fold_left_s (fun (map,size,lines,attachments) email ->
         let size_ = size + (Bytes.length boundary) + 1 in
         let lines_ = lines + 1 in
-        walk email true 2 0 0 >>= fun (email_map,size,lines) ->
-        return (email_map :: map,size_+size,lines_+lines)
-      ) ([],1,1) elist >>= fun (map,size,lines) -> (* 1 because first boundary starts with crlf *)
+        walk email true 2 0 0 attachments >>= fun (email_map,size,lines,attachments) ->
+        return (email_map :: map,size_+size,lines_+lines,attachments)
+      ) ([],1,1,attachments) elist >>= fun (map,size,lines,attachments) -> (* 1 because first boundary starts with crlf *)
       let size = size + (Bytes.length boundary) + last_crlf in (* boundary ends
       with 2 crlf, last outermost with 1 *)
       let lines = lines + 2 in
@@ -259,16 +259,16 @@ let do_encrypt_content config email save_attachment transform =
           part;
           header=header_descr;
           content = `Multipart_map (boundary,(List.rev map))
-        },totsize+part.size,totlines+part.lines)
+        },totsize+part.size,totlines+part.lines,attachments)
   in
-  walk email false 1 0 0 >>= fun (map,_,_) ->
+  walk email false 1 0 0 [] >>= fun (map,_,_,attachments) ->
   let map_sexp_str = Sexp.to_string (sexp_of_email_map map) in
   let content = Buffer.contents content_buff in
   let headers = Printf.sprintf "%07d%s%s" 
     (Bytes.length map_sexp_str) map_sexp_str (Buffer.contents headers_buff) in
   do_encrypt config headers >>= fun headers ->
   do_encrypt config content >>= fun content ->
-  return (headers,content)
+  return (headers,content,attachments)
 
 let default_transform = function
   | `Postmark p -> p
@@ -278,8 +278,8 @@ let default_transform = function
 
 let parse ?(transform=default_transform) config (message:Mailbox.Message.t) ~save_message ~save_attachment =
   do_encrypt config (transform (`Postmark (Mailbox.Postmark.to_string message.postmark))) >>= fun postmark ->
-  do_encrypt_content config message.email save_attachment transform >>= fun (headers,content) ->
-  save_message postmark headers content
+  do_encrypt_content config message.email save_attachment transform >>= fun (headers,content, attachments) ->
+  save_message postmark headers content attachments
 
 (* there must be a better way to do it TBD *)
 let rec printable buffer str =
