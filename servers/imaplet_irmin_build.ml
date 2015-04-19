@@ -229,22 +229,31 @@ let parse_message content =
   ) ~init:None
 
 let rec get_message ic buffer folders =
+  let parse_content content folders f =
+    match parse_message content with
+    | None -> f ()
+    | Some (mailbox,size,flags,message) ->
+      if filter_folder folders mailbox then (
+        f ()
+      ) else (
+        return (Some (mailbox,size,flags,message))
+      )
+  in
   Lwt_io.read_line_opt ic >>= function
-  | None -> return None
+  | None -> 
+    if Buffer.length buffer > 0 then
+      let content = Buffer.contents buffer in
+      Buffer.clear buffer;
+      parse_content content folders (fun () -> return None)
+    else
+      return None
   | Some line ->
     let line = line ^ "\n" in
     if is_postmark line then (
       let content = Buffer.contents buffer in
       Buffer.clear buffer;
       Buffer.add_string buffer line;
-      match parse_message content with
-      | None -> get_message ic buffer folders
-      | Some (mailbox,size,flags,message) ->
-        if filter_folder folders mailbox then (
-          get_message ic buffer folders
-        ) else (
-          return (Some (mailbox,size,flags,message))
-        )
+      parse_content content folders (fun () -> get_message ic buffer folders)
     ) else (
       Buffer.add_string buffer line;
       get_message ic buffer folders
