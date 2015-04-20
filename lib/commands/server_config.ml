@@ -42,7 +42,7 @@ let default_config = {
   rebuild_irmin = false;
   inbox_path = "";(*"/var/mail";*)
   mail_path = "";(*"/Users/@/mail";*)
-  irmin_path = "/tmp/irmin/test";
+  irmin_path = "/var/mail/accounts/%user%";
   irmin_expand = false;
   max_msg_size = 0;
   imap_name = "imaplet";
@@ -72,7 +72,8 @@ let validate_config config =
   in
   match config.data_store with
   | `Irmin -> 
-    Utils.exists config.irmin_path Unix.S_DIR >>= fun res ->
+      let path = Regex.replace ~regx:"%user%[.]*$" ~tmpl:"" config.irmin_path in
+    Utils.exists path Unix.S_DIR >>= fun res ->
     err res "Invalid Irminsule path in"
   | `Mailbox ->
     Utils.exists config.inbox_path Unix.S_REG >>= fun res ->
