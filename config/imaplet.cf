@@ -7,7 +7,7 @@ max_msg_size 10000000
 imap_name imaplet
 
 # irminsule location
-irmin_path /tmp/irmin/test
+irmin_path /var/mail/accounts/%user%
 
 # expand the contents of the database to the filesystem, default false
 irmin_expand false

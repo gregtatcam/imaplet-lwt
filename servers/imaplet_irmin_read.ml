@@ -49,8 +49,8 @@ let prompt str =
   uinput := (Str.split (Str.regexp " ") msg);
   return (arg 0)
 
-let rec tree key indent =
-  IrminIntf.create srv_config >>= fun store ->
+let rec tree user key indent =
+  IrminIntf.create ~user srv_config >>= fun store ->
   IrminIntf.list store key >>= fun l ->
   Lwt_list.iter_s (fun i -> 
     Printf.printf "%s%s%!" indent (Key_.key_to_string (Key_.t_of_list i));
@@ -61,7 +61,7 @@ let rec tree key indent =
       return ()
     ) else (
       Printf.printf "\n%!";
-      tree (Key_.t_of_list i) (indent ^ "  ")
+      tree user (Key_.t_of_list i) (indent ^ "  ")
     )
   ) l
 
@@ -111,7 +111,7 @@ let rec selected user mailbox mbox =
   | "all" -> IrminMailbox.show_all mbox >>= fun () -> selected user mailbox mbox
   | "tree" -> let (_,key) = Key_.mailbox_of_path mailbox in
     let key = "imaplet" :: (user :: key) in
-    tree key "" >>= fun () -> selected user mailbox mbox
+    tree user key "" >>= fun () -> selected user mailbox mbox
   | "exists" -> IrminMailbox.exists mbox >>= fun res ->
     (
      match res with
@@ -202,7 +202,7 @@ let main () =
       UserAccount.create_account ac >> request user
     | "tree" -> 
       let key = Key_.create_account user in
-      tree key "" >> request user
+      tree user key "" >> request user
     | "select" -> 
       let mailbox = Str.replace_first (Str.regexp "+") " " (arg 1) in
       IrminMailbox.create srv_config user mailbox >>= fun mbox ->

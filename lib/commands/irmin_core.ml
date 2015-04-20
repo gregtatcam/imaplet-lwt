@@ -307,10 +307,15 @@ module Key_ :
 
   end
 
+let get_irmin_path user config =
+  match user with
+  | None -> config.irmin_path
+  | Some user -> Regex.replace ~regx:"%user%" ~tmpl:user config.irmin_path
+
 module IrminIntf :
   sig
     type store
-    val create : Server_config.imapConfig -> store Lwt.t
+    val create : ?user:string -> Server_config.imapConfig -> store Lwt.t
     val remove : store -> Key_.t -> unit Lwt.t
     val read_exn : store -> Key_.t -> string Lwt.t
     val mem : store -> Key_.t -> bool Lwt.t
@@ -328,8 +333,9 @@ module IrminIntf :
       let owner = "imaplet <imaplet@openmirage.org>" in
       Irmin.Task.create ~date ~owner msg
 
-    let create config =
-      let config = Irmin_git.config ~root:config.irmin_path 
+    let create ?user config =
+      let config = Irmin_git.config 
+        ~root:(get_irmin_path user config)
         ~bare:(config.irmin_expand=false) () in
       Store.create config task 
 
@@ -381,7 +387,7 @@ module IrminIntf_tr :
     type transaction
     val remove_view : transaction -> unit Lwt.t
     val move_view : transaction -> Key_.t -> unit Lwt.t
-    val begin_transaction : Server_config.imapConfig -> Key_.t -> transaction Lwt.t
+    val begin_transaction : ?user:string -> Server_config.imapConfig -> Key_.t -> transaction Lwt.t
     val end_transaction : transaction -> unit Lwt.t
     val update : transaction -> Key_.t -> string -> unit Lwt.t
     val read : transaction -> Key_.t -> string option Lwt.t
@@ -393,9 +399,9 @@ module IrminIntf_tr :
   struct
     type transaction = IrminIntf.store * View.t * Key_.t * bool ref
 
-    let begin_transaction config key =
+    let begin_transaction ?user config key =
       Key_.assert_key key;
-      IrminIntf.create config >>= fun store ->
+      IrminIntf.create ?user config >>= fun store ->
       (*Printf.printf "------ creating view %s\n%!" (Key_.key_to_string key);*)
       IrminIntf.read_view store key >>= fun view ->
       return (store,view,key,ref false)
@@ -482,7 +488,7 @@ module Subscriptions :
     (* create type *)
     let create config user =
       let key = Key_.create_account user in
-      IrminIntf_tr.begin_transaction config key
+      IrminIntf_tr.begin_transaction ?user:(Some user) config key
 
     (* convert the list to a string of sexp *)
     let str_sexp_of_list l =
@@ -535,16 +541,16 @@ module UserAccount :
     val delete_account : t -> unit Lwt.t
   end = 
   struct
-    type t = imapConfig * Key_.t
+    type t = string * imapConfig * Key_.t
 
     (* create type *)
     let create config user = 
-      (config,Key_.create_account user)
+      (user,config,Key_.create_account user)
 
     (* create new account *)
     let create_account key =
-      let (config,key) = key in
-      IrminIntf_tr.begin_transaction config key >>= fun view ->
+      let (user,config,key) = key in
+      IrminIntf_tr.begin_transaction ~user config key >>= fun view ->
       IrminIntf_tr.mem view Subscriptions.key_subscr >>= fun res ->
       if res then
         return `Exists
@@ -556,8 +562,8 @@ module UserAccount :
 
     (* remove account *)
     let delete_account key =
-      let (config,key) = key in
-      IrminIntf.create config >>= fun store ->
+      let (user,config,key) = key in
+      IrminIntf.create ~user config >>= fun store ->
       IrminIntf.remove store key
       (*
       IrminIntf.begin_transaction key >>= fun view ->
@@ -618,7 +624,7 @@ module IrminMailbox :
      *)
     let create config user path =
       let (mailbox,mbox_key) = Key_.mailbox_of_path path in
-      IrminIntf_tr.begin_transaction config (Key_.create_account user) >>= fun trans ->
+      IrminIntf_tr.begin_transaction ~user config (Key_.create_account user) >>= fun trans ->
         return {user;mailbox;trans;index=ref None;config;mbox_key}
 
     let commit mbox =
@@ -918,14 +924,14 @@ module IrminMailbox :
       list_ mbox key subscriptions access init f >>= fun (acc,_) ->
       return acc
 
-    let list_messages config k =
+    let list_messages mbox k =
       let list_subtr store k =
         IrminIntf.list store k >>= fun l ->
         return (List.fold_left (fun acc i ->
           acc ^ ":" ^ (List.nth i ((List.length i) - 1))
         ) "" l)
       in
-      IrminIntf.create config >>= fun store ->
+      IrminIntf.create ~user:mbox.user mbox.config >>= fun store ->
       IrminIntf.list store k >>= fun l ->
       Lwt_list.fold_left_s (fun acc i ->
         let k = Key_.t_of_list ((List.concat [k;i])) in
@@ -937,7 +943,7 @@ module IrminMailbox :
       Printf.printf "---------- mailbox messages\n%!";
       let (_,key) = Key_.mailbox_of_path mbox.mailbox in
       let key = Key_.add_path key "messages" in
-      list_messages mbox.config key >>= fun l ->
+      list_messages mbox key >>= fun l ->
       List.iter (fun i -> Printf.printf "%s %!" i) l; Printf.printf "\n%!";
       Printf.printf "---------- mailbox index\n%!";
       read_index_uid mbox >>= fun uids ->
