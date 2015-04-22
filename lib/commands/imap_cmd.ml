@@ -106,13 +106,13 @@ let handle_done context =
 **)
 let handle_authenticate context auth_type text =
   Account.authenticate auth_type text >>= function
-    | `Ok (m,u) -> response context (Some State_Authenticated) m (Some
+    | `Ok (m,u,p) -> response context (Some State_Authenticated) m (Some
     (Amailbox.create context.config u))
     | `Error e -> response context None e None
 
 let handle_login context user password =
   Account.login user password >>= function
-    | `Ok (m,u) -> response context (Some State_Authenticated) m (Some
+    | `Ok (m,u,p) -> response context (Some State_Authenticated) m (Some
     (Amailbox.create context.config u))
     | `Error e -> response context None e None
 

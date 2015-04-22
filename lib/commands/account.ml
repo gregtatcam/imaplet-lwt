@@ -78,7 +78,7 @@ let auth_user user password resp_ok resp_no =
   authenticate_user user password >>= fun res ->
   if res then
     return (`Ok (Resp_Ok
-    (None,Utils.formated_capability(Configuration.auth_capability)), user))
+    (None,Utils.formated_capability(Configuration.auth_capability)), user, password))
   else
     return (`Error (Resp_No (None,resp_no)))
 

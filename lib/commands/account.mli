@@ -15,7 +15,7 @@
  *)
 
 val authenticate : Imaplet_types.authtype -> string ->
-  [`Ok of Imaplet_types.response * string | `Error of Imaplet_types.response] Lwt.t
+  [`Ok of Imaplet_types.response * string * string | `Error of Imaplet_types.response] Lwt.t
 
 val login : string -> string ->
-  [`Ok of Imaplet_types.response * string | `Error of Imaplet_types.response] Lwt.t
+  [`Ok of Imaplet_types.response * string * string | `Error of Imaplet_types.response] Lwt.t
