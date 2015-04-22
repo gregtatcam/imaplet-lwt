@@ -54,7 +54,7 @@ let rec args i mbox index labels outdir =
 
 let usage () =
   Printf.fprintf stderr "usage: get_messages -archive filename -index
-  start[:stop] -folders [folder1,folder2] -split [outdir]\n%!"
+  start[:stop] -labels [label1,...,labeln] -split [outdir]\n%!"
 
 let commands f =
   try 
