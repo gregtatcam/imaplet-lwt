@@ -23,6 +23,18 @@ let pad c_data padding =
   else
     (0,c_data)
 
+let add_pad data =
+  let len = Bytes.length data in
+  let m = 32 - (Pervasives.(mod) len 32) in
+  let m = if m > 0 then m else 32 in
+  let pad = Bytes.init m (fun _ -> char_of_int m) in
+  Bytes.cat data pad
+
+let remove_pad data =
+  let len = Bytes.length data in
+  let sz = len - (int_of_char (Bytes.get data (len - 1))) in
+  Bytes.sub data 0 sz
+
 let refill input =
   let n = String.length input in
   let toread = ref n in
@@ -44,6 +56,22 @@ let do_uncompress input =
   let output = Buffer.create (String.length input) in
   Zlib.uncompress (refill input) (flush output);
   Buffer.contents output
+
+let aes_encrypt_pswd ~pswd data =
+  let open Nocrypto.Cipher_block in
+  let key = Cstruct.of_string pswd in
+  let iv = key in
+  let key = AES.CBC.of_secret key in
+  let encr = AES.CBC.encrypt ~key ~iv (Cstruct.of_string (add_pad data)) in
+  Cstruct.to_string encr.message
+
+let aes_decrypt_pswd ~pswd data =
+  let open Nocrypto.Cipher_block in
+  let key = Cstruct.of_string pswd in
+  let iv = key in
+  let key = AES.CBC.of_secret key in
+  let decr = AES.CBC.decrypt ~key ~iv (Cstruct.of_string (remove_pad data)) in
+  Cstruct.to_string decr.message
 
 let aes_encrypt ?(compress=false) data pub secrets =
   let open Nocrypto.Cipher_block in
