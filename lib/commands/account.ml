@@ -36,7 +36,17 @@ let parse_users buff user password =
    let u = Str.matched_group 1 buff in
    let p = Str.matched_group 3 buff in
    let t = Str.matched_group 2 buff in
-   if u = user && p = password && t = "PLAIN" then
+   let p =
+     if t = "PLAIN" then
+       p = password
+     else if t = "SHA1" then
+       p = (Imap_crypto.get_hash ~hash:`Sha1 password)
+     else if t = "SHA256" then
+       p = (Imap_crypto.get_hash ~hash:`Sha256 password)
+     else
+       false
+   in
+   if u = user && p then
     true
    else
     false
@@ -59,13 +69,21 @@ let parse_user_b64 b64 =
   with _ ->
     None
 
+let match_user line user =
+  try
+    Str.search_forward (Str.regexp_case_fold ("^" ^ user ^ ":")) line 0 = 0
+  with Not_found -> false
+
 let rec read_users r user password =
   Lwt_io.read_line_opt r >>= 
     function 
       | Some res -> 
-        if parse_users res user password then
-          return (true)
-        else
+        if match_user res user then (
+          if parse_users res user password then
+            return (true)
+          else
+            return (false)
+        ) else
           read_users r user password
       | None -> return (false)
 
