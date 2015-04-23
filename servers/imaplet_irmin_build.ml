@@ -83,7 +83,7 @@ let rec args i user mailbox filter isappend =
     | _ -> raise InvalidCommand
 
 let usage () =
-  Printf.printf "usage: imaplet_irmin_build -u [user] -m
+  Printf.printf "usage: imaplet_irmin_build -u [user[:pswd]] -m
   [mbox:inbox-path:mailboxes-path|maildir:mailboxes-path|archive:mbox-path]
   -f [start-maxmsg:folder,...,folder] -a\n%!"
 

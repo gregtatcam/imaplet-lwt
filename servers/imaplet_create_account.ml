@@ -22,10 +22,8 @@ open Irmin_storage
 
 exception InvalidCommand
 exception SystemFailed
-exception Done
+exception AccountExists
 
-(* -u : user
- *)
 let rec args i user force =
   if i >= Array.length Sys.argv then
     user,force
@@ -36,16 +34,19 @@ let rec args i user force =
     | _ -> raise InvalidCommand
 
 let usage () =
-  Printf.printf "usage: imaplet_create_account -u [user]\n%!"
+  Printf.printf "usage: imaplet_create_account -u [user:pswd] [-f]\n%!"
 
 let commands f =
   try 
     let (user,force) = args 1 None false in
-    if user = None then
+    if user = None || 
+      Regex.match_regex ~regx:("^\\([^:]+\\):\\([^:]+\\)$")
+      (Utils.option_value_exn user) = false then
       usage ()
     else
       try 
-        f (Utils.option_value_exn user) force
+        f (Str.matched_group 1 (Utils.option_value_exn user)) 
+          (Str.matched_group 2 (Utils.option_value_exn user)) force
       with ex -> Printf.printf "%s\n%!" (Printexc.to_string ex)
   with _ -> usage ()
 
@@ -74,10 +75,33 @@ let dir_cmd f cmd =
   else
     cmd ()
 
+(*
+imaplet:{PLAIN}imaplet:501:::/Users/imaplet
+*)
+let set_users user pswd =
+  let file = srv_config.users_path in
+  Utils.lines_of_file file ~init:false ~f:(fun line acc ->
+    if Regex.match_regex ~case:false ~regx:("^" ^ user ^ ":") line then
+      return true
+    else
+      return acc
+  ) >>= fun exists ->
+  if exists then
+    raise AccountExists
+  else (
+    Lwt_io.with_file ~flags:[O_WRONLY;O_APPEND] ~mode:Lwt_io.output file (fun oc ->
+      Lwt_io.write_line oc (Printf.sprintf "%s:{SHA256}%s::::%s" user
+      (Imap_crypto.get_hash ~hash:`Sha256 pswd) 
+      (Regex.replace ~regx:"%user%" ~tmpl:user srv_config.irmin_path))
+    ) >>
+    return ()
+  )
+
 let () =
-  commands (fun user force ->
+  commands (fun user pswd force ->
     Lwt_main.run (
       catch (fun () ->
+        set_users user pswd >>= fun () ->
         let cert_path = Regex.replace ~regx:"%user%" ~tmpl:user srv_config.user_cert_path in
         let irmin_path = Regex.replace ~regx:"%user%" ~tmpl:user srv_config.irmin_path in
         let priv_path = Filename.concat cert_path srv_config.key_name in
@@ -108,12 +132,12 @@ let () =
             create_mailbox "Drafts" >>
             create_mailbox "Deleted Messages" >>
             create_mailbox "Sent Messages"
-          ) 
+          ) >>= fun () ->
+          Printf.printf "success\n%!";
+          return ()
       ) (function
-        | Done -> return ()
-        | SystemFailed -> Printf.printf "failed to create the account\n%!"; return ()
-        | ex -> 
-          Printf.printf "failed to create the account: %s\n%!"
-          (Printexc.to_string ex); return ())
+        | SystemFailed -> Printf.printf "failed\n%!"; return ()
+        | AccountExists -> Printf.printf "failed\n%!"; return ()
+        | _ -> Printf.printf "failed\n%!"; return ())
     )
   )
