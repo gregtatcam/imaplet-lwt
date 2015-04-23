@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: 852045ab9cdb3e5bd2eda5d2fe147071)
+# DO NOT EDIT (digest: a050665dc9ef3d7d2f8751539a15cc0e)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -160,6 +160,23 @@ true: annot, bin_annot
 "servers/imaplet_server.native": use_commands
 "servers/imaplet_server.native": use_imaplet
 "servers/imaplet_server.native": use_parsemail
+# Executable imaplet_create_account
+"servers/imaplet_create_account.native": pkg_cstruct.unix
+"servers/imaplet_create_account.native": pkg_fieldslib.syntax
+"servers/imaplet_create_account.native": pkg_irmin.unix
+"servers/imaplet_create_account.native": pkg_lwt
+"servers/imaplet_create_account.native": pkg_lwt.syntax
+"servers/imaplet_create_account.native": pkg_lwt.unix
+"servers/imaplet_create_account.native": pkg_nocrypto
+"servers/imaplet_create_account.native": pkg_re
+"servers/imaplet_create_account.native": pkg_re.posix
+"servers/imaplet_create_account.native": pkg_sexplib.syntax
+"servers/imaplet_create_account.native": pkg_str
+"servers/imaplet_create_account.native": pkg_threads
+"servers/imaplet_create_account.native": pkg_tls.lwt
+"servers/imaplet_create_account.native": use_commands
+"servers/imaplet_create_account.native": use_imaplet
+"servers/imaplet_create_account.native": use_parsemail
 # Executable imaplet_lmtp
 "servers/imaplet_lmtp.native": pkg_cstruct.unix
 "servers/imaplet_lmtp.native": pkg_fieldslib.syntax

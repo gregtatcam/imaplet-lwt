@@ -142,6 +142,14 @@ Executable imaplet
                     ../config/imaplet.cf($datadir/imaplet),
                     ../config/users($datadir/imaplet)
 
+Executable imaplet_create_account
+  Build		  : true
+  Install	  : true
+  Path		  : servers
+  CompiledObject  : native
+  MainIs	  : imaplet_create_account.ml
+  BuildDepends	  : lwt,lwt.unix,lwt.syntax,threads,irmin.unix,imaplet.commands,imaplet
+
 Executable imaplet_lmtp
   Build		  : true
   Install	  : true

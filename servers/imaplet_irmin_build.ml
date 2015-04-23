@@ -116,10 +116,21 @@ let rec listdir path mailbox f =
     )
   ) strm 
 
+let user_keys = ref None
+
+let get_keys user =
+  match !user_keys with 
+  | None ->
+    Ssl_.get_user_keys ~user srv_config >>= fun keys ->
+    user_keys := Some keys;
+    return keys
+  | Some keys -> return keys
+
 let create_mailbox user ?uidvalidity mailbox =
   Printf.printf "############# creating mailbox %s %s\n%!" user mailbox;
   with_timer (fun() -> 
-  IrminStorage.create srv_config user mailbox >>= fun ist ->
+  get_keys user >>= fun keys ->
+  IrminStorage.create srv_config user mailbox keys >>= fun ist ->
   IrminStorage.create_mailbox ist >>
   return ist) >>= fun ist ->
   match uidvalidity with
@@ -204,7 +215,11 @@ let append_messages ist path flags =
     )
   ) ~init:(return())
   
-let gmail_mailboxes = ref MapStr.empty
+let gmail_mailboxes = ref MapStr.empty;;
+gmail_mailboxes := MapStr.add "INBOX" "" !gmail_mailboxes;;
+gmail_mailboxes := MapStr.add "Drafts" "" !gmail_mailboxes;;
+gmail_mailboxes := MapStr.add "Deleted Messages" "" !gmail_mailboxes;;
+gmail_mailboxes := MapStr.add "Sent Messages" "" !gmail_mailboxes;;
 
 let postmark = "^from [^ ]+ " ^ Regex.dayofweek ^ " " ^ Regex.mon ^ " " ^
   "[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] [0-9]+"
@@ -281,7 +296,8 @@ let fill path push_strm start maxmsg folders =
 let populate_mailboxes user isappend =
   if isappend then (
     Printf.printf "#### fetching current mailboxes\n%!";
-    IrminStorage.create srv_config user "" >>= fun ist ->
+    get_keys user >>= fun keys ->
+    IrminStorage.create srv_config user "" keys >>= fun ist ->
     IrminStorage.list ~subscribed:true ~access:(fun _ -> true) ist ~init:() ~f:(fun _ f ->
       match f with
       | `Mailbox (f,s) -> Printf.printf "mailbox: %s\n%!" f;gmail_mailboxes := MapStr.add f "" !gmail_mailboxes; return ()
@@ -300,7 +316,8 @@ let append_archive_messages user path filter flags isappend =
     Printf.printf "-- processing message %d, mailbox %s\n%!" cnt mailbox;
     begin
     if MapStr.exists (fun mb _ -> mailbox = mb) !gmail_mailboxes then
-      with_timer (fun() -> IrminStorage.create srv_config user mailbox)
+      get_keys user >>= fun keys ->
+      with_timer (fun() -> IrminStorage.create srv_config user mailbox keys)
     else (
       gmail_mailboxes := MapStr.add mailbox "" !gmail_mailboxes;
       create_mailbox user mailbox
@@ -403,15 +420,15 @@ let create_inbox user inbx =
 
 let create_account user subscriptions =
   Printf.printf "#### creating user account %s\n%!" user;
-  let ac = UserAccount.create srv_config user in
-  UserAccount.delete_account ac >>= fun _ ->
-  UserAccount.create_account ac >>= fun _ ->
+  Lwt_unix.system ("imaplet_create_account -u " ^ user) >>= fun _ ->
   (* get subscriptions - works for dovecot *)
-  Subscriptions.create srv_config user >>= fun s ->
+  get_keys user >>= fun keys ->
   catch (fun () ->
     let strm = Lwt_io.lines_of_file subscriptions in
     Lwt_stream.iter_s (fun line -> 
-      Subscriptions.subscribe s line
+      IrminStorage.create srv_config user line keys >>= fun ist ->
+      IrminStorage.subscribe ist >>
+      IrminStorage.commit ist
     ) strm
   ) (fun _ -> return ())
 
