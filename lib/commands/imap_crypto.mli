@@ -23,7 +23,7 @@ val conv_encrypt : ?compress:bool -> string -> Rsa.pub -> string * string
 
 val conv_decrypt : ?compressed:bool -> string -> Rsa.priv -> string
 
-val get_hash : string -> string
+val get_hash : ?hash:[`Sha1|`Sha256] -> string -> string
 
 val aes_encrypt_pswd : pswd:string -> string -> string
 
