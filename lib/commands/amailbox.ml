@@ -24,23 +24,25 @@ type selection = [`Select of string | `Examine of string | `None]
 
 type amailboxt = 
   {inbox_path:string;mail_path:string;user:string
-  option;selected:selection;config:Server_config.imapConfig}
+  option;selected:selection;config:Server_config.imapConfig;
+  keys:(Ssl_.keys Lwt.t) option}
 
 let factory (mailboxt:amailboxt) ?mailbox2 mailbox =
   let open Server_config in
   let open Storage in
   let open Mailbox_storage in
   let open Maildir_storage in
+  Utils.option_value_exn mailboxt.keys >>= fun keys ->
   match mailboxt.config.data_store with
   | `Irmin -> 
     build_strg_inst (module IrminStorage) mailboxt.config (Utils.option_value_exn mailboxt.user)
-    ?mailbox2 mailbox
+    ?mailbox2 mailbox keys
   | `Mailbox ->
     build_strg_inst (module MailboxStorage) mailboxt.config (Utils.option_value_exn mailboxt.user)
-    ?mailbox2 mailbox
+    ?mailbox2 mailbox keys
   | `Maildir ->
     build_strg_inst (module MaildirStorage) mailboxt.config (Utils.option_value_exn mailboxt.user)
-    ?mailbox2 mailbox
+    ?mailbox2 mailbox keys
 
 (* inbox location * all mailboxes location * user * type of selected mailbox *)
 type t = amailboxt
@@ -60,11 +62,11 @@ let create config user =
   | `Mailbox -> config.inbox_path,Configuration.mailboxes config.mail_path user
   | `Maildir -> config.inbox_path,Configuration.mailboxes config.mail_path user
   in
-  {inbox_path;mail_path;user=Some user;selected=`None;config}
+  {inbox_path;mail_path;user=Some user;selected=`None;config; keys=Some (Ssl_.get_user_keys ~user config)}
 
 (* empty type *)
 let empty () =
-  {inbox_path="";mail_path="";user=None;selected=`None;config=Server_config.default_config}
+  {inbox_path="";mail_path="";user=None;selected=`None;config=Server_config.default_config;keys=None}
 
 (* get authenticated user *)
 let user mailboxt =

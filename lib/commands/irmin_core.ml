@@ -469,119 +469,15 @@ module IrminIntf_tr :
 
   end
 
-(* mailboxes subscription *)
-module Subscriptions :
-  sig
-    type t
-    val key_subscr : Key_.t
-    val create : imapConfig -> string -> t Lwt.t
-    val read : t -> string list Lwt.t
-    val subscribe : t -> string -> unit Lwt.t
-    val unsubscribe : t -> string -> unit Lwt.t
-    val empty : string
-  end =
-  struct
-    type t = IrminIntf_tr.transaction
-
-    let key_subscr = Key_.t_of_path "subscriptions"
-
-    (* create type *)
-    let create config user =
-      let key = Key_.create_account user in
-      IrminIntf_tr.begin_transaction ?user:(Some user) config key
-
-    (* convert the list to a string of sexp *)
-    let str_sexp_of_list l =
-      let sexp = sexp_of_list (fun i -> Sexp.of_string i) l in
-      Sexp.to_string sexp
-
-    let empty =
-      str_sexp_of_list []
-
-    (* convert string of sexp to the list *)
-    let list_of_str_sexp str =
-      let sexp = Sexp.of_string str in
-      list_of_sexp (fun i -> Sexp.to_string i) sexp 
-
-    (* update subscription list *)
-    let update_exn view l =
-      IrminIntf_tr.mem view key_subscr >>= fun res ->
-      if res = false then raise KeyDoesntExist;
-      let str = str_sexp_of_list l in
-      IrminIntf_tr.update view key_subscr str >>
-      IrminIntf_tr.end_transaction view
-
-    (* read subscription *)
-    let read view =
-      IrminIntf_tr.read view key_subscr >>= function
-      | Some str -> return (list_of_str_sexp str)
-      | None -> return []
-
-    (* subscribe *)
-    let subscribe t mailbox =
-      read t >>= fun l ->
-      if list_find l (fun i -> i = mailbox) then 
-        return ()
-      else
-        update_exn t (mailbox :: l) 
-
-    (* unsubscribe *)
-    let unsubscribe t mailbox =
-      read t >>= fun l ->
-      let l = List.fold_left (fun acc i -> if i = mailbox then acc else i :: acc) [] l in
-      update_exn t l
-  end
-
-module UserAccount :
-  sig
-    type t
-
-    val create : imapConfig -> string -> t
-    val create_account : t -> [`Exists|`Ok] Lwt.t
-    val delete_account : t -> unit Lwt.t
-  end = 
-  struct
-    type t = string * imapConfig * Key_.t
-
-    (* create type *)
-    let create config user = 
-      (user,config,Key_.create_account user)
-
-    (* create new account *)
-    let create_account key =
-      let (user,config,key) = key in
-      IrminIntf_tr.begin_transaction ~user config key >>= fun view ->
-      IrminIntf_tr.mem view Subscriptions.key_subscr >>= fun res ->
-      if res then
-        return `Exists
-      else (
-        IrminIntf_tr.update view Subscriptions.key_subscr Subscriptions.empty >>
-        IrminIntf_tr.end_transaction view >>
-        return `Ok
-      )
-
-    (* remove account *)
-    let delete_account key =
-      let (user,config,key) = key in
-      IrminIntf.create ~user config >>= fun store ->
-      IrminIntf.remove store key
-      (*
-      IrminIntf.begin_transaction key >>= fun view ->
-      IrminIntf.remove view Subscriptions.key_subscr >>
-      IrminIntf.remove view (Key_.add_path key "mailboxes") >>
-      IrminIntf.end_transaction view
-      *)
-
-  end
-
   type mailbox_ = {user:string;mailbox:string;trans:IrminIntf_tr.transaction;
-  index:int list option ref;config: Server_config.imapConfig;mbox_key: Key_.t}
+  index:int list option ref;config: Server_config.imapConfig;mbox_key:
+    Key_.t;pubpriv: Ssl_.keys}
 
 (* consistency TBD *)
 module IrminMailbox :
   sig
     type t
-    val create : Server_config.imapConfig -> string -> string  -> t Lwt.t
+    val create : Server_config.imapConfig -> string -> string -> Ssl_.keys -> t Lwt.t
     val commit : t -> unit Lwt.t
     val exists : t -> [`No|`Folder|`Mailbox] Lwt.t
     val create_mailbox : t -> unit Lwt.t
@@ -605,6 +501,8 @@ module IrminMailbox :
     val read_index_uid : t -> int list Lwt.t
     val show_all : t -> unit Lwt.t
     val uid_to_seq : t -> int -> int option Lwt.t
+    val subscribe : t -> unit Lwt.t
+    val unsubscribe : t -> unit Lwt.t
   end with type t = mailbox_ = 
   struct 
     (* user * mailbox * is-folder * irmin key including the mailbox *)
@@ -618,14 +516,15 @@ module IrminMailbox :
     | `Hashes uid -> Key_.add_path mbox_key ("messages/" ^ (string_of_int uid) ^ "/hashes")
     | `Metamessage uid -> Key_.add_path mbox_key ("messages/" ^ (string_of_int uid) ^ "/meta")
     | `Uid uid -> Key_.add_path mbox_key ("messages/" ^ (string_of_int uid))
+    | `Subscriptions -> Key_.t_of_path "subscriptions"
 
     (* commit should be called explicitly on each created mailbox to have the
      * changes commited to Irmin
      *)
-    let create config user path =
+    let create config user path keys =
       let (mailbox,mbox_key) = Key_.mailbox_of_path path in
       IrminIntf_tr.begin_transaction ~user config (Key_.create_account user) >>= fun trans ->
-        return {user;mailbox;trans;index=ref None;config;mbox_key}
+        return {user;mailbox;trans;index=ref None;config;mbox_key;pubpriv=keys}
 
     let commit mbox =
       IrminIntf_tr.end_transaction mbox.trans
@@ -749,7 +648,8 @@ module IrminMailbox :
       update_index_uid mbox uid
 
     let append_message mbox message message_metadata =
-      append_message_raw mbox ~parse:(Email_parse.parse mbox.config message) message_metadata
+      let (pub,_) = mbox.pubpriv in
+      append_message_raw mbox ~parse:(Email_parse.parse pub mbox.config message) message_metadata
 
     let get_uid mbox position = 
       read_index_uid mbox >>= fun uids ->
@@ -797,6 +697,7 @@ module IrminMailbox :
       | `Eof -> return `Eof
       | `NotFound -> return `NotFound
       | `Ok (seq,uid) -> 
+        let (_,priv) = mbox.pubpriv in
         let lazy_hashes = Lazy.from_fun (fun () -> get_hashes mbox uid) in
         return (`Ok (
           build_lazy_message_inst
@@ -804,19 +705,19 @@ module IrminMailbox :
             ((fun () ->
               Lazy.force lazy_hashes >>= fun h ->
               read_storage mbox h.message h.postmark >>= fun postmark ->
-              Email_parse.do_decrypt mbox.config postmark 
+              Email_parse.do_decrypt priv mbox.config postmark 
             ),
             (fun () ->
               Lazy.force lazy_hashes >>= fun h ->
               read_storage mbox h.message h.headers >>= fun headers ->
-              Email_parse.do_decrypt_headers mbox.config headers 
+              Email_parse.do_decrypt_headers priv mbox.config headers 
             ),
             (fun () ->
               Lazy.force lazy_hashes >>= fun h ->
               read_storage mbox h.message h.content >>= fun content ->
-              Email_parse.do_decrypt_content mbox.config content 
+              Email_parse.do_decrypt_content priv mbox.config content 
             ),
-            (Email_parse.get_decrypt_attachment mbox.config (read_lazy_storage mbox lazy_hashes)),
+            (Email_parse.get_decrypt_attachment priv mbox.config (read_lazy_storage mbox lazy_hashes)),
             (fun () ->
               get_message_metadata mbox uid
             ))
@@ -875,6 +776,25 @@ module IrminMailbox :
         update_index_uids mbox uids
       |_ -> return ()
 
+    let read_subscriptions mbox =
+      IrminIntf_tr.read mbox.trans (get_key mbox.mbox_key `Subscriptions) >>= function
+      | Some str -> return (list_of_str_sexp str)
+      | None -> return []
+      
+    let subscribe mbox =
+      read_subscriptions mbox >>= fun l ->
+      if list_find l (fun i -> i = mbox.mailbox) then 
+        return ()
+      else
+        IrminIntf_tr.update mbox.trans (get_key mbox.mbox_key `Subscriptions)
+          (str_sexp_of_list (mbox.mailbox :: l))
+
+    let unsubscribe mbox =
+      read_subscriptions mbox >>= fun l ->
+      let l = List.fold_left (fun acc i -> if i = mbox.mailbox then acc else i :: acc) [] l in
+      IrminIntf_tr.update mbox.trans (get_key mbox.mbox_key `Subscriptions)
+        (str_sexp_of_list l)
+
     let list_mailbox mbox key =
       IrminIntf_tr.list mbox.trans (Key_.add_list mbox.mbox_key (Key_.mailboxes_of_mailbox key))
 
@@ -915,8 +835,7 @@ module IrminMailbox :
       let (_,key) = Key_.mailbox_of_path "" in
       begin
       if subscribed then (
-        Subscriptions.create mbox.config mbox.user >>= fun sub ->
-        Subscriptions.read sub >>= fun sub -> return (Some sub)
+        read_subscriptions mbox >>= fun sub -> return (Some sub)
       ) else (
         return None
       ) 
@@ -952,9 +871,44 @@ module IrminMailbox :
       read_mailbox_metadata mbox >>= fun meta ->
       Printf.printf "%s\n%!" (Sexp.to_string (sexp_of_mailbox_metadata meta));
       Printf.printf "---------- subscriptions\n%!";
-      Subscriptions.create mbox.config mbox.user >>= fun sub ->
-      Subscriptions.read sub >>= fun subscr ->
+      read_subscriptions mbox >>= fun subscr ->
       List.iter (fun i -> Printf.printf "%s %!" i) subscr; Printf.printf "\n%!";
       return ()
+
+  end
+
+module UserAccount :
+  sig
+    type t
+
+    val create : imapConfig -> string -> t
+    val create_account : t -> [`Exists|`Ok] Lwt.t
+    val delete_account : t -> unit Lwt.t
+  end = 
+  struct
+    type t = string * imapConfig * Key_.t
+
+    (* create type *)
+    let create config user = 
+      (user,config,Key_.create_account user)
+
+    (* create new account *)
+    let create_account key =
+      let (user,config,key) = key in
+      IrminIntf_tr.begin_transaction ~user config key >>= fun view ->
+      IrminIntf_tr.mem view (Key_.t_of_path "subscriptions") >>= fun res ->
+      if res then
+        return `Exists
+      else (
+        IrminIntf_tr.update view (Key_.t_of_path "subscriptions") (str_sexp_of_list []) >>
+        IrminIntf_tr.end_transaction view >>
+        return `Ok
+      )
+
+    (* remove account *)
+    let delete_account key =
+      let (user,config,key) = key in
+      IrminIntf.create ~user config >>= fun store ->
+      IrminIntf.remove store key
 
   end

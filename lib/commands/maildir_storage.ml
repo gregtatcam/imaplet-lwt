@@ -393,7 +393,7 @@ struct
   type t = storage_
 
   (* user *)
-  let create config user mailbox =
+  let create config user mailbox keys =
     return {user;mailbox = MaildirPath.create config user mailbox;config}
 
   (* mailbox supports both folders and messages *)

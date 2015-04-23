@@ -57,11 +57,11 @@ let rec walk email part =
     Printf.fprintf stderr "---------------------------------------- multipart %d\n%!" (List.length lpart);
     List.iteri (fun i email -> walk email (Some i)) lpart
 
-let get_attachments config map =
+let get_attachments priv config map =
   MapStr.fold (fun key data m ->
     let key = Regex.replace ~regx:"^[0-9]+-" ~tmpl:"" key in
     if Regex.match_regex ~regx:"^postmark\\|headers\\|content" key = false then
-      MapStr.add key (Lazy.from_fun (fun () -> do_decrypt config data)) m
+      MapStr.add key (Lazy.from_fun (fun () -> do_decrypt priv config data)) m
     else
       m
   ) map MapStr.empty
@@ -167,7 +167,8 @@ let () =
         Printf.fprintf stderr "---------------------------------------- new message %d\n%!" cnt;
         (*walk message.email None;*)
         let tr = (if unique = None then default_transform else transform cnt) in
-        parse ~transform:tr config message ~save_message:(fun _ postmark headers content attachments ->
+        Ssl_.get_system_keys Server_config.srv_config >>= fun (pub,priv) ->
+        parse ~transform:tr pub config message ~save_message:(fun _ postmark headers content attachments ->
           map := MapStr.add (key "postmark" cnt) postmark !map;
           map := MapStr.add (key "headers" cnt) headers !map;
           map := MapStr.add (key "content" cnt) content !map;
@@ -181,23 +182,23 @@ let () =
           let postmark = get map (key "postmark" cnt) in
           let headers = get map (key "headers" cnt) in
           let content = get map (key "content" cnt) in
-          do_decrypt config postmark >>= fun postmark ->
-          do_decrypt_headers config headers >>= fun (m,headers) ->
-          do_decrypt_content config content >>= fun content ->
+          do_decrypt priv config postmark >>= fun postmark ->
+          do_decrypt_headers priv config headers >>= fun (m,headers) ->
+          do_decrypt_content priv config content >>= fun content ->
           let (module LE:LazyEmail_inst) = build_lazy_email_inst
             (module Irmin_core.LazyIrminEmail)
             (
               m,
               headers,
               Lazy.from_fun (fun () -> return content),
-              get_attachments config !map
+              get_attachments priv config !map
             ) in
           LE.LazyEmail.to_string LE.this >>= fun str ->
     
           Printf.printf "%s\n%s\n%!" postmark str;
           return ()
         ) else (
-          restore config ~get_message:(fun () -> 
+          restore priv config ~get_message:(fun () -> 
            let postmark = get map (key "postmark" cnt) in
            let headers = get map (key "headers" cnt) in
            let content = get map (key "content" cnt) in

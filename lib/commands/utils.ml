@@ -14,6 +14,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 open Sexplib
+open Sexplib.Conv
 open Imaplet_types
 
 let formated_capability capability =
@@ -152,10 +153,18 @@ let with_file path ~flags ~perms ~mode ~f =
   Lwt.finalize (fun () -> f ch)
   (fun () -> Lwt_io.close ch >> Lwt_unix.close fd)
 
+let lines_of_file file ~init ~f =
+  let strm = Lwt_io.lines_of_file file in
+  Lwt_stream.fold_s (fun line acc ->
+    f line acc 
+  ) strm init
+
 let exists file tp = 
   let open Lwt in
+  catch (fun () ->
   Lwt_unix.stat file >>= fun st ->
   return (st.Unix.st_kind = tp)
+  ) (fun _ -> return false)
 
 let lines str =
   let rec lines_ str l i =
@@ -169,3 +178,13 @@ let lines str =
       l
   in
   lines_ str 0 0
+
+(* convert the list to a string of sexp *)
+let str_sexp_of_list l =
+  let sexp = sexp_of_list (fun i -> sexp_of_string i) l in
+  Sexp.to_string sexp
+
+(* convert string of sexp to the list *)
+let list_of_str_sexp str =
+  let sexp = Sexp.of_string str in
+  list_of_sexp (fun i -> string_of_sexp i) sexp 

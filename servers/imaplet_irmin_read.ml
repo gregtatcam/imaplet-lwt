@@ -49,6 +49,9 @@ let prompt str =
   uinput := (Str.split (Str.regexp " ") msg);
   return (arg 0)
 
+let get_keys srv_config user =
+  Ssl_.get_user_keys ~user srv_config 
+
 let rec tree user key indent =
   IrminIntf.create ~user srv_config >>= fun store ->
   IrminIntf.list store key >>= fun l ->
@@ -94,8 +97,9 @@ let append user mailbox =
   prompt "to: " >>= fun to_ ->
   prompt "subject: " >>= fun subject_ ->
   prompt "email: " >>= fun email_ ->
+  get_keys srv_config user >>= fun keys ->
   let message = message_template from_ to_ subject_ email_ in
-  IrminStorage.create srv_config user mailbox >>= fun str ->
+  IrminStorage.create srv_config user mailbox keys >>= fun str ->
   IrminStorage.append str message (empty_mailbox_message_metadata())
 
 let rec selected user mailbox mbox =
@@ -196,7 +200,8 @@ let main () =
     | "delete" -> let ac = UserAccount.create srv_config user in
       UserAccount.delete_account ac >> request user
     | "crtmailbox" -> let mailbox = arg 1 in
-      IrminStorage.create srv_config user mailbox >>= fun str ->
+      get_keys srv_config user >>= fun keys ->
+      IrminStorage.create srv_config user mailbox keys >>= fun str ->
       IrminStorage.create_mailbox str >>= fun () -> request user
     | "create" -> let ac = UserAccount.create srv_config user in
       UserAccount.create_account ac >> request user
@@ -205,10 +210,12 @@ let main () =
       tree user key "" >> request user
     | "select" -> 
       let mailbox = Str.replace_first (Str.regexp "+") " " (arg 1) in
-      IrminMailbox.create srv_config user mailbox >>= fun mbox ->
+      get_keys srv_config user >>= fun keys ->
+      IrminMailbox.create srv_config user mailbox keys >>= fun mbox ->
       selected user mailbox mbox >>= fun () -> request user
     | "list" -> 
-      IrminMailbox.create srv_config user "" >>= fun mbox ->
+      get_keys srv_config user >>= fun keys ->
+      IrminMailbox.create srv_config user "" keys >>= fun mbox ->
       IrminMailbox.list ~subscribed:false ~access:(fun _ -> true) mbox ~init:[] ~f:(
         fun acc item -> return ((item::acc))
       ) >>= fun l ->

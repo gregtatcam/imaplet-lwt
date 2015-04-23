@@ -25,7 +25,8 @@ type selection = [`Select of string | `Examine of string | `None]
 
 type amailboxt = 
   {inbox_path:string;mail_path:string;user:string
-  option;selected:selection;config:Server_config.imapConfig}
+  option;selected:selection;config:Server_config.imapConfig;
+  keys:(Ssl_.keys Lwt.t) option}
 
 val create : Server_config.imapConfig -> string -> t
 

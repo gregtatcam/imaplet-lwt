@@ -22,9 +22,6 @@ open Parsemail
 open Sexplib
 open Sexplib.Conv
 
-let priv = ref None
-let pub = ref None
-
 let crlf = "\n"
 
 (* keep two blocks of data in the storage: 
@@ -56,25 +53,6 @@ let sexp_of t =
 
 let t_of_sexp t =
   email_map_of_sexp t
-
-(* each account should have it's own key,
- * should be part of the account creation TBD *)
-let pub_key config =
-  match !pub with
-  | None -> 
-    Ssl_.create_cert config >>= fun (_,priv) -> 
-    let p = Rsa.pub_of_priv priv in
-    pub := Some p;
-    return p
-  | Some pub -> return pub
-
-let priv_key config =
-  match !priv with
-  | None -> 
-    Ssl_.create_cert config >>= fun (_,p) -> 
-    priv := Some p;
-    return p
-  | Some priv -> return priv
 
 let add_boundary buffer ~boundary ~suffix = 
   Buffer.add_string buffer (boundary ^ suffix)
@@ -131,7 +109,7 @@ let email_raw_content email =
   | Some rc -> Octet_stream.to_string rc
   | None -> ""
 
-let email_content config attachment get_contid email transform =
+let email_content pub_key config attachment get_contid email transform =
   match (Email.raw_content email) with
   | Some rc -> 
     let content = Octet_stream.to_string rc in
@@ -144,8 +122,7 @@ let email_content config attachment get_contid email transform =
     let size = Bytes.length content in
     let lines = Utils.lines content in
     if config.encrypt = true && attachment then (
-      pub_key config >>= fun pub ->
-      let (contid,content) = conv_encrypt ~compress:config.compress content pub in
+      let (contid,content) = conv_encrypt ~compress:config.compress content pub_key in
       let contid =
       match get_contid with
       |None -> contid
@@ -162,10 +139,9 @@ let email_content config attachment get_contid email transform =
     )
   | None -> return ("","",0,0) 
 
-let do_encrypt config data =
+let do_encrypt pub_key config data =
   if config.encrypt then
-    pub_key config >>= fun pub ->
-    return (encrypt ~compress:config.compress data pub)
+    return (encrypt ~compress:config.compress data pub_key)
   else
     return data
 
@@ -185,7 +161,7 @@ let get_header_descr headers headers_buff transform =
   Buffer.add_string headers_buff headers_sexp_str;
   (part,descr)
 
-let do_encrypt_content config email save_attachment hash transform =
+let do_encrypt_content pub_key config email save_attachment hash transform =
   let content_buff = Buffer.create 100 in
   let headers_buff = Buffer.create 100 in
   let rec walk email multipart last_crlf totsize totlines attachments =
@@ -218,7 +194,7 @@ let do_encrypt_content config email save_attachment hash transform =
          * just need to keep the number of attachments
          *)
         let get_contid = Some (string_of_int (3 + attachments)) in
-        email_content config attach get_contid email transform >>= fun (contid,content,size,lines) -> 
+        email_content pub_key config attach get_contid email transform >>= fun (contid,content,size,lines) -> 
         if attach then ( (* consider adding Content-type: message/external-body...  *)
           save_attachment hash contid content >>= fun () ->
           (* +1 for crlf - header crlf content *)
@@ -281,8 +257,8 @@ let do_encrypt_content config email save_attachment hash transform =
   let content = Buffer.contents content_buff in
   let headers = Printf.sprintf "%07d%s%s" 
     (Bytes.length map_sexp_str) map_sexp_str (Buffer.contents headers_buff) in
-  do_encrypt config headers >>= fun headers ->
-  do_encrypt config content >>= fun content ->
+  do_encrypt pub_key config headers >>= fun headers ->
+  do_encrypt pub_key config content >>= fun content ->
   return (headers,content,attachments)
 
 let default_transform = function
@@ -291,10 +267,10 @@ let default_transform = function
   | `Body b -> b
   | `Attachment a -> a
 
-let parse ?(transform=default_transform) config (message:Mailbox.Message.t) ~save_message ~save_attachment =
+let parse ?(transform=default_transform) pub_key config (message:Mailbox.Message.t) ~save_message ~save_attachment =
   let hash = Imap_crypto.get_hash (Mailbox.Message.to_string message) in
-  do_encrypt config (transform (`Postmark (Mailbox.Postmark.to_string message.postmark))) >>= fun postmark ->
-  do_encrypt_content config message.email save_attachment hash transform >>= fun (headers,content, attachments) ->
+  do_encrypt pub_key config (transform (`Postmark (Mailbox.Postmark.to_string message.postmark))) >>= fun postmark ->
+  do_encrypt_content pub_key config message.email save_attachment hash transform >>= fun (headers,content, attachments) ->
   save_message hash postmark headers content attachments
 
 (* there must be a better way to do it TBD *)
@@ -309,17 +285,16 @@ let rec printable buffer str =
     Buffer.contents buffer
   )
 
-let get_decrypt_attachment config get_attachment contid =
+let get_decrypt_attachment priv_key config get_attachment contid =
   get_attachment contid >>= fun attachment ->
-  priv_key config >>= fun priv ->
-  return (conv_decrypt ~compressed:config.compress attachment priv)
+  return (conv_decrypt ~compressed:config.compress attachment priv_key)
 
 let header_of_sexp_str str =
   let sexp = Sexp.of_string str in
   let headers = list_of_sexp (fun sexp -> pair_of_sexp string_of_sexp string_of_sexp sexp) sexp in
   headers_str_of_list headers (function | `Headers h -> h)
 
-let reassemble_email config ~headers ~content ~map ~get_attachment =
+let reassemble_email priv_key config ~headers ~content ~map ~get_attachment =
   let buffer = Buffer.create 100 in
   let rec walk map = 
     let header = header_of_sexp_str (Bytes.sub headers map.header.offset map.header.length) in
@@ -331,7 +306,7 @@ let reassemble_email config ~headers ~content ~map ~get_attachment =
       Buffer.add_string buffer crlf;
       return ()
     | `Attach_map contid ->
-      get_decrypt_attachment config get_attachment contid >>= fun cont ->
+      get_decrypt_attachment priv_key config get_attachment contid >>= fun cont ->
       Buffer.add_string buffer cont;
       Buffer.add_string buffer crlf;
       return ()
@@ -348,30 +323,29 @@ let reassemble_email config ~headers ~content ~map ~get_attachment =
   walk map >>
   return (Buffer.contents buffer)
 
-let do_decrypt config data =
+let do_decrypt priv_key config data =
   if config.encrypt then (
-    priv_key config >>= fun priv ->
-    return (decrypt ~compressed:config.compress data priv)
+    return (decrypt ~compressed:config.compress data priv_key)
   ) else
     return data
 
-let do_decrypt_content config content =
-  do_decrypt config content
+let do_decrypt_content priv_key config content =
+  do_decrypt priv_key config content
 
-let do_decrypt_headers config headers =
-  do_decrypt config headers >>= fun headers ->
+let do_decrypt_headers priv_key config headers =
+  do_decrypt priv_key config headers >>= fun headers ->
   let len = int_of_string (Bytes.sub headers 0 7) in
   let map_sexp_str = Bytes.sub headers 7 len in
   let map = email_map_of_sexp (Sexp.of_string map_sexp_str) in
   return (map,Bytes.sub headers (7 + len) (Bytes.length headers - 7 - len))
 
-let restore config ~get_message ~get_attachment  =
+let restore priv_key config ~get_message ~get_attachment  =
   catch (fun () ->
     get_message () >>= fun (postmark,headers,content) ->
-    do_decrypt config postmark >>= fun postmark ->
-    do_decrypt_headers config headers >>= fun (map,headers) ->
-    do_decrypt_content config content >>= fun content ->
-    reassemble_email config ~headers ~content ~map ~get_attachment >>= fun email -> 
+    do_decrypt priv_key config postmark >>= fun postmark ->
+    do_decrypt_headers priv_key config headers >>= fun (map,headers) ->
+    do_decrypt_content priv_key config content >>= fun content ->
+    reassemble_email priv_key config ~headers ~content ~map ~get_attachment >>= fun email -> 
     let email = Email.of_string email in
     return {
       Mailbox.Message.postmark=Mailbox.Postmark.of_string postmark;

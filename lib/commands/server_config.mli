@@ -36,6 +36,7 @@ type imapConfig = {
   data_store : [`Irmin|`Mailbox|`Maildir]; (* type of storage, only irmin supported so far *)
   encrypt : bool; (* encrypt messages, default true *)
   compress : bool; (* compress messages, but not attachments, default true *)
+  user_cert_path : string; (* user's certificate/key location *)
 }
 
 val default_config : imapConfig

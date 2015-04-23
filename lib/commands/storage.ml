@@ -23,8 +23,8 @@ module type Storage_intf =
 sig
   type t
 
-  (* user,mailbox *)
-  val create : imapConfig -> string -> string -> t Lwt.t
+  (* user,mailbox,keys *)
+  val create : imapConfig -> string -> string -> Ssl_.keys -> t Lwt.t
 
   (* check if mailbox exists *)
   val exists : t -> [`No|`Folder|`Mailbox] Lwt.t
@@ -106,12 +106,12 @@ end
 
 let build_strg_inst
 (module S : Storage_intf)
-config user ?mailbox2 mailbox =
-  S.create config user mailbox >>= fun this ->
+config user ?mailbox2 mailbox keys =
+  S.create config user mailbox keys >>= fun this ->
   begin
   match mailbox2 with 
   | None -> return None
-  | Some mailbox2 -> S.create config user mailbox2 >>= fun this2 -> return (Some this2) 
+  | Some mailbox2 -> S.create config user mailbox2 keys >>= fun this2 -> return (Some this2) 
   end >>= fun this2 ->
   return
   (module struct

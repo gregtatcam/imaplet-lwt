@@ -36,13 +36,14 @@ type imapConfig = {
   data_store : [`Irmin|`Mailbox|`Maildir]; (* type of storage, only irmin supported so far *)
   encrypt : bool; (* encrypt messages, default true *)
   compress : bool; (* compress messages, but not attachments, default true *)
+  user_cert_path : string; (* user's certificate/key location *)
 }
 
 let default_config = {
   rebuild_irmin = false;
   inbox_path = "";(*"/var/mail";*)
   mail_path = "";(*"/Users/@/mail";*)
-  irmin_path = "/var/mail/accounts/%user%";
+  irmin_path = "/var/mail/accounts/%user%/repo";
   irmin_expand = false;
   max_msg_size = 0;
   imap_name = "imaplet";
@@ -59,6 +60,7 @@ let default_config = {
   data_store = `Irmin;
   encrypt = true;
   compress = true;
+  user_cert_path = "/var/mail/accounts/%user%/cert";
 }
 
 let validate_config config =
@@ -72,7 +74,7 @@ let validate_config config =
   in
   match config.data_store with
   | `Irmin -> 
-      let path = Regex.replace ~regx:"%user%[.]*$" ~tmpl:"" config.irmin_path in
+      let path = Regex.replace ~regx:"%user%.*$" ~tmpl:"" config.irmin_path in
     Utils.exists path Unix.S_DIR >>= fun res ->
     err res "Invalid Irminsule path in"
   | `Mailbox ->
@@ -155,6 +157,7 @@ let config_of_lines lines =
           | "data_store" -> {acc with data_store = (stval n v)}
           | "encrypt" -> {acc with encrypt = (bval n v true)}
           | "compress" -> {acc with encrypt = (bval n v true)}
+          | "user_cert_path" -> {acc with user_cert_path = v}
           | _ -> Printf.printf "unknown configuration %s\n%!" n; acc
         ) else 
           acc

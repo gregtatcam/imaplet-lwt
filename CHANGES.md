@@ -18,3 +18,4 @@
 * update for ocaml-tls 0.4.0
 * store message parts keyed by the message hash and part number 0-post;1-headers;2-content;3+-attachments. All messages are stored under imaplet:user:storage key
 * the message is staged/commited under View keyed off imaplet:user
+* added user account creation

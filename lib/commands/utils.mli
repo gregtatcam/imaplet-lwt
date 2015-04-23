@@ -47,3 +47,9 @@ val with_file : string -> flags:Lwt_unix.open_flag list ->
 val exists : string -> Lwt_unix.file_kind -> bool Lwt.t
 
 val lines : string -> int
+
+val list_of_str_sexp : string -> string list
+
+val str_sexp_of_list : string list -> string
+
+val lines_of_file : string -> init:'a -> f:(string -> 'a -> 'a Lwt.t) -> 'a Lwt.t

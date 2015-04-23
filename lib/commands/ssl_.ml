@@ -15,29 +15,33 @@
  *)
 open Lwt
 open Server_config
+open X509.Encoding.Pem
+
+type keys = Nocrypto.Rsa.pub * Nocrypto.Rsa.priv
+
+let get_pub_key priv =
+  Nocrypto.Rsa.pub_of_priv priv
 
 let create_cert config = 
   X509_lwt.private_of_pems
   ~cert:(Install.data_path ^ "/" ^ config.pem_name)
   ~priv_key:(Install.data_path ^ "/" ^ config.key_name)
 
-let create_cert_decode ?pswd config =
-  let open X509.Encoding.Pem in
-  match pswd with
-  | None -> create_cert config
-  | Some pswd -> 
-    let content f =
-      Lwt_io.with_file ~mode:Lwt_io.input (Install.data_path ^ "/" ^ f) (fun ci ->
-        Lwt_io.read ci
-      )
-    in
-    content config.pem_name >>= fun pem ->
-    content config.key_name >>= fun enckey ->
-    let key = Imap_crypto.aes_decrypt_pswd ~pswd enckey in
-    return (
-      Cert.of_pem_cstruct (Cstruct.of_string pem),
-      PK.of_pem_cstruct1 (Cstruct.of_string key))
-  
+let create_user_cert ~cert ~priv_key =
+  X509_lwt.private_of_pems ~cert ~priv_key
+
+let get_user_keys ~user config =
+  let path name =
+    let p = Filename.concat config.user_cert_path name in
+    Regex.replace ~regx:"%user%" ~tmpl:user p 
+  in
+  create_user_cert ~cert:(path config.pem_name) 
+    ~priv_key:(path config.key_name) >>= fun (_,priv) ->
+  return (get_pub_key priv,priv)
+
+let get_system_keys config =
+  create_cert config >>= fun (_,priv) ->
+  return (get_pub_key priv,priv)
 
 let init_ssl config =  
   Tls_lwt.rng_init () >>

@@ -26,8 +26,8 @@ struct
   type t = storage_
 
   (* user *)
-  let create config user mailbox =
-    IrminMailbox.create config user mailbox >>= fun mailbox ->
+  let create config user mailbox keys =
+    IrminMailbox.create config user mailbox keys >>= fun mailbox ->
     return {user;mailbox;config}
 
   let exists t = 
@@ -61,13 +61,11 @@ struct
    * subscribe and unsubscribe should be in a separate module TBD 
    *)
   let subscribe t =
-    Subscriptions.create t.config t.user >>= fun sub ->
-    Subscriptions.subscribe sub t.mailbox.mailbox
+    IrminMailbox.subscribe t.mailbox
 
   (* unsubscribe mailbox *)
   let unsubscribe t =
-    Subscriptions.create t.config t.user >>= fun sub ->
-    Subscriptions.unsubscribe sub t.mailbox.mailbox
+    IrminMailbox.unsubscribe t.mailbox
 
   (* list 
    * returns list of files/folders with list of flags 
