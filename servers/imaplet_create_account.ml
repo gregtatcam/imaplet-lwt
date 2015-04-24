@@ -78,30 +78,30 @@ let dir_cmd f cmd =
 (*
 imaplet:{PLAIN}imaplet:501:::/Users/imaplet
 *)
-let set_users user pswd =
-  let file = srv_config.users_path in
-  Utils.lines_of_file file ~init:false ~f:(fun line acc ->
+let check_users user pswd =
+  Utils.lines_of_file srv_config.users_path ~init:() ~f:(fun line _ ->
     if Regex.match_regex ~case:false ~regx:("^" ^ user ^ ":") line then
-      return true
-    else
-      return acc
-  ) >>= fun exists ->
-  if exists then
-    raise AccountExists
-  else (
-    Lwt_io.with_file ~flags:[O_WRONLY;O_APPEND] ~mode:Lwt_io.output file (fun oc ->
-      Lwt_io.write_line oc (Printf.sprintf "%s:{SHA256}%s::::%s" user
-      (Imap_crypto.get_hash ~hash:`Sha256 pswd) 
-      (Regex.replace ~regx:"%user%" ~tmpl:user srv_config.irmin_path))
-    ) >>
-    return ()
+      raise AccountExists;
+      return ()
   )
+
+let set_users user pswd =
+  Lwt_io.with_file ~flags:[O_WRONLY;O_APPEND] ~mode:Lwt_io.output srv_config.users_path 
+  (fun oc ->
+    Lwt_io.write_line oc (Printf.sprintf "%s:{SHA256}%s::::%s" user
+    (Imap_crypto.get_hash ~hash:`Sha256 pswd) 
+    (Regex.replace ~regx:"%user%" ~tmpl:user srv_config.irmin_path))
+  )
+
+let openssl priv pem =
+  Printf.sprintf "sudo openssl req -x509 -batch -nodes -newkey rsa:1024 -keyout %s -out %s" 
+    priv pem
 
 let () =
   commands (fun user pswd force ->
     Lwt_main.run (
       catch (fun () ->
-        set_users user pswd >>= fun () ->
+        check_users user pswd >>= fun () ->
         let cert_path = Regex.replace ~regx:"%user%" ~tmpl:user srv_config.user_cert_path in
         let irmin_path = Regex.replace ~regx:"%user%" ~tmpl:user srv_config.irmin_path in
         let priv_path = Filename.concat cert_path srv_config.key_name in
@@ -113,9 +113,7 @@ let () =
           return ()) >>= fun () ->
         system ("mkdir -p " ^ cert_path) >>= fun () ->
         file_cmd priv_path 
-          (fun () -> system ("openssl genrsa -out " ^ priv_path ^ " 1024")) >>
-        file_cmd pem_path
-          (fun () -> system ("openssl req -x509 -key " ^ priv_path ^ " -new -batch -out " ^ pem_path)) >>
+          (fun () -> system (openssl priv_path pem_path)) >>
         dir_cmd (Filename.concat irmin_path ".git") 
           (fun () -> 
             system ("git init " ^ irmin_path) >>= fun () ->
@@ -132,7 +130,8 @@ let () =
             create_mailbox "Drafts" >>
             create_mailbox "Deleted Messages" >>
             create_mailbox "Sent Messages"
-          ) >>= fun () ->
+          ) >>
+          set_users user pswd >>= fun () ->
           Printf.printf "success\n%!";
           return ()
       ) (function
