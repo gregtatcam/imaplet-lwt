@@ -97,15 +97,26 @@ let openssl priv pem =
   Printf.sprintf "sudo openssl req -x509 -batch -nodes -newkey rsa:1024 -keyout %s -out %s" 
     priv pem
 
+let failed user_path msg =
+  Printf.printf "%s\n%!" msg;
+  match user_path with
+  | Some user_path -> system ("rm -rf " ^ user_path)
+  | None -> return ()
+
+let created = ref None
+
 let () =
   commands (fun user pswd force ->
+    let user_path = Regex.replace ~regx:"%user%.*$" ~tmpl:user srv_config.user_cert_path in
+    let cert_path = Regex.replace ~regx:"%user%" ~tmpl:user srv_config.user_cert_path in
+    let irmin_path = Regex.replace ~regx:"%user%" ~tmpl:user srv_config.irmin_path in
+    let priv_path = Filename.concat cert_path srv_config.key_name in
+    let pem_path = Filename.concat cert_path srv_config.pem_name in
     Lwt_main.run (
       catch (fun () ->
+        dir user_path >>= fun res ->
+        if res then created := Some user_path;
         check_users user pswd >>= fun () ->
-        let cert_path = Regex.replace ~regx:"%user%" ~tmpl:user srv_config.user_cert_path in
-        let irmin_path = Regex.replace ~regx:"%user%" ~tmpl:user srv_config.irmin_path in
-        let priv_path = Filename.concat cert_path srv_config.key_name in
-        let pem_path = Filename.concat cert_path srv_config.pem_name in
         system ("mkdir -p " ^ irmin_path) >>= fun () ->
         (if force then
           system ("rm -rf " ^ (Filename.concat irmin_path ".git"))
@@ -135,8 +146,8 @@ let () =
           Printf.printf "success\n%!";
           return ()
       ) (function
-        | SystemFailed -> Printf.printf "failed\n%!"; return ()
-        | AccountExists -> Printf.printf "failed\n%!"; return ()
-        | _ -> Printf.printf "failed\n%!"; return ())
+        | SystemFailed -> failed !created "failed"
+        | AccountExists -> failed !created "failed"
+        | _ -> failed !created "failed")
     )
   )
