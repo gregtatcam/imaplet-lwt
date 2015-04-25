@@ -21,7 +21,7 @@ open Irmin_core
 open Irmin_storage
 
 exception InvalidCommand
-exception SystemFailed
+exception SystemFailed of string
 exception AccountExists
 
 let rec args i user force =
@@ -52,8 +52,8 @@ let commands f =
 
 let system cmd =
   Lwt_unix.system cmd >>= function
-  | WEXITED i -> return (if i = 0 then () else raise SystemFailed) 
-  | _ -> raise SystemFailed
+  | WEXITED i -> return (if i = 0 then () else raise (SystemFailed cmd)) 
+  | _ -> raise (SystemFailed cmd)
 
 let dir f =
   Utils.exists f Unix.S_DIR
@@ -78,7 +78,9 @@ let dir_cmd f cmd =
 (*
 imaplet:{PLAIN}imaplet:501:::/Users/imaplet
 *)
-let check_users user pswd =
+let check_users user_path user pswd =
+  dir user_path >>= fun res ->
+  if res then raise AccountExists;
   Utils.lines_of_file srv_config.users_path ~init:() ~f:(fun line _ ->
     if Regex.match_regex ~case:false ~regx:("^" ^ user ^ ":") line then
       raise AccountExists;
@@ -93,9 +95,15 @@ let set_users user pswd =
     (Regex.replace ~regx:"%user%" ~tmpl:user srv_config.irmin_path))
   )
 
-let openssl priv pem =
-  Printf.sprintf "sudo openssl req -x509 -batch -nodes -newkey rsa:1024 -keyout %s -out %s" 
-    priv pem
+let log msg =
+  Lwt_io.with_file ~flags:[O_WRONLY;O_APPEND;O_CREAT] ~mode:Lwt_io.output "/tmp/log/imaplet.log"
+  (fun oc -> Lwt_io.write_line oc msg)
+
+let genrsa priv =
+  Printf.sprintf "openssl genrsa -out %s 1024s%!" priv 
+
+let reqcert priv pem =
+  Printf.sprintf "openssl req -x509 -batch -new -key %s -out %s%!" priv pem
 
 let failed user_path msg =
   Printf.printf "%s\n%!" msg;
@@ -114,17 +122,18 @@ let () =
     let pem_path = Filename.concat cert_path srv_config.pem_name in
     Lwt_main.run (
       catch (fun () ->
-        dir user_path >>= fun res ->
-        if res then created := Some user_path;
-        check_users user pswd >>= fun () ->
-        system ("mkdir -p " ^ irmin_path) >>= fun () ->
+        check_users user_path user pswd >>= fun () ->
+        created := Some user_path;
+        Lwt_unix.mkdir user_path 0o775 >>
+        Lwt_unix.mkdir irmin_path 0o775 >>
         (if force then
           system ("rm -rf " ^ (Filename.concat irmin_path ".git"))
         else
-          return ()) >>= fun () ->
-        system ("mkdir -p " ^ cert_path) >>= fun () ->
+          return ()) >>
+        Lwt_unix.mkdir cert_path 0o775 >>
         file_cmd priv_path 
-          (fun () -> system (openssl priv_path pem_path)) >>
+          (fun () -> system (genrsa priv_path ) >>
+	             system (reqcert priv_path pem_path)) >>
         dir_cmd (Filename.concat irmin_path ".git") 
           (fun () -> 
             system ("git init " ^ irmin_path) >>= fun () ->
@@ -146,8 +155,8 @@ let () =
           Printf.printf "success\n%!";
           return ()
       ) (function
-        | SystemFailed -> failed !created "failed"
-        | AccountExists -> failed !created "failed"
-        | _ -> failed !created "failed")
+        | SystemFailed msg -> failed !created ("system failed " ^ msg)
+        | AccountExists -> failed !created "account exists failed"
+        | ex -> failed !created ("failed " ^ (Printexc.to_string ex)))
     )
   )
