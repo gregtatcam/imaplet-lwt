@@ -1,6 +1,6 @@
 # OASIS_START
-# DO NOT EDIT (digest: 25a5d5b22cfed5608083500e47862ecd)
-version = "0.1.9"
+# DO NOT EDIT (digest: b2124d7958f270fc0fb2c0ba80766928)
+version = "0.1.10"
 description = "IMAP server"
 requires =
 "lwt lwt.unix lwt.syntax tls.lwt sexplib.syntax threads str cstruct.unix irmin.unix nocrypto imaplet.parsemail imaplet.commands"
@@ -10,7 +10,7 @@ archive(native) = "imaplet.cmxa"
 archive(native, plugin) = "imaplet.cmxs"
 exists_if = "imaplet.cma"
 package "parsemail" (
- version = "0.1.9"
+ version = "0.1.10"
  description = "IMAP server"
  requires = "re re.posix str threads"
  archive(byte) = "parsemail.cma"
@@ -21,7 +21,7 @@ package "parsemail" (
 )
 
 package "commands" (
- version = "0.1.9"
+ version = "0.1.10"
  description = "IMAP server"
  requires =
  "lwt lwt.unix lwt.syntax tls.lwt sexplib.syntax threads str cstruct.unix irmin.unix nocrypto imaplet.parsemail"
