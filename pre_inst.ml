@@ -9,16 +9,16 @@ let path dir fn ?ver () =
 let exists fn =
   try
     let st = Unix.stat fn in
-    st.Unix.st_kind = Unix.S_REG
-  with _ -> false
+    let res = (st.Unix.st_kind = Unix.S_REG) in
+    res
+  with _ -> ;false
 
 let backup dir fn ver =
   let src = path dir fn () in
   if exists src then ( 
     let dest = path dir (fn ^ ".back") ~ver () in
     Unix.rename src dest
-  ) else
-    ()
+  ) 
 
 let () =
   let datadir = Sys.argv.(1) in

@@ -13,23 +13,31 @@ let exists fn =
   with _ -> false
 
 let check dir fn ver rm =
-  let src = path dir (fn ^ ".back") ~ver () in
+  let src = path dir fn ~ver () in
   if exists src then (
-    let dest = path dir fn () in
-    let temp = path dir (fn ^ "_back") () in
-    let dest1 = path dir fn ~ver () in
-    Unix.rename dest temp;
-    Unix.rename src dest;
-    begin
-    try
-      let nul = if (String.sub rm 0 3) = "del" then " 2> nul" else " 2> /dev/null" in
-      let cmd = rm ^ " " ^ dest ^ ".*" ^ nul in
-      let _ = Unix.system cmd in ()
-    with _ -> ()
-    end;
-    Unix.rename temp dest1
-  ) else
-    ()
+    let src = path dir (fn ^ ".back") ~ver () in
+    if exists src then (
+      let dest = path dir fn () in
+      Unix.rename src dest
+    )
+  ) else (
+    let src = path dir (fn ^ ".back") ~ver () in
+    if exists src then (
+      let dest = path dir fn () in
+      let temp = path dir (fn ^ "_back") () in
+      let dest1 = path dir fn ~ver () in
+      Unix.rename dest temp;
+      Unix.rename src dest;
+      begin
+      try
+        let nul = if (String.sub rm 0 3) = "del" then " 2> nul" else " 2> /dev/null" in
+        let cmd = rm ^ " " ^ dest ^ ".*" ^ nul in
+        let _ = Unix.system cmd in ()
+      with _ -> ()
+      end;
+      Unix.rename temp dest1
+    )
+ )
 
 let () =
   let datadir = Sys.argv.(1) in

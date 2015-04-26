@@ -7,7 +7,8 @@ License:     GPL
 Plugins:     META (0.4), DevFiles (0.4)
 BuildTools:  ocamlbuild, camlp4o
 PreBuildCommand:    ocaml inst.ml $bindir $datadir > lib/commands/install.ml
-PreInstallCommand:  ocaml unix.cma pre_inst.ml $datadir $pkg_version
+PreUninstallCommand:  ocaml unix.cma pre_inst.ml $datadir $pkg_version 
+PreInstallCommand:  ocaml unix.cma pre_inst.ml $datadir $pkg_version 
 PostInstallCommand: ocaml unix.cma post_inst.ml $datadir $pkg_version $rm
 
 Flag utils
