@@ -11,7 +11,7 @@ let exists fn =
     let st = Unix.stat fn in
     let res = (st.Unix.st_kind = Unix.S_REG) in
     res
-  with _ -> ;false
+  with _ -> false
 
 let backup dir fn ver =
   let src = path dir fn () in
