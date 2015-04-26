@@ -84,16 +84,22 @@ let check_users user_path user pswd =
   Utils.lines_of_file srv_config.users_path ~init:() ~f:(fun line _ ->
     if Regex.match_regex ~case:false ~regx:("^" ^ user ^ ":") line then
       raise AccountExists;
-      return ()
+    return ()
   )
 
 let set_users user pswd =
-  Lwt_io.with_file ~flags:[O_WRONLY;O_APPEND] ~mode:Lwt_io.output srv_config.users_path 
-  (fun oc ->
-    Lwt_io.write_line oc (Printf.sprintf "%s:{SHA256}%s::::%s" user
+  let new_user = 
+    (Printf.sprintf "%s:{SHA256}%s::::%s" user
     (Imap_crypto.get_hash ~hash:`Sha256 pswd) 
-    (Regex.replace ~regx:"%user%" ~tmpl:user srv_config.irmin_path))
-  )
+    (Regex.replace ~regx:"%user%" ~tmpl:user srv_config.irmin_path)) in
+  Utils.lines_of_file srv_config.users_path ~init:[] ~f:(fun line acc ->
+    if Regex.match_regex ~case:false ~regx:("^" ^ user ^ ":") line then
+      return acc
+    else
+      return (line :: acc)
+  ) >>= fun lines ->
+  let strm = Lwt_stream.of_list (List.rev (new_user::lines)) in
+  Lwt_io.lines_to_file srv_config.users_path strm
 
 let log msg =
   Lwt_io.with_file ~flags:[O_WRONLY;O_APPEND;O_CREAT] ~mode:Lwt_io.output "/tmp/log/imaplet.log"
@@ -122,14 +128,13 @@ let () =
     let pem_path = Filename.concat cert_path srv_config.pem_name in
     Lwt_main.run (
       catch (fun () ->
-        check_users user_path user pswd >>= fun () ->
+        (if force then
+          system ("rm -rf " ^ user_path)
+        else
+          check_users user_path user pswd) >>= fun () ->
         created := Some user_path;
         Lwt_unix.mkdir user_path 0o775 >>
         Lwt_unix.mkdir irmin_path 0o775 >>
-        (if force then
-          system ("rm -rf " ^ (Filename.concat irmin_path ".git"))
-        else
-          return ()) >>
         Lwt_unix.mkdir cert_path 0o775 >>
         file_cmd priv_path 
           (fun () -> system (genrsa priv_path ) >>
