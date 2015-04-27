@@ -144,8 +144,7 @@ let create config =
     begin
     init_all config >>= fun (cert,sock,unix_sock) ->
     let rec connect f msgt sock cert =
-      accept_conn msgt sock cert;
-      >>= fun (msgt,sock_c,(netr,netw)) ->
+      accept_conn msgt sock cert >>= fun (msgt,sock_c,(netr,netw)) ->
       let id = next_id () in
       f (
         fun () ->
