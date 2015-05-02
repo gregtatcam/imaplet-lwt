@@ -103,6 +103,7 @@ module ImapTime :
     val epoch : t
     val t_of_sexp : Sexp.t -> t
     val sexp_of_t : t -> Sexp.t 
+    val to_string : t -> string
   end =
   struct
     type t = float
@@ -146,6 +147,12 @@ module ImapTime :
     let t_of_sexp sexp = Pervasives.float_of_string (Sexp.to_string sexp)
 
     let sexp_of_t t = Sexp.of_string (Pervasives.string_of_float t)
+
+    let to_string t =
+      let tm = Unix.gmtime t in
+      Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d" (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+        tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+
   end 
 
 let month_to_int = function 

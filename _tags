@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: 6c1b531df35b6407c7c849a9d49eba6f)
+# DO NOT EDIT (digest: db568300124e773203e86d14e37e5ab1)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -67,6 +67,7 @@ true: annot, bin_annot
 "lib/commands/interpreter.cmx": for-pack(Commands)
 "lib/commands/lazy_message.cmx": for-pack(Commands)
 "lib/commands/lex.cmx": for-pack(Commands)
+"lib/commands/log_.cmx": for-pack(Commands)
 "lib/commands/mailbox_storage.cmx": for-pack(Commands)
 "lib/commands/maildir_storage.cmx": for-pack(Commands)
 "lib/commands/parser.cmx": for-pack(Commands)

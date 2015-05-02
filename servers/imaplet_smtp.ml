@@ -19,6 +19,7 @@ open Commands
 open Socket_utils
 open Server_config
 open Account
+open Dates
 
 exception InvalidCmd
 
@@ -27,6 +28,8 @@ type netio = Lwt_io.input_channel * Lwt_io.output_channel*
 
 type cmd_context = {config:imapConfig;auth:bool;grttype:[`Helo|`Ehlo|`Rset]; io:netio;
   from:string;rcpt:string list;buff:Buffer.t}
+
+let _ = Log_.set_log "smtplet.log"
 
 (*
  From dovecot@localhost.local  Thu Jul 17 14:53:00 2014
@@ -54,25 +57,24 @@ let add_postmark from_ msg =
 (* sending "special" local append on unix socket
  *)
 let send_to_imap addr context =
-  Printf.printf "imaplet_smtp: sending to imap\n%!";
+  Log_.log `Info1 "smtp: sending to imap\n";
   let _from = context.from in
   let msg = Buffer.contents context.buff in
   let _to = List.nth context.rcpt 0 in
   let msg = add_postmark _from msg in
-  Printf.printf "imaplet_smtp:\n%s%!" msg;
   client_send addr (fun inchan outchan ->
     let write buff = Lwt_io.write outchan buff >>= fun () -> Lwt_io.flush outchan in
     let read () = Lwt_io.read_line inchan in
     write ("a lappend " ^ _to ^ " INBOX {" ^ (string_of_int (String.length msg)) ^ "+}\r\n") >>= fun () ->
     write msg >>= fun () ->
-    read () >>= fun resp -> Printf.printf "imaplet_smtp response: %s\n%!" resp; (* a OK APPEND completed *)
+    read () >>= fun resp -> (* a OK APPEND completed *)
     write "a logout\r\n" >>= fun () ->
-    read () >>= fun resp -> Printf.printf "imaplet_smtp response: %s\n%!" resp; (* * BYE *)
+    read () >>= fun resp -> (* * BYE *)
     return ()
   )
 
 let write context msg = 
-  Printf.printf "--> %s\n%!" msg;
+  Log_.log `Info1 (Printf.sprintf "--> %s\n" msg);
   let (_,w,_) = context.io in
   Lwt_io.write w (msg ^ "\r\n") 
 
@@ -80,7 +82,7 @@ let read context =
   let (r,_,_) = context.io in
   catch (fun () ->
   Lwt_io.read_line_opt r
-  ) (fun ex -> Printf.printf "read exception %s\n%!" (Printexc.to_string ex);
+  ) (fun ex -> Log_.log `Error (Printf.sprintf "smtp:read exception %s\n" (Printexc.to_string ex));
   return None)
 
 let buffer_ends buffer str =
@@ -264,8 +266,8 @@ let syntx_auth next_state ~msg cmd context =
 
 let next ?(isdata=false) ?(msg="503 5.5.1 Command out of sequence") ~next_state context =
   read context >>= function
-  | None -> Printf.printf "client terminated\n%!";return `Quit
-  | Some str -> Printf.printf "<-- %s\n%!" str;
+  | None -> Log_.log `Debug "smtp: client terminated\n";return `Quit
+  | Some str -> Log_.log `Info3 (Printf.sprintf "smtp: <-- %s\n" str);
   let domatch ?(tmpl="\\(.*\\)$") rx =
     Regex.match_regex ~case:false ~regx:("^[ \t]*" ^ rx ^ tmpl) str in
   let get () = try Str.matched_group 1 str with _ -> "" in
@@ -307,7 +309,7 @@ let all state context = function
   | _ -> return (`State (state,context))
 
 let rec datastream context =
-  Printf.printf "# starting datastream\n%!";
+  Log_.log `Debug "smtp: starting datastream\n";
   next ~isdata:true ~next_state:[`DataStream] context >>= function
   | `DataStream str ->
     if buffer_ends context.buff "\r\n" && str = "." then (
@@ -325,14 +327,14 @@ let rec datastream context =
   | _ -> return `Rset
 
 let rec rcptto context =
-  Printf.printf "# starting rcptto\n%!";
+  Log_.log `Debug "smtp: starting rcptto\n";
   next ~next_state:[`RcpTo;`Data;`Vrfy;`Noop;`Helo;`Ehlo;`Rset] context >>= function
   | `RcptTo r -> return (`State (rcptto, {context with rcpt = r :: context.rcpt}))
   | `Data -> return (`State (datastream,context))
   | cmd -> all (rcptto) context cmd
 
 let rec mailfrom context =
-  Printf.printf "# starting mailfrom\n%!";
+  Log_.log `Debug "smtp: starting mailfrom\n";
   next ~next_state:[`RcptTo;`Vrfy;`Noop;`Helo;`Ehlo;`Rset] context >>= function 
   | `RcptTo r -> return (`State (rcptto, {context with rcpt = r :: context.rcpt}))
   | cmd -> all (mailfrom) context cmd
@@ -354,14 +356,14 @@ let authenticate text ?password context =
 
 (* auth is done right after starttls *)
 let rec authplain context =
-  Printf.printf "# starting authplain\n%!";
+  Log_.log `Debug "smtp: starting authplain\n";
   next ~isdata:true ~next_state:[`DataStream] context >>= function
   | `DataStream text ->
     authenticate text context
   | _ -> return `Rset (* will not get here, cause of DataStream *)
 
 let rec authlogin user context =
-  Printf.printf "# starting authlogin\n%!";
+  Log_.log `Debug "smtp starting authlogin\n";
   next ~isdata:true ~next_state:[`DataStream] context >>= function
   | `DataStream text -> 
     begin
@@ -375,7 +377,7 @@ let rec authlogin user context =
   | _ -> return `Rset (* will not get here, cause of DataStream *)
 
 let rec helo context =
-  Printf.printf "# starting helo\n%!";
+  Log_.log `Debug "smtp: starting helo\n";
   next ~next_state:[`MailFrom;`Ehlo;`Helo;`Noop;`Vrfy;] context >>= function
   | `MailFrom from -> return (`State (mailfrom, {context with from}))
   | cmd -> all (helo) context cmd
@@ -390,7 +392,7 @@ let doauth context = function
   | `AuthLogin -> return (`State (authlogin None ,context))
 
 let rec auth context =
-  Printf.printf "# starting auth\n%!";
+  Log_.log `Debug "smtp starting auth\n";
   next ~next_state:[`Ehlo;`Helo;`AuthPlain;`AuthLogin]
       ~msg:"530 5.7.0 Must issue a AUTH command first" context >>= function
   | `AuthPlain text as cmd -> doauth context cmd
@@ -398,7 +400,7 @@ let rec auth context =
   | cmd -> all (auth) context cmd
 
 let rec ehlo context =
-  Printf.printf "# starting ehlo\n%!";
+  Log_.log `Debug "smtp: starting ehlo\n";
   let (next_state,msg) = 
     if starttls_required context then
       ([`Ehlo;`Helo;`Starttls],"530 5.7.0 Must issue a STARTTLS command first")
@@ -417,7 +419,7 @@ let rec ehlo context =
   | cmd -> all (ehlo) context cmd
 
 let rec start context =
-  Printf.printf "# starting state\n%!";
+  Log_.log `Debug "smtp: starting state\n";
   let (next_state,msg) =
     if starttls_required context then
       ([`Ehlo;`Helo;`Starttls],"530 5.7.0 Must issue a STARTTLS command first")
@@ -461,11 +463,12 @@ let _ =
     (* temp, overwrite ssl/starttls with smtp_ssl/smtp_starttls *)
     let config = {srv_config with
       ssl=srv_config.smtp_ssl;starttls=srv_config.smtp_starttls} in
-    Printf.printf "imaplet_smtp: started %s:%d:%b:%b\n%!" 
-      config.smtp_addr config.smtp_port config.ssl config.starttls;
+    Log_.log `Info1 (Printf.sprintf "imaplet_smtp: started %s %s:%d:%b:%b\n" 
+      (ImapTime.to_string (ImapTime.now()))
+      config.smtp_addr config.smtp_port config.ssl config.starttls);
     server (`Inet (config.smtp_addr,config.smtp_port)) config 
     (fun sock inchan outchan ->
       greeting (mkcontext config sock inchan outchan)
-    ) (fun ex -> Printf.printf "imaplet_smtp: exception %s\n%!"
-    (Printexc.to_string ex); return ())
+    ) (fun ex -> Log_.log `Error (Printf.sprintf "imaplet_smtp: exception %s\n"
+    (Printexc.to_string ex)); return ())
   )

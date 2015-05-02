@@ -17,8 +17,11 @@ open Lwt
 open Imaplet
 open Commands
 open Commands.Server_config
+open Commands.Dates
 
 exception InvalidCommand
+
+let _ = Log_.set_log "imaplet.log"
 
 let rec args i net port ssl tls store =
   let bval = function
@@ -48,16 +51,24 @@ let rec args i net port ssl tls store =
     | _ -> raise InvalidCommand
 
 let usage () =
-  Printf.fprintf stderr "usage: imaplet -net [interface] -port [port] -ssl [true|false]
-  -starttls [true|false] -store[irmin;mbox:inboxpath,mailboxpath;maildir:maildirpath\n%!"
+  Log_.log `Error "usage: imaplet -net [interface] -port [port] -ssl [true|false]
+  -starttls [true|false] -store[irmin;mbox:inboxpath,mailboxpath;maildir:maildirpath\n"
 
 let commands f =
   try 
     let net,port,ssl,tls,store = args 1 None None None None None in
       try 
         f net port ssl tls store
-      with ex -> Printf.printf "%s\n%!" (Printexc.to_string ex)
+      with ex -> Log_.log `Error (Printf.sprintf "%s\n" (Printexc.to_string ex))
   with _ -> usage ()
+
+let log () =
+  let store_to_string = function
+    |`Irmin->"irmin"|`Mailbox->"mbox"|`Maildir->"maildir" in
+  Log_.log `Info1 (Printf.sprintf "imaplet: creating imap server %s: on %s:%d:%b:%b:%s:%s:%s\n"
+    (ImapTime.to_string (ImapTime.now()))
+    srv_config.addr srv_config.port srv_config.ssl srv_config.starttls
+    (store_to_string srv_config.data_store) srv_config.inbox_path srv_config.mail_path)
 
 (**
  * start the server
@@ -68,14 +79,15 @@ let () =
       (fun net port ssl tls store ->
         Lwt_main.run (catch(fun() ->
             let config = update_config srv_config net port ssl tls store in
+            log ();
             Server.create config >>= function
             | `Ok -> return ()
-            | `Error e -> Printf.fprintf stderr "%s" e; return ()
+            | `Error e -> Log_.log `Error e; return ()
           )
-          (fun ex -> Printf.fprintf stderr "imaplet: fatal exception: %s %s"
-            (Printexc.to_string ex) (Printexc.get_backtrace()); return()
+          (fun ex -> Log_.log `Error (Printf.sprintf "imaplet: fatal exception: %s %s"
+            (Printexc.to_string ex) (Printexc.get_backtrace())); return()
           )
         )
       )
   with Exit -> 
-    Printf.fprintf stderr "imaplet: terminated: %s" (Printexc.get_backtrace())
+    Log_.log `Error (Printf.sprintf "imaplet: terminated: %s" (Printexc.get_backtrace()))

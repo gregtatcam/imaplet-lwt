@@ -46,11 +46,7 @@ let init_unix_socket file =
   let socket = socket Unix.PF_UNIX Unix.SOCK_STREAM 0 in
   setsockopt socket Unix.SO_REUSEADDR true;
   bind socket sockaddr;
-  catch (fun () ->
-  getpwnam "postfix" >>= fun (pw:Lwt_unix.passwd_entry) ->
-  chown file pw.pw_uid pw.pw_gid >>= fun () ->
-  chmod file  0o777)
-  (fun _ -> Printf.printf "warning: postfix is not installed\n%!"; return ()) >>
+  chmod file 0o777 >>
   return socket
 
 let create_srv_socket addr = 
@@ -83,9 +79,8 @@ let rec accept_conn msgt sock cert =
   (fun ex ->
   match ex with
   | End_of_file -> accept_conn msgt sock cert
-  | _ -> Printf.printf "imaplet: accept_conn exception %s %s %s\n%!"
-    (msgt_to_str msgt) (Printexc.to_string ex) 
-    (Printexc.get_backtrace()); 
+  | _ -> Log_.log `Error (Printf.sprintf "imaplet: accept_conn exception %s %s %s\n"
+    (msgt_to_str msgt) (Printexc.to_string ex) (Printexc.get_backtrace())); 
     accept_conn msgt sock cert
   )
 
@@ -120,8 +115,8 @@ let init_connection msgt w =
       Lwt_io.flush w
   )
   (fun ex ->
-    Printf.printf "imaplet: exception writing initial capability %s %s\n%!" 
-      (msgt_to_str msgt) (Printexc.to_string ex);
+    Log_.log `Error (Printf.sprintf "imaplet: exception writing initial capability %s %s\n" 
+      (msgt_to_str msgt) (Printexc.to_string ex));
     return ()
   )
 

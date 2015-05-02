@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: d9f8758343aa2fbb5b40844ec7a45597)
+# DO NOT EDIT (digest: 944f9d04978fb67336adfc7b7053cb34)
 Account
 Amailbox
 Configuration
@@ -17,6 +17,7 @@ Install
 Interpreter
 Lazy_message
 Lex
+Log_
 Mailbox_storage
 Maildir_storage
 Parser

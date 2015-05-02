@@ -39,6 +39,8 @@ type imapConfig = {
   encrypt : bool; (* encrypt messages, default true *)
   compress : bool; (* compress messages, but not attachments, default true *)
   user_cert_path : string; (* user's certificate/key location *)
+  log : string; (* log location, default /var/log *)
+  log_level:[`Error|`Info1|`Info2|`Info3|`Debug]; (* log level, default error *)
 }
 
 let default_config = {
@@ -65,6 +67,8 @@ let default_config = {
   encrypt = true;
   compress = true;
   user_cert_path = "/var/mail/accounts/%user%/cert";
+  log = "/var/log";
+  log_level = `Error;
 }
 
 let validate_config config =
@@ -90,8 +94,6 @@ let validate_config config =
     Utils.exists config.mail_path Unix.S_DIR >>= fun res ->
     err res "Invalid Maildir path in "
 
-let store_to_string = function |`Irmin->"irmin"|`Mailbox->"mbox"|`Maildir->"maildir"
-
 let update_config config net port ssl tls store =
   let port = (match port with |None -> config.port|Some port->port) in
   let ssl = (match ssl with |None -> config.ssl|Some ssl->ssl) in
@@ -104,8 +106,6 @@ let update_config config net port ssl tls store =
   | Some (store,inbox,mail) -> (store,mail,inbox)
   end
   in
-  Printf.printf "imaplet: creating imap server on %s:%d:%b:%b:%s:%s:%s\n%!"
-    addr port ssl starttls (store_to_string data_store) inbox_path mail_path;
   {config with inbox_path;mail_path;addr;port;ssl;starttls;data_store}
 
 let exists file =
@@ -135,7 +135,7 @@ let config_of_lines lines =
           let n = Str.matched_group 1 hd in
           let v = Str.matched_group 2 hd in
           let v = Regex.replace ~regx:"\"" ~tmpl:"" v in
-          let log n v = Printf.printf "%s: invalid value %s\n%!" n v in
+          let log n v = Printf.fprintf stderr "%s: invalid value %s\n%!" n v in
           let ival n v default = try int_of_string v with _ -> log n v; default in
           let bval n v default = try bool_of_string v with _ -> log n v; default in
           let stval n = function
@@ -164,7 +164,16 @@ let config_of_lines lines =
           | "encrypt" -> {acc with encrypt = (bval n v true)}
           | "compress" -> {acc with encrypt = (bval n v true)}
           | "user_cert_path" -> {acc with user_cert_path = v}
-          | _ -> Printf.printf "unknown configuration %s\n%!" n; acc
+          | "log" -> {acc with log = v}
+          | "log_level" -> {acc with log_level =
+            match v with
+            | "error" -> `Error
+            | "info1" -> `Info1
+            | "info2" -> `Info2
+            | "info3" -> `Info3
+            | "debug" -> `Debug
+            | _ -> log n v;`Error}
+          | _ -> Printf.fprintf stderr "unknown configuration %s\n%!" n; acc
         ) else 
           acc
       end 

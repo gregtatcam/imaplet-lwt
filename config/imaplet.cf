@@ -1,5 +1,11 @@
 # configuration file
 
+# log file location
+log /var/log
+
+# log level error/info1/info2/info3/debug
+log_level error
+
 # maximum email size in bytes
 max_msg_size 10000000
 

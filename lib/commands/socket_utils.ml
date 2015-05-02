@@ -17,12 +17,10 @@ open Lwt
 open Server_config
 
 let try_close cio =
-  Printf.printf "closing channel\n%!";
   catch (fun () -> Lwt_io.close cio)
   (function _ -> return ())
 
 let try_close_sock sock =
-  Printf.printf "closing socket\n%!";
   catch (fun () ->
     match sock with |None->return()|Some sock->Lwt_unix.close sock)
   (function _ -> return ())
@@ -44,11 +42,7 @@ let init_unix_socket file =
   let socket = socket Unix.PF_UNIX Unix.SOCK_STREAM 0 in
   setsockopt socket Unix.SO_REUSEADDR true;
   bind socket sockaddr;
-  catch (fun () ->
-  getpwnam "postfix" >>= fun (pw:Lwt_unix.passwd_entry) ->
-  chown file pw.pw_uid pw.pw_gid >>= fun () ->
-  chmod file  0o777)
-  (fun _ -> Printf.printf "warning: postfix is not installed\n%!"; return ()) >>
+  chmod file 0o777 >>
   return socket
 
 let create_srv_socket addr =
@@ -90,8 +84,8 @@ let rec accept_conn sock cert =
   (fun ex ->
   match ex with
   | End_of_file -> accept_conn sock cert
-  | _ -> Printf.printf "imaplet: accept_conn exception %s %s\n%!"
-    (Printexc.to_string ex) (Printexc.get_backtrace());
+  | _ -> Log_.log `Error (Printf.sprintf "socket: accept_conn exception %s %s\n%!"
+    (Printexc.to_string ex) (Printexc.get_backtrace()));
     accept_conn sock cert
   )
 
@@ -120,6 +114,10 @@ let client_send addr f =
   Lwt_unix.close socket >>
   try_close inchan >> try_close outchan
 
+let addr_to_string = function
+  | `Inet (addr,port) -> Printf.sprintf "%s:%d%!" addr port
+  | `Unix file -> file
+
 (**
  * start accepting connections
  **)
@@ -128,7 +126,7 @@ let server addr config f err =
   init_all addr config >>= fun (cert,sock) ->
   let rec connect f sock cert =
     accept_conn sock cert >>= fun (sock_c,(netr,netw)) ->
-    Printf.printf "accepted client connection\n%!";
+    Log_.log `Debug (Printf.sprintf "socket: accepted client connection %s\n%!" (addr_to_string addr));
     async ( fun () ->
       catch( fun () ->
         f sock_c netr netw >>
