@@ -107,6 +107,7 @@ Library commands
                     Response,
                     Seq_iterator,
                     Server_config,
+                    Socket_utils,
                     Ssl_,
                     Storage,
                     Storage_meta,
@@ -152,11 +153,19 @@ Executable imaplet_create_account
   BuildDepends	  : lwt,lwt.unix,lwt.syntax,threads,irmin.unix,imaplet.commands,imaplet
 
 Executable imaplet_lmtp
+  Build		  : false
+  Install	  : false
+  Path		  : servers
+  CompiledObject  : native
+  MainIs	  : imaplet_lmtp.ml
+  BuildDepends	  : lwt,lwt.unix,lwt.syntax,str,threads,sexplib.syntax,imaplet,imaplet.commands
+
+Executable imaplet_smtp
   Build		  : true
   Install	  : true
   Path		  : servers
   CompiledObject  : native
-  MainIs	  : imaplet_lmtp.ml
+  MainIs	  : imaplet_smtp.ml
   BuildDepends	  : lwt,lwt.unix,lwt.syntax,str,threads,sexplib.syntax,imaplet,imaplet.commands
 
 Executable imaplet_irmin_read

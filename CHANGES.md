@@ -20,3 +20,4 @@
 * the message is staged/commited under View keyed off imaplet:user
 * added user account creation
 * added per user configured key/certificate
+* added smtp server (replaced lmtp with smtp)

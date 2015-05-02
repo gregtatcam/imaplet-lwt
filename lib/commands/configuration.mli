@@ -29,6 +29,6 @@ val max_message_in_memory_size : int
 
 val get_mbox_flags : (string list*string list)
 
-val lmtp_srv_exec : string
+val smtp_srv_exec : string
 
-val lmtp_backlog : int
+val smtp_backlog : int

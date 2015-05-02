@@ -78,7 +78,7 @@ let get_mbox_flags =
   ["\\Answered"; "\\Flagged"; "\\Deleted"; "\\Seen"; "\\Draft"; "$NotJunk";
   "NotJunk"; "\\*"])
 
-(* lmtp *)
-let lmtp_srv_exec = Install.lmtp_srv_exec
+(* smtp *)
+let smtp_srv_exec = Install.smtp_srv_exec
 
-let lmtp_backlog = 10
+let smtp_backlog = 10

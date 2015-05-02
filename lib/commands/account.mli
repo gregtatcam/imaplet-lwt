@@ -19,3 +19,7 @@ val authenticate : Imaplet_types.authtype -> string ->
 
 val login : string -> string ->
   [`Ok of Imaplet_types.response * string * string | `Error of Imaplet_types.response] Lwt.t
+
+val authenticate_user : ?b64:bool -> ?users:string -> string -> ?password:string -> unit -> bool Lwt.t
+
+val plain_auth : string -> bool Lwt.t

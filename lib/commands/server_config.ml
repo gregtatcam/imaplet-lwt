@@ -23,8 +23,10 @@ type imapConfig = {
   irmin_expand : bool; (* expand the contents of the database to the filesystem, default false *)
   max_msg_size : int;
   imap_name : string; (* greeting name, default imaplet *)
-  lmtp_addr : string; (* lmtp server address, default 127.0.0.1 *)
-  lmtp_port : int; (* lmtp server port, default 24 *)
+  smtp_addr : string; (* smtp server address, default 127.0.0.1 *)
+  smtp_port : int; (* smtp server port, default 25 *)
+  smtp_ssl : bool; (* ssl enabled for smtp, default false *)
+  smtp_starttls : bool; (* starttls enabled for smtp, default false *)
   addr : string; (* server port, default 127.0.0.1 *)
   port : int; (* server port, default 993 *)
   ssl : bool; (* ssl enabled, default true *)
@@ -47,8 +49,10 @@ let default_config = {
   irmin_expand = false;
   max_msg_size = 0;
   imap_name = "imaplet";
-  lmtp_addr = "127.0.0.1";
-  lmtp_port = 24;
+  smtp_addr = "127.0.0.1";
+  smtp_port = 25;
+  smtp_ssl = false;
+  smtp_starttls = true;
   addr = "127.0.0.1";
   port = 993;
   ssl = true;
@@ -144,8 +148,10 @@ let config_of_lines lines =
           | "irmin_path" -> {acc with irmin_path = v}
           | "irmin_expand" -> {acc with irmin_expand = bval n v false}
           | "max_msg_size" -> {acc with max_msg_size = ival n v 10_000_000}
-          | "lmtp_addr" -> {acc with lmtp_addr = v}
-          | "lmtp_port" -> {acc with lmtp_port = ival n v 24}
+          | "smtp_addr" -> {acc with smtp_addr = v}
+          | "smtp_port" -> {acc with smtp_port = ival n v 24}
+          | "smtp_ssl" -> {acc with smtp_ssl = bval n v false}
+          | "smtp_starttls" -> {acc with smtp_starttls = bval n v true}
           | "addr" -> {acc with addr = v}
           | "port" -> {acc with port = (ival n v 993)}
           | "ssl" -> {acc with ssl = (bval n v true)}

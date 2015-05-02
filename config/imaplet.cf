@@ -15,11 +15,17 @@ user_cert_path /var/mail/accounts/%user%/cert
 # expand the contents of the database to the filesystem, default false
 irmin_expand false
 
-# lmtp server address, always the loopback
-lmtp_addr 127.0.0.1
+# smtp server address
+smtp_addr 127.0.0.1
 
-# lmtp server port
-lmtp_port 24
+# smtp server port, 25 no ssl/465 ssl
+smtp_port 25
+
+# smtp ssl enabled
+smtp_ssl false
+
+# smtp starttls enabled
+smtp_starttls true
 
 # imap server address for outside connections
 addr 127.0.0.1

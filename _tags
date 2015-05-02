@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: a050665dc9ef3d7d2f8751539a15cc0e)
+# DO NOT EDIT (digest: 6c1b531df35b6407c7c849a9d49eba6f)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -74,6 +74,7 @@ true: annot, bin_annot
 "lib/commands/response.cmx": for-pack(Commands)
 "lib/commands/seq_iterator.cmx": for-pack(Commands)
 "lib/commands/server_config.cmx": for-pack(Commands)
+"lib/commands/socket_utils.cmx": for-pack(Commands)
 "lib/commands/ssl_.cmx": for-pack(Commands)
 "lib/commands/storage.cmx": for-pack(Commands)
 "lib/commands/storage_meta.cmx": for-pack(Commands)
@@ -194,6 +195,23 @@ true: annot, bin_annot
 "servers/imaplet_lmtp.native": use_commands
 "servers/imaplet_lmtp.native": use_imaplet
 "servers/imaplet_lmtp.native": use_parsemail
+# Executable imaplet_smtp
+"servers/imaplet_smtp.native": pkg_cstruct.unix
+"servers/imaplet_smtp.native": pkg_fieldslib.syntax
+"servers/imaplet_smtp.native": pkg_irmin.unix
+"servers/imaplet_smtp.native": pkg_lwt
+"servers/imaplet_smtp.native": pkg_lwt.syntax
+"servers/imaplet_smtp.native": pkg_lwt.unix
+"servers/imaplet_smtp.native": pkg_nocrypto
+"servers/imaplet_smtp.native": pkg_re
+"servers/imaplet_smtp.native": pkg_re.posix
+"servers/imaplet_smtp.native": pkg_sexplib.syntax
+"servers/imaplet_smtp.native": pkg_str
+"servers/imaplet_smtp.native": pkg_threads
+"servers/imaplet_smtp.native": pkg_tls.lwt
+"servers/imaplet_smtp.native": use_commands
+"servers/imaplet_smtp.native": use_imaplet
+"servers/imaplet_smtp.native": use_parsemail
 <servers/*.ml{,i,y}>: use_imaplet
 # Executable imaplet_irmin_read
 "servers/imaplet_irmin_read.native": pkg_cstruct.unix

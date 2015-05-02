@@ -88,11 +88,21 @@ let handle_enable capability context =
 let handle_noop context =
   response context None (Resp_Ok (None, "NOOP completed")) None
 
+let get_selected context =
+  match Amailbox.user context.!mailbox with
+  | Some user ->
+      begin
+        match Amailbox.selected_mbox context.!mailbox with
+        | Some mailbox -> Some (user,mailbox)
+        | None -> None
+      end
+  | None -> None
+
 let handle_idle context =
   begin
-  match Amailbox.user context.!mailbox with
-  | Some user -> 
-    Connections.add_id context.id user context.!netw context.!capability
+  match get_selected context with
+  | Some (user,mailbox) ->
+      Connections.add_id context.id user mailbox context.!netw context.!capability
   | None -> ()
   end;
   response context None (Resp_Any ("+ idling")) None
@@ -262,35 +272,20 @@ let handle_status context mailbox optlist =
 (* send unsolicited response to idle clients *)
 let idle_clients context =
   let open Storage_meta in
-  let get_status () =
-   match Amailbox.selected_mbox context.!mailbox with
-   | Some mailbox ->
-    (Amailbox.examine context.!mailbox mailbox >>= function
-    |`Ok(mbx,header) -> return (Some header)
-    | _ -> return None
-    )
-   | None -> return None
-  in
-  match Amailbox.user context.!mailbox with
-  |Some user ->
-    let (_,idle) = List.fold_left (fun (i,acc) (ctx:client_context) ->
-      if ctx.user = user then 
-        i+1,i :: acc
-      else
-        i+1,acc
-    ) (0,[]) context.!connections in
-    if List.length idle > 0 then (
-      get_status () >>= function
-      | Some status ->
-        Lwt_list.iter_s (fun i ->
-          let ctx = List.nth context.!connections i in
+  match get_selected context with
+  | Some (user,mailbox) ->
+    begin
+    Amailbox.examine context.!mailbox mailbox >>= function
+    |`Ok(_,status) -> 
+      Lwt_list.iter_s (fun (ctx:client_context) ->
+        if ctx.user = user && ctx.mailbox = mailbox then (
           write_resp_untagged ctx.outch ("EXISTS " ^ (string_of_int status.count)) >>
           write_resp_untagged ctx.outch ("RECENT " ^ (string_of_int status.recent))
-        ) idle
-      | None -> return ()
-    ) else (
-      return ()
-    )
+        ) else
+          return ()
+      ) context.!connections
+    |_ -> return ()
+    end
   |None -> return ()
 
 (** handle append **)

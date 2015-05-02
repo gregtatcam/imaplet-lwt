@@ -13,4 +13,15 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
-val client_requests : [`Smtp|`Client] -> Context.context -> [`Done|`Starttls] Lwt.t
+open Lwt
+open Server_config
+
+val client_send : [`Inet of string*int|`Unix of string] -> (Lwt_io.input_channel ->
+  Lwt_io.output_channel -> unit Lwt.t) -> unit Lwt.t
+
+val server : [`Inet of string*int|`Unix of string] -> imapConfig -> 
+  (Lwt_unix.file_descr option -> Lwt_io.input_channel -> Lwt_io.output_channel -> unit Lwt.t) -> 
+  (exn -> unit Lwt.t) -> unit Lwt.t
+
+val starttls : imapConfig -> Lwt_unix.file_descr -> unit -> 
+  (Lwt_io.input_channel * Lwt_io.output_channel) Lwt.t

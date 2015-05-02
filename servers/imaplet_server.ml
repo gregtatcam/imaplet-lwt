@@ -43,13 +43,13 @@ let rec args i net port ssl tls store =
     | "-net" -> args (i+2) (Some Sys.argv.(i+1)) port ssl tls store
     | "-port" -> args (i+2) net (Some (int_of_string Sys.argv.(i+1))) ssl tls store
     | "-ssl" -> args (i+2) net port (Some (bval Sys.argv.(i+1))) tls store
-    | "-tls" -> args (i+2) net port ssl (Some (bval Sys.argv.(i+1))) store
+    | "-starttls" -> args (i+2) net port ssl (Some (bval Sys.argv.(i+1))) store
     | "-store" -> args (i+2) net port ssl tls (Some (sval Sys.argv.(i+1))) 
     | _ -> raise InvalidCommand
 
 let usage () =
   Printf.fprintf stderr "usage: imaplet -net [interface] -port [port] -ssl [true|false]
-  -tls [true|false] -store[irmin;mbox:inboxpath,mailboxpath;maildir:maildirpath\n%!"
+  -starttls [true|false] -store[irmin;mbox:inboxpath,mailboxpath;maildir:maildirpath\n%!"
 
 let commands f =
   try 

@@ -31,8 +31,8 @@ let rem_id id =
     i :: acc
   ) [] !connections
 
-let add_id id user outch capability =
-  connections := {id;user;outch;capability = ref []} :: !connections
+let add_id id user mailbox outch capability =
+  connections := {mailbox;id;user;outch;capability = ref []} :: !connections
 
 let add_capability id cap =
   connections := List.fold_left (fun acc (i:client_context) ->

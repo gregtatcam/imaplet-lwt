@@ -26,7 +26,7 @@ let try_close_sock sock =
   (function _ -> return ())
 
 let msgt_to_str = function
-  | `Lmtp -> "lmtp"
+  | `Smtp -> "smtp"
   | `Client -> "client"
 
 let init_socket addr port =
@@ -95,14 +95,14 @@ let init_local_delivery () =
   if pid <> 0 then
     ()
   else (
-    Unix.execv Configuration.lmtp_srv_exec [|Configuration.lmtp_srv_exec|]
+    Unix.execv Configuration.smtp_srv_exec [|Configuration.smtp_srv_exec|]
   )
 
 (* initialize all things *)
 let init_all config =
   let open Server_config in
   create_srv_socket (`Inet (config.addr,config.port)) >>= fun sock ->
-  create_srv_socket (`Unix (Filename.concat config.data_path "sock/lmtp")) >>= fun unix_sock ->
+  create_srv_socket (`Unix (Filename.concat config.data_path "sock/smtp")) >>= fun unix_sock ->
   init_local_delivery ();
   if config.ssl then (
     Ssl_.init_ssl config >>= fun cert ->
@@ -113,7 +113,7 @@ let init_all config =
 let init_connection msgt w =
   catch( fun () ->
     match msgt with
-    | `Lmtp -> return ()
+    | `Smtp -> return ()
     | `Client ->
       let resp = "* OK [CAPABILITY " ^ Configuration.capability ^ "] Imaplet ready.\r\n" in
       Lwt_io.write w resp >>
@@ -152,7 +152,7 @@ let create config =
           fun () ->
             init_connection msgt netw >>= fun() ->
             let ctx =
-              {id;connections=ref [];commands=ref (Stack.create());
+              {id;connections=connections;commands=ref (Stack.create());
                 netr=ref netr;netw=ref netw;state=ref
                 Imaplet_types.State_Notauthenticated;mailbox=ref (Amailbox.empty());
                 starttls=starttls config sock_c;highestmodseq=ref `None;
@@ -168,7 +168,7 @@ let create config =
       connect f msgt sock cert
     in
     let f a = a () in
-    async (fun() -> connect f `Lmtp unix_sock None);
+    async (fun() -> connect f `Smtp unix_sock None);
     connect async `Client sock cert
     end
   | `Error e -> return (`Error e)

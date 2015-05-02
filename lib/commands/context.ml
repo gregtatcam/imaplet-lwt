@@ -19,11 +19,12 @@ type client_context = {
   user: string;
   outch: Lwt_io.output_channel;
   capability: string list ref;
+  mailbox: string;
 }
 
 type context = {
   id : Int64.t;
-  connections : client_context list ref;
+  connections : (client_context list) ref;
   commands : Imaplet_types.clientRequest Stack.t ref;
   netr : Lwt_io.input_channel ref;
   netw : Lwt_io.output_channel ref;
