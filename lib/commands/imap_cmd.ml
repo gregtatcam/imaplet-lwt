@@ -88,13 +88,16 @@ let handle_enable capability context =
 let handle_noop context =
   response context None (Resp_Ok (None, "NOOP completed")) None
 
+let selected_mailbox_exn mbox =
+  option_value_exn (Amailbox.selected_mbox mbox)
+
 let get_selected context =
   match Amailbox.user context.!mailbox with
-  | Some user ->
+  | Some user -> 
       begin
         match Amailbox.selected_mbox context.!mailbox with
         | Some mailbox -> Some (user,mailbox)
-        | None -> None
+        | None -> Some (user,"")
       end
   | None -> None
 
@@ -270,17 +273,18 @@ let handle_status context mailbox optlist =
   )
 
 (* send unsolicited response to idle clients *)
-let idle_clients context =
+let idle_clients mailbox context =
   let open Storage_meta in
   match get_selected context with
-  | Some (user,mailbox) ->
+  | Some (user,_) ->
     begin
     Amailbox.examine context.!mailbox mailbox >>= function
     |`Ok(_,status) -> 
       Lwt_list.iter_s (fun (ctx:client_context) ->
         if ctx.user = user && ctx.mailbox = mailbox then (
-          write_resp_untagged ctx.outch ("EXISTS " ^ (string_of_int status.count)) >>
-          write_resp_untagged ctx.outch ("RECENT " ^ (string_of_int status.recent))
+          write_resp_untagged ctx.outch ("EXISTS " ^ (string_of_int status.count))
+          (*write_resp_untagged ctx.outch ("RECENT " ^ (string_of_int
+           * status.recent))*)
         ) else
           return ()
       ) context.!connections
@@ -304,7 +308,7 @@ let handle_append context mailbox flags date literal =
       | `Error e -> response context None (Resp_No(None,e)) None
       | `Eof i -> response context (Some State_Logout) (Resp_No(None, "Truncated Message")) None
       | `Ok -> 
-        idle_clients context >>= fun () ->
+        idle_clients mailbox context >>= fun () ->
         response context None (Resp_Ok(None, "APPEND completed")) None
   )
 
@@ -382,7 +386,7 @@ let handle_store context sequence flagsatt flagsval changedsince buid =
         "completed",""
       else
         "failed","[MODIFIED " ^ (String.concat "," modified) ^ "] " in
-    idle_clients context >>= fun () ->
+    idle_clients (selected_mailbox_exn context.!mailbox) context >>= fun () ->
     response context None (Resp_Ok(None, modified ^ conditional ^ "STORE " ^ success)) None
 
 let handle_copy context sequence mailbox buid =
@@ -390,14 +394,18 @@ let handle_copy context sequence mailbox buid =
   | `NotExists -> response context None (Resp_No(None,"Mailbox doesn't exist")) None
   | `NotSelectable ->  response context None (Resp_No(None,"Mailbox is not selectable")) None
   | `Error e -> response context None (Resp_No(None,e)) None
-  | `Ok -> response context None (Resp_Ok(None, "COPY completed")) None
+  | `Ok -> 
+    idle_clients mailbox context >>
+    response context None (Resp_Ok(None, "COPY completed")) None
 
 let handle_expunge context =
   Amailbox.expunge context.!mailbox (write_resp_untagged context.!netw) >>= function
   | `NotExists -> response context  None (Resp_No(None,"Mailbox doesn't exist")) None
   | `NotSelectable ->  response context  None (Resp_No(None,"Mailbox is not selectable")) None
   | `Error e -> response context None (Resp_No(None,e)) None
-  | `Ok -> response context None (Resp_Ok(None, "EXPUNGE completed")) None
+  | `Ok -> 
+    idle_clients (selected_mailbox_exn context.!mailbox) context >>
+    response context None (Resp_Ok(None, "EXPUNGE completed")) None
 
 (**
  * Done Selected state
