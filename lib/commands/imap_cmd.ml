@@ -281,7 +281,7 @@ let idle_clients mailbox context =
     Amailbox.examine context.!mailbox mailbox >>= function
     |`Ok(_,status) -> 
       Lwt_list.iter_s (fun (ctx:client_context) ->
-        if ctx.user = user && ctx.mailbox = mailbox then (
+        if ctx.user = user then (
           write_resp_untagged ctx.outch ("EXISTS " ^ (string_of_int status.count))
           (*write_resp_untagged ctx.outch ("RECENT " ^ (string_of_int
            * status.recent))*)
