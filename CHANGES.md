@@ -21,3 +21,6 @@
 * added user account creation
 * added per user configured key/certificate
 * added smtp server (replaced lmtp with smtp)
+* added option to iterate messages in reverse order
+* added untagges response in NOOP
+* added tracking of selected mailboxes for the same account from different clients for IDLE command.

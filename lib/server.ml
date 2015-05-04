@@ -151,7 +151,7 @@ let create config =
                 netr=ref netr;netw=ref netw;state=ref
                 Imaplet_types.State_Notauthenticated;mailbox=ref (Amailbox.empty());
                 starttls=starttls config sock_c;highestmodseq=ref `None;
-                capability=ref [];config} in
+                capability=ref [];config;} in
             Imap_cmd.client_requests msgt ctx >>= fun _ ->
             rem_id id;
             try_close ctx.!netr >> try_close ctx.!netw >> try_close_sock sock_c 

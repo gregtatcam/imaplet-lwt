@@ -19,7 +19,10 @@ type client_context = {
   user: string;
   outch: Lwt_io.output_channel;
   capability: string list ref;
-  mailbox: string;
+  mailbox: string ref;
+  idle: bool ref;
+  selected: bool ref;
+  modseq: int64 ref;
 }
 
 type context = {
