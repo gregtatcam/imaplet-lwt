@@ -20,19 +20,23 @@ module SequenceIterator :
     type t
 
     (* sequence -> max in seq *)
-    val create : sequence -> int -> int -> t
+    val create : sequence -> ?rev:bool -> ?test:bool -> int -> int -> t
 
-    val single : sequence -> bool
+    val single : sequence -> int option
 
     val next : t -> [`Ok of int|`End]
 
   end =
   struct
-    (* sequence, next element in sequence, current counter, max for the
-       counter, overal min and max for the mailbox *)
-    type t = sequence * int ref*int ref*int ref*int * int
+    (* sequence, rev, next element in sequence, current counter, max for the
+       counter, overal min and max for the mailbox, delta(±1) *)
+    type t = sequence * bool * int ref*int ref*int ref*int * int * int
 
-    let create seq min max = (seq,ref 0, ref 0, ref 0, min,max)
+    let create seq ?(rev=false) ?(test=false) min max = 
+      if rev then
+        (seq,rev,ref (List.length seq - 1), ref 0, ref 0, min,max,-1)
+      else
+        (seq,rev,ref 0, ref 0, ref 0, min,max,1)
 
     (* is this a single or a range *)
     let single seq =
@@ -41,16 +45,16 @@ module SequenceIterator :
         | SeqNumber sn ->
           (
           match sn with
-          | Number n -> true
-          | Wild -> false
+          | Number n -> Some n
+          | Wild -> None
           )
-        | SeqRange _ -> false
+        | SeqRange _ -> None
       else
-        false
+        None
 
     (* get next in sequence *)
     let next t = 
-      let s,nc,c,cmax,min,max = t in
+      let s,rev,nc,c,cmax,min,max,dl = t in
       let get_n m = function
         | Number n -> n
         | Wild -> m
@@ -60,21 +64,24 @@ module SequenceIterator :
         cmax := mx;
         `Ok !c
       in
-      c := !c + 1;
-      if !c > !cmax then (
-        if !nc >= List.length s then
+      c := !c + dl;
+      if rev && !c < !cmax || rev = false && !c > !cmax then (
+        if rev && !nc < 0 || rev = false && !nc >= List.length s then
           `End
         else (
           let seq = List.nth s !nc in
-          nc := !nc + 1; (* ref to the next element in the sequence *)
+          nc := !nc + dl; (* ref to the next element in the sequence *)
           match seq with
           | SeqNumber sn ->
             (match sn with
             | Number n -> update n n
-            | Wild -> update min max
+            | Wild -> update max max
             )
           | SeqRange (sn1,sn2) ->
-              update (get_n min sn1) (get_n max sn2)
+              if rev then
+                update (get_n max sn2) (get_n min sn1)
+              else
+                update (get_n min sn1) (get_n max sn2)
         )
       ) else
         `Ok !c

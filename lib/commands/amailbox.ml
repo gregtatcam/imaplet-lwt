@@ -333,27 +333,29 @@ let close mailboxt =
   {mailboxt with selected=`None}
 
 (* iterator for message number or uid sequence *)
-let get_iterator (module Mailbox: Storage.Storage_inst) buid sequence =
+let get_iterator (module Mailbox: Storage.Storage_inst) buid sequence rev =
   let open Seq_iterator in
-  if SequenceIterator.single sequence then (
-    return (Some (SequenceIterator.create sequence 1 ((Int32.to_int (Int32.max_int)) * 2) ))
+  let single = SequenceIterator.single sequence in
+  if single <> None then (
+    return (Some (SequenceIterator.create sequence ~rev
+      (Utils.option_value_exn single) (Utils.option_value_exn single) ))
   ) else (
     Mailbox.MailboxStorage.status Mailbox.this >>= fun mailbox_metadata ->
     if buid = false then (
-      return (Some (SequenceIterator.create sequence 1 mailbox_metadata.count))
+      return (Some (SequenceIterator.create sequence ~rev 1 mailbox_metadata.count))
     ) else (
       Mailbox.MailboxStorage.fetch_message_metadata Mailbox.this (`Sequence 1) >>= function
       | `Ok message_metadata ->
-        return (Some (SequenceIterator.create sequence message_metadata.uid
+        return (Some (SequenceIterator.create sequence ~rev message_metadata.uid
           (mailbox_metadata.uidnext - 1)))
       | _ -> return None
     )
   )
 
 (* iterate over the sequence, call f for each position *)
-let iter_selected_with_seq (module Mailbox:Storage.Storage_inst) sequence buid f acc =
+let iter_selected_with_seq (module Mailbox:Storage.Storage_inst) sequence ?(rev=false) buid f acc =
   let open Interpreter in
-  get_iterator (module Mailbox) buid sequence >>= function
+  get_iterator (module Mailbox) buid sequence rev >>= function
   | None -> return acc
   | Some it ->
     let open Seq_iterator in
@@ -594,7 +596,7 @@ let expunge mailboxt resp_writer =
   | `Error e -> return (`Error e)
   | `Ok (_,(module Mailbox)) ->
   Mailbox.MailboxStorage.status Mailbox.this >>= fun mailbox_metadata ->
-  iter_selected_with_seq (module Mailbox) sequence true (fun mailbox_metadata pos seq ->
+  iter_selected_with_seq (module Mailbox) sequence ~rev:true true (fun mailbox_metadata pos seq ->
     Mailbox.MailboxStorage.fetch_message_metadata Mailbox.this pos >>= function
     | `Eof -> return (`Eof mailbox_metadata)
     | `NotFound -> return (`Ok mailbox_metadata)
