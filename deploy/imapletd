@@ -1,0 +1,61 @@
+#! /bin/sh -e
+### BEGIN INIT INFO
+# Provides:          imaplet
+# Required-Start:    $time $local_fs $remote_fs
+# Required-Stop:     $time $local_fs $remote_fs
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: IMAP-imaplet daemon
+# Description:       Init script for the imaplet generation daemon
+### END INIT INFO
+#
+# Author:	"Gregory T" <gregtsip@gmail.com>
+#
+set -e
+
+PATH=/bin:/usr/bin:/sbin:/usr/sbin:/usr/local/bin
+DAEMON=/usr/local/bin/imaplet
+NAME=imaplet
+IMAP_DIR=/run
+PIDFILE=$IMAP_DIR/imaplet.pid
+
+test -x $DAEMON || exit 0
+
+. /lib/lsb/init-functions
+
+case "$1" in
+  start)
+	log_daemon_msg "Starting imaplet" "imaplet"
+	#mkdir -p `dirname $PIDFILE`
+	start-stop-daemon --start -b --quiet -m --pidfile "$PIDFILE" --exec $DAEMON
+	#start_daemon -p $PIDFILE $DAEMON &
+	log_end_msg $?
+    ;;
+  stop)
+	log_daemon_msg "Stopping imaplet" "imaplet"
+	pkill -f imaplet_smtp
+	killproc -p $PIDFILE $DAEMON
+	#start-stop-daemon --stop --quiet --retry 5 --pidfile "$PIDFILE" --name $NAME
+	log_end_msg $?
+    ;;
+  status)
+	if pidofproc -p $PIDFILE $DAEMON >/dev/null 2>&1; then
+	    echo "$DAEMON is running";
+	    exit 0;
+	else
+	    echo "$DAEMON is NOT running";
+	    if test -f $PIDFILE; then exit 2; fi
+	    exit 3;
+	fi
+    ;;
+  force-reload|restart)
+    $0 stop
+    $0 start
+    ;;
+  *)
+    echo "Usage: /etc/init.d/imapletd {start|stop|restart|status}"
+    exit 1
+    ;;
+esac
+
+exit 0

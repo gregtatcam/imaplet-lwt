@@ -143,7 +143,11 @@ Executable imaplet
   DataFiles	  : ../certificates/server.pem($datadir/imaplet),
                     ../certificates/server.key($datadir/imaplet),
                     ../config/imaplet.cf($datadir/imaplet),
-                    ../config/users($datadir/imaplet)
+                    ../config/users($datadir/imaplet),
+                    ../deploy/crt.pl($datadir/imaplet),
+                    ../deploy/imaplet.html($datadir/imaplet),
+                    ../deploy/deploy.sh($datadir/imaplet),
+                    ../deploy/imapletd($datadir/imaplet)
 
 Executable imaplet_create_account
   Build		  : true
@@ -152,6 +156,14 @@ Executable imaplet_create_account
   CompiledObject  : native
   MainIs	  : imaplet_create_account.ml
   BuildDepends	  : lwt,lwt.unix,lwt.syntax,threads,irmin.unix,imaplet.commands,imaplet
+
+Executable imaplet_deploy
+  Build		  : true
+  Install	  : true
+  Path		  : deploy
+  CompiledObject  : native
+  MainIs	  : imaplet_deploy.ml
+  BuildDepends	  : lwt,lwt.unix,lwt.syntax,threads,imaplet.commands,imaplet
 
 Executable imaplet_lmtp
   Build		  : false

@@ -24,3 +24,4 @@
 * added option to iterate messages in reverse order
 * added untagges response in NOOP
 * added tracking of selected mailboxes for the same account from different clients for IDLE command.
+* added deploy instructions for Ubuntu

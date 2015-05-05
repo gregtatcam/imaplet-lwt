@@ -22,10 +22,10 @@ user_cert_path /var/mail/accounts/%user%/cert
 irmin_expand false
 
 # smtp server address
-smtp_addr 0.0.0.0
+smtp_addr 127.0.0.1
 
-# smtp server port 25,587
-smtp_port 587
+# smtp server port, 25 no ssl/465 ssl
+smtp_port 25
 
 # smtp ssl enabled
 smtp_ssl false
@@ -34,16 +34,16 @@ smtp_ssl false
 smtp_starttls true
 
 # imap server address for outside connections
-addr 0.0.0.0
+addr 127.0.0.1
 
 # imap server port for outside connections, 143 no ssl/993 ssl
-port 993
+port 143
 
 # is ssl enabled
-ssl true
+ssl false
 
 # is starttls enabled
-starttls true
+starttls false
 
 # inbox location for the storage (irmin, mbox(/var/mail), mailbox, etc)
 # blank for irmin
