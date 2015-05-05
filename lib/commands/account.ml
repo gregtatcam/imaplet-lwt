@@ -58,18 +58,22 @@ let b64decode b64 =
    Cstruct.to_string (Nocrypto.Base64.decode (Cstruct.of_string b64))
 
 let parse_user_b64 b64 =
-  try 
-   let buff = b64decode b64 in (** need to log this if it fails **)
-   let _ = Str.search_forward (Str.regexp
-   "^\\([^\\]+\\)\000\\([^\\]+\\)\000\\([^\\]+\\)$") buff 0 in
-   let u1 = Str.matched_group 1 buff in
-   let u2 = Str.matched_group 2 buff in
-   let p = Str.matched_group 3 buff in
-   if u1 = u2 then
-     Some (u1,p)
-   else
-     None
-  with _ ->
+  let buff = b64decode b64 in (** need to log this if it fails **)
+  let r1 = Str.regexp "^\\([^\\]+\\)\000\\([^\\]+\\)\000\\([^\\]+\\)$" in
+  let r2 = Str.regexp "^\000\\([^\\]+\\)\000\\([^\\]+\\)$" in
+  if Str.string_match r1 buff 0 then (
+    let u1 = Str.matched_group 1 buff in
+    let u2 = Str.matched_group 2 buff in
+    let p = Str.matched_group 3 buff in
+    if u1 = u2 then
+      Some (u1,p)
+    else
+      None
+  ) else if Str.string_match r2 buff 0 then (
+    let u = Str.matched_group 1 buff in
+    let p = Str.matched_group 2 buff in
+    Some (u,p)
+  ) else
     None
 
 let match_user line user =
