@@ -365,8 +365,8 @@ let idle_clients mailbox context =
     |`Ok(_,status) -> 
       Lwt_list.iter_s (fun (ctx:client_context) ->
         if ctx.user = user && ctx.!idle && mailbox = ctx.!mailbox then (
-          write_resp_untagged ctx.outch ("EXISTS " ^ (string_of_int status.count)) >>
-          write_resp_untagged ctx.outch ("RECENT " ^ (string_of_int status.recent)) >>
+          write_resp_untagged ctx.outch (Printf.sprintf "%d EXISTS" status.count) >>
+          write_resp_untagged ctx.outch (Printf.sprintf "%d RECENT" status.recent) >>
           write_resp_untagged ctx.outch ("Ok still here")
         ) else
           return ()
@@ -563,14 +563,14 @@ let rec read_network reader writer buffer =
   | Some buff -> return (`Ok buff)
   )
   (fun ex -> match ex with
-    | End_of_file -> return `Done
+    | End_of_file -> Log_.log `Info1 "### received EOF on network read\n"; return `Done
     | _ -> raise ex
   )
   end >>= function
   | `Done -> return `Done
   | `None -> return (`Ok (Buffer.contents buffer))
   | `Ok buff ->
-  Log_.log `Info3 (Printf.sprintf "--> %s\n%!" buff);
+  Log_.log `Info3 (Printf.sprintf "----> %s\n%!" buff);
   (** does command end in the literal {[0-9]+} ? **)
   let i = match_regex_i buff ~regx:"{\\([0-9]+\\)[+]?}$" in
   if i < 0 then (
@@ -668,4 +668,5 @@ let rec client_requests msgt context =
         write_resp context.!netw ~tag:command.tag response >> client_requests msgt context
       )
   )
-  (fun _ -> return `Done)
+  (fun ex -> Log_.log `Error (Printf.sprintf "client_requests exception: %s\n"
+    (Printexc.to_string ex)); return `Done)
