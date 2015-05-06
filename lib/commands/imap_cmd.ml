@@ -95,7 +95,7 @@ let rem_id context =
   ) None >>= function
   | None -> return false
   | Some ctx ->
-    ctx.!idle = false;
+    ctx.idle := false;
     if ctx.!selected = false then (
       Connections.rem_id context.id;
       return true 
@@ -570,6 +570,7 @@ let rec read_network reader writer buffer =
   | `Done -> return `Done
   | `None -> return (`Ok (Buffer.contents buffer))
   | `Ok buff ->
+  Log_.log `Info3 (Printf.sprintf "--> %s\n%!" buff);
   (** does command end in the literal {[0-9]+} ? **)
   let i = match_regex_i buff ~regx:"{\\([0-9]+\\)[+]?}$" in
   if i < 0 then (

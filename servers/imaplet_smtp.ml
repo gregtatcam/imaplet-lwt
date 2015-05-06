@@ -74,7 +74,7 @@ let send_to_imap addr context =
   )
 
 let write context msg = 
-  Log_.log `Info1 (Printf.sprintf "--> %s\n" msg);
+  Log_.log `Info1 (Printf.sprintf "<-- %s\n" msg);
   let (_,w,_) = context.io in
   Lwt_io.write w (msg ^ "\r\n") 
 
@@ -267,7 +267,7 @@ let syntx_auth next_state ~msg cmd context =
 let next ?(isdata=false) ?(msg="503 5.5.1 Command out of sequence") ~next_state context =
   read context >>= function
   | None -> Log_.log `Debug "smtp: client terminated\n";return `Quit
-  | Some str -> Log_.log `Info3 (Printf.sprintf "smtp: <-- %s\n" str);
+  | Some str -> Log_.log `Info3 (Printf.sprintf "--> %s\n" str);
   let domatch ?(tmpl="\\(.*\\)$") rx =
     Regex.match_regex ~case:false ~regx:("^[ \t]*" ^ rx ^ tmpl) str in
   let get () = try Str.matched_group 1 str with _ -> "" in
