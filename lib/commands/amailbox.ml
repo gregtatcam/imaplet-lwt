@@ -94,7 +94,7 @@ let mbox_item path mailbox cnt =
     if path = "Drafts" then
       ["\\Drafts"]
     else if path = "Deleted Messages" then
-      ["\\Deleted"]
+      ["\\Trash"]
     else if path = "Sent Messages" then
       ["\\Sent"] 
     else
@@ -128,9 +128,12 @@ let list_ mailboxt subscribed mailbox wilcards =
 let add_list reference mailbox acc =
   let open Regex in
   let fixed = fixregx_mbox mailbox in
-  if dequote reference = "" && match_regex "INBOX" ~regx:fixed then 
-    ("INBOX", ["\\HasNoChildren"])::acc
-  else
+  if dequote reference = "" && match_regex "INBOX" ~regx:fixed then (
+    if List.exists (fun (m,_) -> (String.lowercase m) = "inbox") acc then
+      acc
+    else
+      ("INBOX", ["\\HasNoChildren"])::acc
+  ) else
     acc
 
 let get_path_and_regex reference mailbox =
@@ -169,8 +172,8 @@ let list_adjusted mailboxt subscribed reference mailbox =
     return ([])
   ) else (
     let (path,regx) = get_path_and_regex reference mailbox in
-    list_ mailboxt subscribed path regx >>= 
-      fun acc -> return (add_list reference mailbox acc)
+    list_ mailboxt subscribed path regx (*>>= 
+      fun acc -> return (add_list reference mailbox acc)*)
   )
 
 (** list mailbox **)
