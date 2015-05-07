@@ -273,7 +273,7 @@ let get_message_from_client reader writer literal =
   (** request the message from the client **)
   begin
     match literal with
-    | Literal n -> Response.write_resp writer (Resp_Cont("")) >> return n
+    | Literal n -> Response.write_resp Int64.zero writer (Resp_Cont("")) >> return n
     | LiteralPlus n -> return n
   end >>= fun size ->
   let message = String.create size in

@@ -32,6 +32,6 @@ module StatusResponse :
     val continue : ?text:string -> unit -> string
   end
 
-val write_resp : Lwt_io.output_channel -> ?tag:string -> response -> unit Lwt.t
+val write_resp : int64 -> Lwt_io.output_channel -> ?tag:string -> response -> unit Lwt.t
 
-val write_resp_untagged : Lwt_io.output_channel -> string -> unit Lwt.t
+val write_resp_untagged : int64 -> Lwt_io.output_channel -> string -> unit Lwt.t
