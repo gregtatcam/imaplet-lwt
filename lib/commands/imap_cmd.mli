@@ -14,3 +14,4 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 val client_requests : [`Smtp|`Client] -> Context.context -> [`Done|`Starttls] Lwt.t
+val maintenance : Server_config.imapConfig -> unit Lwt.t

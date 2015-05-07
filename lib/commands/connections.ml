@@ -24,6 +24,11 @@ let next_id () =
   connid := Int64.add !connid Int64.one;
   !connid
 
+let fold f init =
+  List.fold_left (fun acc i ->
+    f acc i 
+  ) init !connections
+
 let find_id id f init =
   let ctx : client_context option ref = ref None in
   if List.exists (fun (c:client_context) -> 

@@ -25,3 +25,7 @@
 * added untagges response in NOOP
 * added tracking of selected mailboxes for the same account from different clients for IDLE command.
 * added deploy instructions for Ubuntu
+0.1.11
+* added maintenance to send notifications to IDLE'ed clients
+* fixed untagged search response - clients expect 'SEARCH' keyword before the list of matched sequence
+* added connection id to logging

@@ -47,7 +47,7 @@ let resp_highestmodseq is_modseq context () =
     match context.!highestmodseq with
     | `Sessionstart modseq ->
       context.highestmodseq := `Highestmodseq;
-      write_resp context.!netw (Resp_Ok (Some RespCode_Highestmodseq, Int64.to_string modseq))
+      write_resp context.id context.!netw (Resp_Ok (Some RespCode_Highestmodseq, Int64.to_string modseq))
     | _ -> return ()
   else
     return ()
@@ -129,27 +129,27 @@ let unset_recent_on_select context =
     return ()
 
 let handle_id context l =
-  write_resp context.!netw (Resp_Untagged (formated_id(Configuration.id))) >>
+  write_resp context.id context.!netw (Resp_Untagged (formated_id(Configuration.id))) >>
   response context None (Resp_Ok (None, "ID completed")) None
 
 let handle_capability context = 
   begin
   if (Amailbox.user context.!mailbox) = None then
-    write_resp context.!netw (Resp_Untagged (formated_capability(Configuration.capability)))
+    write_resp context.id context.!netw (Resp_Untagged (formated_capability(Configuration.capability)))
   else
-    write_resp context.!netw (Resp_Untagged (formated_capability(Configuration.auth_capability)))
+    write_resp context.id context.!netw (Resp_Untagged (formated_capability(Configuration.auth_capability)))
   end >>
   response context None (Resp_Ok (None, "CAPABILITY completed")) None
 
 let handle_logout context =
   unset_recent_on_close context >>
-  write_resp context.!netw (Resp_Bye(None,"")) >>
+  write_resp context.id context.!netw (Resp_Bye(None,"")) >>
   response context (Some State_Logout) (Resp_Ok (None, "LOGOUT completed")) None
 
 let handle_enable capability context =
   begin
   if context.!state = State_Notauthenticated then
-    write_resp context.!netw (Resp_Untagged ("ENABLED")) >>
+    write_resp context.id context.!netw (Resp_Untagged ("ENABLED")) >>
     return "ENABLE ignored in non-authenticated state."
   else (
     context.capability := capability :: context.!capability;
@@ -172,7 +172,7 @@ let handle_noop context =
        if Int64.compare ctx.!modseq status.modseq <> 0 then (
          (* also need to output changes "* EXPUNGE.." *)
          let resp_writer = (fun str -> 
-           write_resp_untagged context.!netw
+           write_resp_untagged context.id context.!netw
            (replace ~regx:"MODSEQ ([0-9]+) " ~tmpl:"" str)) in 
          let resp_prefix = (fun () -> return ()) in
          resp_writer ("EXISTS " ^ (string_of_int status.count)) >>
@@ -245,7 +245,7 @@ let handle_list context reference mailbox lsub =
     Amailbox.lsub context.!mailbox reference mailbox
   end >>= fun l ->
   Lwt_list.iter_s (fun (file, flags) ->
-      write_resp context.!netw (list_resp flags file)
+      write_resp context.id context.!netw (list_resp flags file)
   ) l >>
   response context None (Resp_Ok(None, "LIST completed")) None
 
@@ -272,16 +272,16 @@ let handle_select context mailbox condstore rw =
       let (flags,prmnt_flags) = Configuration.get_mbox_flags in
       let flags = to_plist (String.concat " " flags) in
       let pflags = to_plist (String.concat " " prmnt_flags) in
-      write_resp context.!netw (Resp_Untagged ("FLAGS " ^ flags)) >>
-      write_resp context.!netw (Resp_Ok (Some RespCode_Permanentflags, pflags)) >>
-      write_resp context.!netw (Resp_Untagged ((string_of_int header.count) ^ " EXISTS")) >>
-      write_resp context.!netw (Resp_Untagged ((string_of_int header.recent) ^ " RECENT")) >>
-      write_resp context.!netw (Resp_Ok (Some RespCode_Uidvalidity, header.uidvalidity)) >>
-      write_resp context.!netw (Resp_Ok (Some RespCode_Uidnext, string_of_int header.uidnext)) >>
-      write_resp context.!netw (Resp_Ok (Some RespCode_Highestmodseq, Int64.to_string header.modseq)) >>
+      write_resp context.id context.!netw (Resp_Untagged ("FLAGS " ^ flags)) >>
+      write_resp context.id context.!netw (Resp_Ok (Some RespCode_Permanentflags, pflags)) >>
+      write_resp context.id context.!netw (Resp_Untagged ((string_of_int header.count) ^ " EXISTS")) >>
+      write_resp context.id context.!netw (Resp_Untagged ((string_of_int header.recent) ^ " RECENT")) >>
+      write_resp context.id context.!netw (Resp_Ok (Some RespCode_Uidvalidity, header.uidvalidity)) >>
+      write_resp context.id context.!netw (Resp_Ok (Some RespCode_Uidnext, string_of_int header.uidnext)) >>
+      write_resp context.id context.!netw (Resp_Ok (Some RespCode_Highestmodseq, Int64.to_string header.modseq)) >>
       begin
       if header.unseen <> 0 then
-        write_resp context.!netw (Resp_Ok (Some RespCode_Unseen, string_of_int header.unseen))
+        write_resp context.id context.!netw (Resp_Ok (Some RespCode_Unseen, string_of_int header.unseen))
       else
         return ()
       end >>
@@ -351,7 +351,7 @@ let handle_status context mailbox optlist =
       else
         acc ^ " " ^ str
     ) "" optlist) in
-    write_resp context.!netw (Resp_Untagged (to_plist output)) >>
+    write_resp context.id context.!netw (Resp_Untagged (to_plist output)) >>
     response context None (Resp_Ok(None, "STATUS completed")) None
   )
 
@@ -365,9 +365,9 @@ let idle_clients mailbox context =
     |`Ok(_,status) -> 
       Lwt_list.iter_s (fun (ctx:client_context) ->
         if ctx.user = user && ctx.!idle && mailbox = ctx.!mailbox then (
-          write_resp_untagged ctx.outch (Printf.sprintf "%d EXISTS" status.count) >>
-          write_resp_untagged ctx.outch (Printf.sprintf "%d RECENT" status.recent) >>
-          write_resp_untagged ctx.outch ("Ok still here")
+          write_resp_untagged context.id ctx.outch (Printf.sprintf "%d EXISTS" status.count) >>
+          write_resp_untagged context.id ctx.outch (Printf.sprintf "%d RECENT" status.recent) >>
+          write_resp_untagged context.id ctx.outch ("Ok still here")
         ) else
           return ()
       ) context.!connections
@@ -435,7 +435,7 @@ let handle_search context charset search buid =
       |None -> ""
       |Some modseq -> " (MODSEQ " ^ (Int64.to_string modseq) ^ ")"
     in
-    write_resp context.!netw (Resp_Untagged ((List.fold_left (fun acc i ->
+    write_resp context.id context.!netw (Resp_Untagged ("SEARCH " ^ (List.fold_left (fun acc i ->
       let s = string_of_int i in
       if acc = "" then 
         s 
@@ -449,7 +449,7 @@ let handle_fetch context sequence fetchattr changedsince buid =
   let resp_prefix = resp_highestmodseq (changedsince <> None) context in
   let t = Unix.gettimeofday () in
   Amailbox.fetch context.!mailbox resp_prefix (write_resp_untagged
-      context.!netw) sequence fetchattr changedsince buid >>= function
+      context.id context.!netw) sequence fetchattr changedsince buid >>= function
   | `NotExists -> response context None (Resp_No(None,"Mailbox doesn't exist")) None
   | `NotSelectable ->  response context None (Resp_No(None,"Mailbox is not selectable")) None
   | `Error e -> response context None (Resp_No(None,e)) None
@@ -459,7 +459,7 @@ let handle_fetch context sequence fetchattr changedsince buid =
 
 let handle_store context sequence flagsatt flagsval changedsince buid =
   let resp_prefix = resp_highestmodseq (changedsince <> None) context in
-  Amailbox.store context.!mailbox resp_prefix (write_resp_untagged context.!netw) sequence
+  Amailbox.store context.!mailbox resp_prefix (write_resp_untagged context.id context.!netw) sequence
       flagsatt flagsval changedsince buid >>= function
   | `NotExists -> response context None (Resp_No(None,"Mailbox doesn't exist")) None
   | `NotSelectable ->  response context None (Resp_No(None,"Mailbox is not selectable")) None
@@ -484,7 +484,7 @@ let handle_copy context sequence mailbox buid =
     response context None (Resp_Ok(None, "COPY completed")) None
 
 let handle_expunge context =
-  Amailbox.expunge context.!mailbox (write_resp_untagged context.!netw) >>= function
+  Amailbox.expunge context.!mailbox (write_resp_untagged context.id context.!netw) >>= function
   | `NotExists -> response context  None (Resp_No(None,"Mailbox doesn't exist")) None
   | `NotSelectable ->  response context  None (Resp_No(None,"Mailbox is not selectable")) None
   | `Error e -> response context None (Resp_No(None,e)) None
@@ -555,22 +555,24 @@ let handle_command context =
  * if the line ends with literal {N} and it is not the append
  * then read N bytes, otherwise return the buffer
  *)
-let rec read_network reader writer buffer =
+let rec read_network context buffer =
   begin
   catch ( fun () ->
-  Lwt_io.read_line_opt reader >>= function
+  Lwt_io.read_line_opt context.!netr >>= function
   | None -> return `None
   | Some buff -> return (`Ok buff)
   )
   (fun ex -> match ex with
-    | End_of_file -> Log_.log `Info1 "### received EOF on network read\n"; return `Done
+    | End_of_file -> 
+      Log_.log `Info1 (Printf.sprintf "### received EOF on network read %s\n" (Int64.to_string context.id)); 
+      return `Done
     | _ -> raise ex
   )
   end >>= function
   | `Done -> return `Done
   | `None -> return (`Ok (Buffer.contents buffer))
   | `Ok buff ->
-  Log_.log `Info3 (Printf.sprintf "----> %s\n%!" buff);
+  Log_.log `Info3 (Printf.sprintf "----> %s: %s\n%!" (Int64.to_string context.id) buff);
   (** does command end in the literal {[0-9]+} ? **)
   let i = match_regex_i buff ~regx:"{\\([0-9]+\\)[+]?}$" in
   if i < 0 then (
@@ -593,18 +595,18 @@ let rec read_network reader writer buffer =
       return (`Error "command too long")
     ) else (
       (if match_regex literal ~regx:"[+]}$" = false then
-        write_resp writer (Resp_Cont(""))
+        write_resp context.id context.!netw (Resp_Cont(""))
       else
         return ()
       ) >>
       let str = String.create len in
       Lwt.pick [
         Lwt_unix.sleep 5.0 >> return `Timeout; 
-        Lwt_io.read_into_exactly reader str 0 len >> return (`Ok str)
+        Lwt_io.read_into_exactly context.!netr str 0 len >> return (`Ok str)
       ] >>= function
       | `Ok str ->
         Buffer.add_string buffer str;
-        read_network reader writer buffer
+        read_network context buffer
       | `Timeout ->
         return (`Error "timeout")
     )
@@ -616,7 +618,7 @@ let get_command msgt context =
   let open Lex in
   catch (fun () ->
     let buffer = Buffer.create 0 in
-    read_network context.!netr context.!netw buffer >>= function
+    read_network context buffer >>= function
     | `Done -> return `Done
     | `Error err -> return (`Error err)
     | `Ok buff ->
@@ -659,14 +661,34 @@ let rec client_requests msgt context =
   catch ( fun () ->
     get_command msgt context >>= function
     | `Done -> return `Done
-    | `Error e -> write_resp context.!netw (Resp_Bad(None,e)) >> client_requests msgt context
+    | `Error e -> write_resp context.id context.!netw (Resp_Bad(None,e)) >> client_requests msgt context
     | `Ok -> handle_command context >>= fun response ->
       if context.!state = State_Logout then
         return `Done
       else (
         let command = Stack.top context.!commands in
-        write_resp context.!netw ~tag:command.tag response >> client_requests msgt context
+        write_resp context.id context.!netw ~tag:command.tag response >> client_requests msgt context
       )
   )
   (fun ex -> Log_.log `Error (Printf.sprintf "client_requests exception: %s\n"
     (Printexc.to_string ex)); return `Done)
+
+(* scheduled maintenance 
+ * - send ping to idle clients
+ *)
+let rec maintenance config =
+  let open Server_config in
+  catch (fun () ->
+    Lwt_unix.sleep config.idle_interval >>
+    Connections.fold (fun acc ctx ->
+     acc >>= fun () ->
+     if ctx.!idle then (
+       write_resp_untagged ctx.id ctx.outch "OK still here"
+     ) else
+       return ()
+    ) (return())
+  ) 
+  (fun ex -> 
+    Log_.log `Error (Printf.sprintf "### maintenance error: %s\n" (Printexc.to_string ex));
+    return ()
+  ) >> maintenance config

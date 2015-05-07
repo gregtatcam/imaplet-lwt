@@ -41,6 +41,7 @@ type imapConfig = {
   user_cert_path : string; (* user's certificate/key location *)
   log : string; (* log location, default /var/log *)
   log_level:[`Error|`Info1|`Info2|`Info3|`Debug]; (* log level, default error *)
+  idle_interval: float; (* wait (sec) between idle 'still here' notifications, default 120 sec *)
 }
 
 let default_config = {
@@ -69,6 +70,7 @@ let default_config = {
   user_cert_path = "/var/mail/accounts/%user%/cert";
   log = "/var/log";
   log_level = `Error;
+  idle_interval = 120.;
 }
 
 let validate_config config =
@@ -138,6 +140,7 @@ let config_of_lines lines =
           let log n v = Printf.fprintf stderr "%s: invalid value %s\n%!" n v in
           let ival n v default = try int_of_string v with _ -> log n v; default in
           let bval n v default = try bool_of_string v with _ -> log n v; default in
+          let fval n v default = try float_of_string v with _ -> log n v; default in
           let stval n = function
             |"irmin"->`Irmin|"mbox"->`Mailbox|"maildir"->`Maildir|_->log n v; `Irmin in
           match n with 
@@ -164,6 +167,7 @@ let config_of_lines lines =
           | "encrypt" -> {acc with encrypt = (bval n v true)}
           | "compress" -> {acc with encrypt = (bval n v true)}
           | "user_cert_path" -> {acc with user_cert_path = v}
+          | "idle_interval" -> {acc with idle_interval = fval n v 120.}
           | "log" -> {acc with log = v}
           | "log_level" -> {acc with log_level =
             match v with

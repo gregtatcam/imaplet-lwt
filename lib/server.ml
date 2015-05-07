@@ -137,6 +137,7 @@ let create config =
   validate_config config >>= function
   | `Ok ->
     begin
+    async (fun () -> Imap_cmd.maintenance config);
     init_all config >>= fun (cert,sock,unix_sock) ->
     let rec connect f msgt sock cert =
       accept_conn msgt sock cert >>= fun (msgt,sock_c,(netr,netw)) ->
@@ -153,11 +154,13 @@ let create config =
                 starttls=starttls config sock_c;highestmodseq=ref `None;
                 capability=ref [];config;} in
             Imap_cmd.client_requests msgt ctx >>= fun _ ->
+            Log_.log `Info1 (Printf.sprintf "### closed client connection %s\n" (Int64.to_string id));
             rem_id id;
             try_close ctx.!netr >> try_close ctx.!netw >> try_close_sock sock_c 
         )
-        (function _ -> rem_id id; try_close netr >> try_close netw >>
-        try_close_sock sock_c) >>= fun () ->
+        (function _ -> 
+          Log_.log `Info1 (Printf.sprintf "### closed client connection %s\n" (Int64.to_string id));
+          rem_id id; try_close netr >> try_close netw >> try_close_sock sock_c) >>= fun () ->
         return `Ok
       ); 
       connect f msgt sock cert
