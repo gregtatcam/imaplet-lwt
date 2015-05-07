@@ -39,14 +39,16 @@ let group re = "\\(" ^ re ^ "\\)"
 
 let orx re1 re2 = re1 ^ "\\|" ^ re2
 
-let quote re = 
-  if match_regex re ~regx:"^\"[^\"]*\"$" then
+let dequote re =
+  replace ~regx:"\"" ~tmpl:"" re
+
+let quote ?(always=true) re = 
+  if always = false && match_regex re ~regx:"[ ]" = false then
+    dequote re
+  else if match_regex re ~regx:"^\"[^\"]*\"$" then
     re
   else
     dq ^ re ^ dq
-
-let dequote re =
-  replace ~regx:"\"" ~tmpl:"" re
 
 let list_of re = "(" ^ re ^ ")"
 

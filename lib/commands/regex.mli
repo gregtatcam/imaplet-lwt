@@ -27,7 +27,7 @@ val date_time_dqregex : string
 
 val email_date_regex : string
 
-val quote : string -> string
+val quote : ?always:bool -> string -> string
 
 val dequote : string -> string
 

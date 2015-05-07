@@ -186,7 +186,7 @@ let handle_noop context =
          return ()
       | _ -> return ()
       end
-  | None -> return ()
+    | None -> return ()
   ) () >>
   response context None (Resp_Ok (None, "NOOP completed")) None
 
@@ -351,7 +351,8 @@ let handle_status context mailbox optlist =
       else
         acc ^ " " ^ str
     ) "" optlist) in
-    write_resp context.id context.!netw (Resp_Untagged (to_plist output)) >>
+    let resp = "STATUS " ^ (quote ~always:false mailbox) ^ " " ^ (to_plist output) in
+    write_resp context.id context.!netw (Resp_Untagged resp) >>
     response context None (Resp_Ok(None, "STATUS completed")) None
   )
 

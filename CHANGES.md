@@ -29,3 +29,4 @@
 * added maintenance to send notifications to IDLE'ed clients
 * fixed untagged search response - clients expect 'SEARCH' keyword before the list of matched sequence
 * added connection id to logging
+* fix to STATUS to support mobile devices
