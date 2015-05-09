@@ -30,3 +30,4 @@
 * fixed untagged search response - clients expect 'SEARCH' keyword before the list of matched sequence
 * added connection id to logging
 * fix to STATUS to support mobile devices
+* improved client connections tracking, fixes for mobile devices
