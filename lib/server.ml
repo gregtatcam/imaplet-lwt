@@ -148,11 +148,12 @@ let create config =
           fun () ->
             init_connection msgt netw >>= fun() ->
             let ctx =
-              {id;connections=connections;commands=ref (Stack.create());
+              {id;client_id=ref [];commands=ref (Stack.create());
                 netr=ref netr;netw=ref netw;state=ref
                 Imaplet_types.State_Notauthenticated;mailbox=ref (Amailbox.empty());
                 starttls=starttls config sock_c;highestmodseq=ref `None;
-                capability=ref [];config;} in
+                noop_modseq = ref Int64.zero; capability=ref [];config;} in
+            add_id ctx;
             Imap_cmd.client_requests msgt ctx >>= fun _ ->
             Log_.log `Info1 (Printf.sprintf "### closed client connection %s\n" (Int64.to_string id));
             rem_id id;

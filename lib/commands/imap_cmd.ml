@@ -37,20 +37,30 @@ let response context state resp mailbox =
   end;
   return resp
 
-let highestmodseq context =
-  match context.!highestmodseq with
-  | `Sessionstart modseq -> Some modseq
-  | _ -> None
+let examine context =
+  match Amailbox.selected_mbox context.!mailbox with
+  | Some mailbox -> Amailbox.examine context.!mailbox mailbox
+  | None -> return `NotExists
 
 let resp_highestmodseq is_modseq context () =
   if is_modseq then
     match context.!highestmodseq with
-    | `Sessionstart modseq ->
-      context.highestmodseq := `Highestmodseq;
-      write_resp context.id context.!netw (Resp_Ok (Some RespCode_Highestmodseq, Int64.to_string modseq))
+    | `Sessionstart ->
+      begin
+      examine context >>= function
+      |`Ok(_,status) -> 
+         context.highestmodseq := `Highestmodseq;
+         write_resp context.id context.!netw (Resp_Ok (Some RespCode_Highestmodseq, Int64.to_string status.modseq))
+      |_ -> return ()
+      end
     | _ -> return ()
   else
     return ()
+
+let is_client_id l name value =
+  List.exists (fun (n,v) -> 
+    Regex.match_regex ~regx:("^\"?" ^ name) n && Regex.match_regex ~case:false ~regx:value v
+  ) l
 
 (* handle all commands
  * return either Ok, Bad, No, Preauth, Bye, or Continue response
@@ -68,45 +78,12 @@ let get_selected context =
   | Some user -> 
       begin
         match Amailbox.selected_mbox context.!mailbox with
-        | Some mailbox -> Some (user,Some mailbox)
-        | None -> Some (user,None)
+        | Some mailbox -> Some (user,mailbox)
+        | None -> Some (user,"")
       end
   | None -> None
 
-let handle_idle_or_selected ?(idle=false) ?(selected=false) context =
-  begin
-  match get_selected context with
-  | Some (user,mailbox) ->
-      Connections.add_id 
-        context.id 
-        ~idle 
-        ~selected
-        ~mailbox:(option_value ~default:"" mailbox)
-        ~modseq:(option_value ~default:Int64.zero (highestmodseq context))
-        user 
-        context.!netw 
-        context.!capability
-  | None -> ()
-  end
-
-let rem_id context =
-  Connections.find_id context.id (fun ctx ->
-    return (Some ctx)
-  ) None >>= function
-  | None -> return false
-  | Some ctx ->
-    ctx.idle := false;
-    if ctx.!selected = false then (
-      Connections.rem_id context.id;
-      return true 
-    ) else
-      return false 
-
-let handle_selected context =
-  handle_idle_or_selected ~selected:true context
-
 let handle_idle context =
-  handle_idle_or_selected ~idle:true context;
   response context None (Resp_Any ("+ idling")) None
 
 let unset_recent context =
@@ -116,19 +93,16 @@ let unset_recent context =
     (Interpreter.get_sequence "1:*") Store_MinusFlagsSilent [Flags_Recent] None false >>= fun _ -> return ()
   | None -> return ()
 
-let unset_recent_on_close context =
-  rem_id context >>= fun _ ->
-  unset_recent context
-
-let unset_recent_on_select context =
-  (* reset mailbox's recent flag when closing the mailbox *)
-  rem_id context >>= fun removed ->
-  if removed then
-    unset_recent_on_close context
-  else 
-    return ()
+let get_client_ids l =
+  let rec get l acc =
+    match l with
+    | n :: v :: tl -> let acc = (n,v) :: acc in get tl acc
+    | _ -> acc
+  in
+  get l []
 
 let handle_id context l =
+  context.client_id := get_client_ids l;
   write_resp context.id context.!netw (Resp_Untagged (formated_id(Configuration.id))) >>
   response context None (Resp_Ok (None, "ID completed")) None
 
@@ -142,7 +116,7 @@ let handle_capability context =
   response context None (Resp_Ok (None, "CAPABILITY completed")) None
 
 let handle_logout context =
-  unset_recent_on_close context >>
+  unset_recent context >>
   write_resp context.id context.!netw (Resp_Bye(None,"")) >>
   response context (Some State_Logout) (Resp_Ok (None, "LOGOUT completed")) None
 
@@ -153,51 +127,60 @@ let handle_enable capability context =
     return "ENABLE ignored in non-authenticated state."
   else (
     context.capability := capability :: context.!capability;
-    Connections.add_capability context.id capability;
     return "ENABLED"
   )
   end >>= fun msg ->
   response context None (Resp_Ok (None, msg)) None
 
+let unsolicited_response context (status:Storage_meta.mailbox_metadata) =
+  (* also need to output changes "* EXPUNGE.." *)
+  let resp_writer = (fun str -> (* remove modseq from the fetch response *)
+    write_resp_untagged context.id context.!netw
+    (replace ~regx:"MODSEQ ([0-9]+) " ~tmpl:"" str)) in 
+  let resp_prefix = (fun () -> return ()) in
+  resp_writer (Printf.sprintf "%d EXISTS" status.count) >>
+  resp_writer (Printf.sprintf "%d RECENT" status.recent) >>
+  Amailbox.fetch context.!mailbox resp_prefix resp_writer 
+   ([SeqRange (Number 1,Wild)]) (FetchAtt [Fetch_Flags]) 
+   (Some context.!noop_modseq) false >>= fun _ ->
+  context.noop_modseq := status.modseq;
+  return ()
+
 (** TBD should have a hook into the maintenance to recet inactivity **)
 let handle_noop context =
   (* check if modseq changed *)
   let open Storage_meta in
-  Connections.find_id context.id (fun ctx ->
-    match Amailbox.selected_mbox context.!mailbox with
-    | Some mailbox ->
-      begin
-      Amailbox.examine context.!mailbox mailbox >>= function
-      |`Ok(_,status) -> 
-       if Int64.compare ctx.!modseq status.modseq <> 0 then (
-         (* also need to output changes "* EXPUNGE.." *)
-         let resp_writer = (fun str -> 
-           write_resp_untagged context.id context.!netw
-           (replace ~regx:"MODSEQ ([0-9]+) " ~tmpl:"" str)) in 
-         let resp_prefix = (fun () -> return ()) in
-         resp_writer ("EXISTS " ^ (string_of_int status.count)) >>
-         resp_writer ("RECENT " ^ (string_of_int status.recent)) >>
-         Amailbox.fetch context.!mailbox resp_prefix resp_writer 
-          ([SeqRange (Number 1,Wild)]) (FetchAtt [Fetch_Flags]) 
-          (Some ctx.!modseq) false >>= fun _ -> 
-         ctx.modseq := status.modseq;
-         return ()
-       ) else
-         return ()
-      | _ -> return ()
-      end
-    | None -> return ()
-  ) () >>
+  begin
+  examine context >>= function
+  |`Ok(_,status) -> 
+    (* has modseq for the same mailbox been changed by another client? *) 
+    if Int64.compare context.!noop_modseq status.modseq <> 0 then (
+      unsolicited_response context status >>= fun () ->
+      (* noop resets highestmodseq *)
+      context.highestmodseq := `Highestmodseq;
+      return ()
+    ) else
+      return ()
+  | _ -> return ()
+  end >>
   response context None (Resp_Ok (None, "NOOP completed")) None
 
 let handle_done context =
-  rem_id context >>
   response context None (Resp_Ok (None, "IDLE")) None
 
 (**
  * Not Authenticated state
 **)
 let handle_authenticate context auth_type text =
+  begin
+  match text with 
+  | Some text -> return text
+  | None ->
+    write_resp context.id context.!netw (Resp_Cont("")) >>
+    Lwt_io.read_line context.!netr >>= fun text ->
+    Log_.log `Info3 (Printf.sprintf "----> %s: %s\n%!" (Int64.to_string context.id) text);
+    return text
+  end >>= fun text ->
   Account.authenticate auth_type text >>= function
     | `Ok (m,u,p) -> response context (Some State_Authenticated) m (Some
     (Amailbox.create context.config u))
@@ -267,8 +250,9 @@ let handle_select context mailbox condstore rw =
       (* might be tricky, it is probably shared by all clients which select this
        * mailbox
        *)
-      unset_recent_on_select context >>= fun () ->
-      context.highestmodseq := `Sessionstart header.modseq;
+      unset_recent context >>= fun () ->
+      context.highestmodseq := `Sessionstart;
+      context.noop_modseq := header.modseq;
       let (flags,prmnt_flags) = Configuration.get_mbox_flags in
       let flags = to_plist (String.concat " " flags) in
       let pflags = to_plist (String.concat " " prmnt_flags) in
@@ -290,9 +274,7 @@ let handle_select context mailbox condstore rw =
         response context (Some State_Selected) (Resp_Ok(Some RespCode_Read_write, "")) (Some mbx)
       else
         response context (Some State_Selected) (Resp_Ok(Some RespCode_Read_only, "")) (Some mbx)
-      end >>= fun resp ->
-      handle_selected context;
-      return resp
+      end
     )
 
 (** create a mailbox **)
@@ -351,7 +333,8 @@ let handle_status context mailbox optlist =
       else
         acc ^ " " ^ str
     ) "" optlist) in
-    let resp = "STATUS " ^ (quote ~always:false mailbox) ^ " " ^ (to_plist output) in
+    let prefix = ("STATUS " ^ (quote ~always:false mailbox) ^ " ") in
+    let resp = prefix ^ (to_plist output) in
     write_resp context.id context.!netw (Resp_Untagged resp) >>
     response context None (Resp_Ok(None, "STATUS completed")) None
   )
@@ -364,14 +347,18 @@ let idle_clients mailbox context =
     begin
     Amailbox.examine context.!mailbox mailbox >>= function
     |`Ok(_,status) -> 
-      Lwt_list.iter_s (fun (ctx:client_context) ->
-        if ctx.user = user && ctx.!idle && mailbox = ctx.!mailbox then (
-          write_resp_untagged context.id ctx.outch (Printf.sprintf "%d EXISTS" status.count) >>
-          write_resp_untagged context.id ctx.outch (Printf.sprintf "%d RECENT" status.recent) >>
-          write_resp_untagged context.id ctx.outch ("Ok still here")
-        ) else
-          return ()
-      ) context.!connections
+      Connections.fold (fun acc (ctx:context) ->
+        acc >>= fun () ->
+        match get_selected ctx with
+        | Some (ctx_user, ctx_mailbox) (* if not self and another client for same user/selected mbox *)
+            when context.id <> ctx.id && ctx_user = user && mailbox = ctx_mailbox ->
+          if Stack.is_empty ctx.!commands = false && is_idle (Stack.top ctx.!commands) then ( (* idle command is in progress for another client *)
+            unsolicited_response ctx status >>
+            write_resp_untagged context.id ctx.!netw ("Ok still here")
+          ) else
+            return ()
+        | _ -> return ()
+      ) (return())
     |_ -> return ()
     end
   |None -> return ()
@@ -405,8 +392,7 @@ let handle_append context mailbox flags date literal =
 **)
 
 let handle_close context =
-  unset_recent_on_close context >>= fun () ->
-  Connections.rem_id context.id;
+  unset_recent context >>= fun () ->
   context.highestmodseq := `None;
   let mbx = Amailbox.close context.!mailbox in
   response context (Some State_Authenticated) (Resp_Ok(None, "CLOSE completed")) (Some mbx)
@@ -423,7 +409,7 @@ let rec print_search_tree t indent =
 
 (** handle the charset TBD **)
 let handle_search context charset search buid =
-  let resp_prefix = resp_highestmodseq false context in
+  let resp_prefix = return in
   let t = Unix.gettimeofday () in
   Amailbox.search context.!mailbox resp_prefix search buid >>= function 
     (** what do these two states mean in this contex? TBD **)
@@ -436,7 +422,8 @@ let handle_search context charset search buid =
       |None -> ""
       |Some modseq -> " (MODSEQ " ^ (Int64.to_string modseq) ^ ")"
     in
-    write_resp context.id context.!netw (Resp_Untagged ("SEARCH " ^ (List.fold_left (fun acc i ->
+    let prefix = "SEARCH " in
+    write_resp context.id context.!netw (Resp_Untagged (prefix ^ (List.fold_left (fun acc i ->
       let s = string_of_int i in
       if acc = "" then 
         s 
@@ -683,8 +670,8 @@ let rec maintenance config =
     Lwt_unix.sleep config.idle_interval >>
     Connections.fold (fun acc ctx ->
      acc >>= fun () ->
-     if ctx.!idle then (
-       write_resp_untagged ctx.id ctx.outch "OK still here"
+     if (Stack.is_empty ctx.!commands = false) && is_idle (Stack.top ctx.!commands) then (
+       write_resp_untagged ctx.id ctx.!netw "OK still here"
      ) else
        return ()
     ) (return())

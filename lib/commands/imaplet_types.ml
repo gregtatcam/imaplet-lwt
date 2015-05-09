@@ -189,7 +189,7 @@ type anyCmd =
   
 type notAuthenticatedCmd =  
   | Cmd_Starttls (** start tls negotiation **)
-  | Cmd_Authenticate of authtype * string (** authentication mechanism **)
+  | Cmd_Authenticate of authtype * string option (** authentication mechanism **)
   | Cmd_Login of string * string (** user * password **)
   | Cmd_Lappend of string * string * literal (** user * password **)
   
