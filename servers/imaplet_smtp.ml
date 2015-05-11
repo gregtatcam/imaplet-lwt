@@ -81,7 +81,13 @@ let write context msg =
 let read context =
   let (r,_,_) = context.io in
   catch (fun () ->
-  Lwt_io.read_line_opt r
+    Lwt.pick [
+      (Lwt_unix.sleep  context.config.smtp_idle_max >> 
+      Lwt_unix.gethostname () >>= fun host ->
+      write context ("421 4.4.2 " ^ host ^ " Error: timeout exceeded") >>
+      return None);
+      Lwt_io.read_line_opt r;
+    ]
   ) (fun ex -> Log_.log `Error (Printf.sprintf "smtp:read exception %s\n" (Printexc.to_string ex));
   return None)
 

@@ -42,6 +42,7 @@ type imapConfig = {
   log : string; (* log location, default /var/log *)
   log_level:[`Error|`Info1|`Info2|`Info3|`Debug]; (* log level, default error *)
   idle_interval: float; (* wait (sec) between idle 'still here' notifications, default 120 sec *)
+  smtp_idle_max: float; (* smtp idle time-out, default 300 sec *)
 }
 
 val default_config : imapConfig

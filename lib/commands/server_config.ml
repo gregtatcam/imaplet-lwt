@@ -42,6 +42,7 @@ type imapConfig = {
   log : string; (* log location, default /var/log *)
   log_level:[`Error|`Info1|`Info2|`Info3|`Debug]; (* log level, default error *)
   idle_interval: float; (* wait (sec) between idle 'still here' notifications, default 120 sec *)
+  smtp_idle_max: float; (* smtp idle time-out, default 300 sec *)
 }
 
 let default_config = {
@@ -71,6 +72,7 @@ let default_config = {
   log = "/var/log";
   log_level = `Error;
   idle_interval = 120.;
+  smtp_idle_max = 300.
 }
 
 let validate_config config =
@@ -168,6 +170,7 @@ let config_of_lines lines =
           | "compress" -> {acc with encrypt = (bval n v true)}
           | "user_cert_path" -> {acc with user_cert_path = v}
           | "idle_interval" -> {acc with idle_interval = fval n v 120.}
+          | "smtp_idle_max" -> {acc with smtp_idle_max = fval n v 300.}
           | "log" -> {acc with log = v}
           | "log_level" -> {acc with log_level =
             match v with

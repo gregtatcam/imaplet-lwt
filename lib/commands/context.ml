@@ -27,4 +27,6 @@ type context = {
   highestmodseq : [`None|`Sessionstart|`Highestmodseq] ref;
   capability: string list ref;
   config: Server_config.imapConfig;
+  client_last_active: float ref;
+  client_timed_out: Lwt_mutex.t;
 }

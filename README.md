@@ -3,14 +3,12 @@ imaplet
 This is a prototype of IMAP server.
 
 To get started
-- install imaplet via opam: opam install imaplet
-- configure authentication in "users" file. 
-  The file can be found in ~/.opam/xxxx/share/imaplet/users or /usr/local/share/imaplet/users if installed manually. There is one line per configured user, for instance
-imaplet:{PLAIN}imaplet:501:::/Users/imaplet
-Where 'imaplet' is the user name, {PLAIN} is the supported authentication, 'imaplet' is the password, 501 is the user id (you can get with 'id' command on MAC X), /Users/imaplet is user's home directory.
-- configure run-time parameters in imaplet.cf (same dir as above). The important parameters to set:
-- irmin_path: path for the git repository, default is /var/mail/accounts/%user/repo
-- user_cert_path: path for the user's certificate, default is /var/mail/accounts/%user/cert
+- install imaplet via opam: opam install imaplet, or build it from source
+- if built from source then run: 'sudo make install'
+- run 'sudo imaplet_configure'. This will help you to set up configuration settings to run imaplet server for the first time. You can also update configuration settings in imaplet.cf file.
+The important parameters to set:
+- irmin_path: path for the git repository, default is /var/mail/accounts/%user%/repo, where %user% will be replaced with the actual user name
+- user_cert_path: path for the user's certificate, default is /var/mail/accounts/%user%/cert, where %user% will be replaced with the actual user name
 - addr: interface that IMAP server accepts connections on, default is 0.0.0.0
 - port: port to listen on, normally 993 for SSL and 143 for plain, default is 993
 - ssl: set to true to support ssl, default is true
@@ -19,7 +17,9 @@ Where 'imaplet' is the user name, {PLAIN} is the supported authentication, 'imap
 - smtp_port: port to listen on, normally it's either 25 or 587, default is 587
 - smtp_ssl: this option is rarely suppported by email clients, default is false
 - smtp_starttls: set to true to support STARTTLS, default is true
-- create new user account - view README in the deploy folder
+- log: location of the log files (imaplet.log and smtplet.log), by default it is /var/log. You can also set the logging go to stderr or stdout by setting the log to stderr|stdout
+- create new user account 
+  run 'sudo imaplet_create_account -u name:password'. This will create necessary folders, create some typical email boxes (INBOX, Drafts,etc), and update 'users' file containing user name/password. User's account by default is created in /var/mail/accounts. You have to create this directory if it doesn't exist.
 - import email archive
   there are two sample archives included in the data folder
   one is test.mbox with a few email messages in it

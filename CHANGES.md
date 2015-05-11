@@ -31,3 +31,6 @@
 * added connection id to logging
 * fix to STATUS to support mobile devices
 * improved client connections tracking, fixes for mobile devices
+0.1.12
+* added inactivity timeout
+* added configuration utility

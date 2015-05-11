@@ -152,7 +152,10 @@ let create config =
                 netr=ref netr;netw=ref netw;state=ref
                 Imaplet_types.State_Notauthenticated;mailbox=ref (Amailbox.empty());
                 starttls=starttls config sock_c;highestmodseq=ref `None;
-                noop_modseq = ref Int64.zero; capability=ref [];config;} in
+                noop_modseq = ref Int64.zero; capability=ref [];config;
+                client_last_active = ref (Unix.gettimeofday());
+                client_timed_out = Lwt_mutex.create ()} in
+            Lwt_mutex.lock ctx.client_timed_out >>= fun () ->
             add_id ctx;
             Imap_cmd.client_requests msgt ctx >>= fun _ ->
             Log_.log `Info1 (Printf.sprintf "### closed client connection %s\n" (Int64.to_string id));

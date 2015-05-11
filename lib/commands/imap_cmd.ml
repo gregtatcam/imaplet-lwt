@@ -22,6 +22,7 @@ open Utils
 
 exception SystemError of string
 exception ExpectedDone
+exception ClientTimedOut
 
 let response context state resp mailbox =
   begin
@@ -177,7 +178,10 @@ let handle_authenticate context auth_type text =
   | Some text -> return text
   | None ->
     write_resp context.id context.!netw (Resp_Cont("")) >>
-    Lwt_io.read_line context.!netr >>= fun text ->
+    Lwt.pick [
+      Lwt_mutex.lock context.client_timed_out >> raise ClientTimedOut;
+      Lwt_io.read_line context.!netr
+    ] >>= fun text ->
     Log_.log `Info3 (Printf.sprintf "----> %s: %s\n%!" (Int64.to_string context.id) text);
     return text
   end >>= fun text ->
@@ -546,9 +550,12 @@ let handle_command context =
 let rec read_network context buffer =
   begin
   catch ( fun () ->
-  Lwt_io.read_line_opt context.!netr >>= function
-  | None -> return `None
-  | Some buff -> return (`Ok buff)
+    Lwt.pick [
+      Lwt_mutex.lock context.client_timed_out >> return `Done;
+      Lwt_io.read_line_opt context.!netr >>= function
+      | None -> return `None
+      | Some buff -> return (`Ok buff)
+    ]
   )
   (fun ex -> match ex with
     | End_of_file -> 
@@ -558,8 +565,14 @@ let rec read_network context buffer =
   )
   end >>= function
   | `Done -> return `Done
-  | `None -> return (`Ok (Buffer.contents buffer))
+  | `None -> 
+    if Buffer.length buffer > 0 then (
+      context.client_last_active := Unix.gettimeofday ();
+      return (`Ok (Buffer.contents buffer))
+    ) else
+      return `Done
   | `Ok buff ->
+  context.client_last_active := Unix.gettimeofday ();
   Log_.log `Info3 (Printf.sprintf "----> %s: %s\n%!" (Int64.to_string context.id) buff);
   (** does command end in the literal {[0-9]+} ? **)
   let i = match_regex_i buff ~regx:"{\\([0-9]+\\)[+]?}$" in
@@ -589,6 +602,7 @@ let rec read_network context buffer =
       ) >>
       let str = String.create len in
       Lwt.pick [
+        Lwt_mutex.lock context.client_timed_out >> return `Done;
         Lwt_unix.sleep 5.0 >> return `Timeout; 
         Lwt_io.read_into_exactly context.!netr str 0 len >> return (`Ok str)
       ] >>= function
@@ -597,6 +611,7 @@ let rec read_network context buffer =
         read_network context buffer
       | `Timeout ->
         return (`Error "timeout")
+      | `Done -> return `Done
     )
   )
 
@@ -669,11 +684,17 @@ let rec maintenance config =
   catch (fun () ->
     Lwt_unix.sleep config.idle_interval >>
     Connections.fold (fun acc ctx ->
-     acc >>= fun () ->
-     if (Stack.is_empty ctx.!commands = false) && is_idle (Stack.top ctx.!commands) then (
-       write_resp_untagged ctx.id ctx.!netw "OK still here"
-     ) else
-       return ()
+      acc >>= fun () ->
+      let now = Unix.gettimeofday () in
+      if (now -. ctx.!client_last_active > 1800.) then (
+        Log_.log `Info1 (Printf.sprintf "### client %s timed-out\n" (Int64.to_string ctx.id));
+        write_resp ctx.id ctx.!netw (Resp_Bye(None,"Autologout; idle for too long")) >>= fun () ->
+        Lwt_mutex.unlock ctx.client_timed_out;
+        return ()
+      ) else if (Stack.is_empty ctx.!commands = false) && is_idle (Stack.top ctx.!commands) then (
+        write_resp_untagged ctx.id ctx.!netw "OK still here"
+      ) else
+        return ()
     ) (return())
   ) 
   (fun ex -> 

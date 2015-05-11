@@ -133,6 +133,14 @@ Executable parse_restore
   MainIs	  : parse_restore.ml
   BuildDepends	  : lwt,lwt.unix,lwt.syntax,tls.lwt,sexplib.syntax,threads,str,cstruct.unix,irmin.unix,imaplet,imaplet.parsemail,nocrypto,imaplet.commands
 
+Executable imaplet_configure
+  Build		  : true
+  Install	  : true
+  Path		  : servers
+  CompiledObject  : native
+  MainIs	  : imaplet_configure.ml
+  BuildDepends	  : lwt,lwt.unix,lwt.syntax,sexplib.syntax,threads,str,cstruct.unix,imaplet,imaplet.commands
+
 Executable imaplet
   Build		  : true
   Install	  : true
