@@ -20,7 +20,14 @@ let oc = ref stderr
 let set_log file =
   oc :=
   try
-    open_out_gen [Open_append;Open_creat] 0o666 (Filename.concat srv_config.log file)
+    if srv_config.log = "stderr" then
+      stderr
+    else if srv_config.log = "stdout" then
+      stdout
+    else if srv_config.log <> "" then
+      open_out_gen [Open_append;Open_creat] 0o666 (Filename.concat srv_config.log file)
+    else
+      stderr
   with _ -> stderr
 
 let is l allowed =
