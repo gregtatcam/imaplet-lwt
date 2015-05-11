@@ -17,10 +17,12 @@ open Lwt
 open Server_config
 
 let try_close cio =
+  Log_.log `Info3 "socket: closing channel\n";
   catch (fun () -> Lwt_io.close cio)
   (function _ -> return ())
 
 let try_close_sock sock =
+  Log_.log `Info3 "socket: closing socket\n";
   catch (fun () ->
     match sock with |None->return()|Some sock->Lwt_unix.close sock)
   (function _ -> return ())
