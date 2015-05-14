@@ -70,8 +70,8 @@ let aes_decrypt_pswd ~pswd data =
   let key = Cstruct.of_string pswd in
   let iv = key in
   let key = AES.CBC.of_secret key in
-  let decr = AES.CBC.decrypt ~key ~iv (Cstruct.of_string (remove_pad data)) in
-  Cstruct.to_string decr.message
+  let decr = AES.CBC.decrypt ~key ~iv (Cstruct.of_string data) in
+  remove_pad (Cstruct.to_string decr.message)
 
 let aes_encrypt ?(compress=false) data pub secrets =
   let open Nocrypto.Cipher_block in
