@@ -107,10 +107,12 @@ let authenticate_user ?(b64=false) ?(users=Install.users_path) user ?password ()
       | Some p -> (b64decode user, Some (b64decode p))
     )
   in
-  Lwt_io.with_file ~mode:Lwt_io.Input users (fun r -> read_users r user password)
+  Lwt_io.with_file ~mode:Lwt_io.Input users (fun r -> 
+    read_users r user password) >>= fun res ->
+  return (user,password,res)
 
 let auth_user user password resp_ok resp_no =
-  authenticate_user user ~password () >>= fun res ->
+  authenticate_user user ~password () >>= fun (_,_,res) ->
   if res then
     return (`Ok (Resp_Ok
     (None,Utils.formated_capability(Configuration.auth_capability)), user, password))
@@ -119,8 +121,9 @@ let auth_user user password resp_ok resp_no =
 
 let plain_auth text =
   match (parse_user_b64 text) with
-  | Some (u,p) -> authenticate_user u ?password:(Some p) ()
-  | None -> return false
+  | Some (u,p) -> 
+    authenticate_user u ?password:(Some p) () 
+  | None -> return ("",None,false)
 
 let _plain_auth text =
   match (parse_user_b64 text) with
