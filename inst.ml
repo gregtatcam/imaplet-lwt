@@ -10,4 +10,4 @@ let () =
   Printf.printf "  let bin_path = \"%s\"\n%!" bin;
   Printf.printf "  let users_path = \"%s/imaplet/users\"\n%!" data;
   Printf.printf "  let config_path = \"%s/imaplet/imaplet.cf\"\n%!" data;
-  Printf.printf "  let smtp_srv_exec = \"%s/imaplet_smtp\"\n%!" bin;
+  Printf.printf "  let smtp_srv_exec = \"%s/smtplet\"\n%!" bin;

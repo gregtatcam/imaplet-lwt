@@ -2,6 +2,7 @@
 
 cp -f imaplet_* /usr/local/bin/
 cp -f imaplet /usr/local/bin/
+cp -f smtplet /usr/local/bin/
 cp -f server.* /usr/local/share/imaplet/
 cp -f imapletd /etc/init.d/imapletd
 

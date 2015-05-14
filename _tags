@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: 4468d8b01a82f4d5814e717577118c8e)
+# DO NOT EDIT (digest: b66ed1e493a5233ae2978021f5512d40)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -60,6 +60,7 @@ true: annot, bin_annot
 "lib/commands/fetchregex.cmx": for-pack(Commands)
 "lib/commands/imap_cmd.cmx": for-pack(Commands)
 "lib/commands/imap_crypto.cmx": for-pack(Commands)
+"lib/commands/imaplet_dns.cmx": for-pack(Commands)
 "lib/commands/imaplet_types.cmx": for-pack(Commands)
 "lib/commands/irmin_core.cmx": for-pack(Commands)
 "lib/commands/irmin_storage.cmx": for-pack(Commands)
@@ -81,7 +82,10 @@ true: annot, bin_annot
 "lib/commands/storage_meta.cmx": for-pack(Commands)
 "lib/commands/utils.cmx": for-pack(Commands)
 <lib/commands/*.ml{,i,y}>: pkg_cstruct.unix
+<lib/commands/*.ml{,i,y}>: pkg_dns
+<lib/commands/*.ml{,i,y}>: pkg_dns.lwt
 <lib/commands/*.ml{,i,y}>: pkg_fieldslib.syntax
+<lib/commands/*.ml{,i,y}>: pkg_ipaddr
 <lib/commands/*.ml{,i,y}>: pkg_irmin.unix
 <lib/commands/*.ml{,i,y}>: pkg_lwt
 <lib/commands/*.ml{,i,y}>: pkg_lwt.syntax
@@ -98,7 +102,10 @@ true: annot, bin_annot
 "lib/imaplet.cmxs": use_imaplet
 "lib/server.cmx": for-pack(Imaplet)
 <lib/*.ml{,i,y}>: pkg_cstruct.unix
+<lib/*.ml{,i,y}>: pkg_dns
+<lib/*.ml{,i,y}>: pkg_dns.lwt
 <lib/*.ml{,i,y}>: pkg_fieldslib.syntax
+<lib/*.ml{,i,y}>: pkg_ipaddr
 <lib/*.ml{,i,y}>: pkg_irmin.unix
 <lib/*.ml{,i,y}>: pkg_lwt
 <lib/*.ml{,i,y}>: pkg_lwt.syntax
@@ -114,7 +121,10 @@ true: annot, bin_annot
 <lib/*.ml{,i,y}>: use_parsemail
 # Executable parse_restore
 "test/parse_restore.native": pkg_cstruct.unix
+"test/parse_restore.native": pkg_dns
+"test/parse_restore.native": pkg_dns.lwt
 "test/parse_restore.native": pkg_fieldslib.syntax
+"test/parse_restore.native": pkg_ipaddr
 "test/parse_restore.native": pkg_irmin.unix
 "test/parse_restore.native": pkg_lwt
 "test/parse_restore.native": pkg_lwt.syntax
@@ -130,7 +140,10 @@ true: annot, bin_annot
 "test/parse_restore.native": use_imaplet
 "test/parse_restore.native": use_parsemail
 <test/*.ml{,i,y}>: pkg_cstruct.unix
+<test/*.ml{,i,y}>: pkg_dns
+<test/*.ml{,i,y}>: pkg_dns.lwt
 <test/*.ml{,i,y}>: pkg_fieldslib.syntax
+<test/*.ml{,i,y}>: pkg_ipaddr
 <test/*.ml{,i,y}>: pkg_irmin.unix
 <test/*.ml{,i,y}>: pkg_lwt
 <test/*.ml{,i,y}>: pkg_lwt.syntax
@@ -147,7 +160,10 @@ true: annot, bin_annot
 <test/*.ml{,i,y}>: use_parsemail
 # Executable imaplet_configure
 "servers/imaplet_configure.native": pkg_cstruct.unix
+"servers/imaplet_configure.native": pkg_dns
+"servers/imaplet_configure.native": pkg_dns.lwt
 "servers/imaplet_configure.native": pkg_fieldslib.syntax
+"servers/imaplet_configure.native": pkg_ipaddr
 "servers/imaplet_configure.native": pkg_irmin.unix
 "servers/imaplet_configure.native": pkg_lwt
 "servers/imaplet_configure.native": pkg_lwt.syntax
@@ -164,7 +180,10 @@ true: annot, bin_annot
 "servers/imaplet_configure.native": use_parsemail
 # Executable imaplet
 "servers/imaplet_server.native": pkg_cstruct.unix
+"servers/imaplet_server.native": pkg_dns
+"servers/imaplet_server.native": pkg_dns.lwt
 "servers/imaplet_server.native": pkg_fieldslib.syntax
+"servers/imaplet_server.native": pkg_ipaddr
 "servers/imaplet_server.native": pkg_irmin.unix
 "servers/imaplet_server.native": pkg_lwt
 "servers/imaplet_server.native": pkg_lwt.syntax
@@ -181,7 +200,10 @@ true: annot, bin_annot
 "servers/imaplet_server.native": use_parsemail
 # Executable imaplet_create_account
 "servers/imaplet_create_account.native": pkg_cstruct.unix
+"servers/imaplet_create_account.native": pkg_dns
+"servers/imaplet_create_account.native": pkg_dns.lwt
 "servers/imaplet_create_account.native": pkg_fieldslib.syntax
+"servers/imaplet_create_account.native": pkg_ipaddr
 "servers/imaplet_create_account.native": pkg_irmin.unix
 "servers/imaplet_create_account.native": pkg_lwt
 "servers/imaplet_create_account.native": pkg_lwt.syntax
@@ -198,7 +220,10 @@ true: annot, bin_annot
 "servers/imaplet_create_account.native": use_parsemail
 # Executable imaplet_deploy
 "deploy/imaplet_deploy.native": pkg_cstruct.unix
+"deploy/imaplet_deploy.native": pkg_dns
+"deploy/imaplet_deploy.native": pkg_dns.lwt
 "deploy/imaplet_deploy.native": pkg_fieldslib.syntax
+"deploy/imaplet_deploy.native": pkg_ipaddr
 "deploy/imaplet_deploy.native": pkg_irmin.unix
 "deploy/imaplet_deploy.native": pkg_lwt
 "deploy/imaplet_deploy.native": pkg_lwt.syntax
@@ -214,7 +239,10 @@ true: annot, bin_annot
 "deploy/imaplet_deploy.native": use_imaplet
 "deploy/imaplet_deploy.native": use_parsemail
 <deploy/*.ml{,i,y}>: pkg_cstruct.unix
+<deploy/*.ml{,i,y}>: pkg_dns
+<deploy/*.ml{,i,y}>: pkg_dns.lwt
 <deploy/*.ml{,i,y}>: pkg_fieldslib.syntax
+<deploy/*.ml{,i,y}>: pkg_ipaddr
 <deploy/*.ml{,i,y}>: pkg_irmin.unix
 <deploy/*.ml{,i,y}>: pkg_lwt
 <deploy/*.ml{,i,y}>: pkg_lwt.syntax
@@ -231,7 +259,10 @@ true: annot, bin_annot
 <deploy/*.ml{,i,y}>: use_parsemail
 # Executable imaplet_lmtp
 "servers/imaplet_lmtp.native": pkg_cstruct.unix
+"servers/imaplet_lmtp.native": pkg_dns
+"servers/imaplet_lmtp.native": pkg_dns.lwt
 "servers/imaplet_lmtp.native": pkg_fieldslib.syntax
+"servers/imaplet_lmtp.native": pkg_ipaddr
 "servers/imaplet_lmtp.native": pkg_irmin.unix
 "servers/imaplet_lmtp.native": pkg_lwt
 "servers/imaplet_lmtp.native": pkg_lwt.syntax
@@ -248,7 +279,10 @@ true: annot, bin_annot
 "servers/imaplet_lmtp.native": use_parsemail
 # Executable imaplet_smtp
 "servers/imaplet_smtp.native": pkg_cstruct.unix
+"servers/imaplet_smtp.native": pkg_dns
+"servers/imaplet_smtp.native": pkg_dns.lwt
 "servers/imaplet_smtp.native": pkg_fieldslib.syntax
+"servers/imaplet_smtp.native": pkg_ipaddr
 "servers/imaplet_smtp.native": pkg_irmin.unix
 "servers/imaplet_smtp.native": pkg_lwt
 "servers/imaplet_smtp.native": pkg_lwt.syntax
@@ -266,7 +300,10 @@ true: annot, bin_annot
 <servers/*.ml{,i,y}>: use_imaplet
 # Executable imaplet_irmin_read
 "servers/imaplet_irmin_read.native": pkg_cstruct.unix
+"servers/imaplet_irmin_read.native": pkg_dns
+"servers/imaplet_irmin_read.native": pkg_dns.lwt
 "servers/imaplet_irmin_read.native": pkg_fieldslib.syntax
+"servers/imaplet_irmin_read.native": pkg_ipaddr
 "servers/imaplet_irmin_read.native": pkg_irmin.unix
 "servers/imaplet_irmin_read.native": pkg_lwt
 "servers/imaplet_irmin_read.native": pkg_lwt.syntax
@@ -282,7 +319,10 @@ true: annot, bin_annot
 "servers/imaplet_irmin_read.native": use_parsemail
 # Executable imaplet_irmin_build
 "servers/imaplet_irmin_build.native": pkg_cstruct.unix
+"servers/imaplet_irmin_build.native": pkg_dns
+"servers/imaplet_irmin_build.native": pkg_dns.lwt
 "servers/imaplet_irmin_build.native": pkg_fieldslib.syntax
+"servers/imaplet_irmin_build.native": pkg_ipaddr
 "servers/imaplet_irmin_build.native": pkg_irmin.unix
 "servers/imaplet_irmin_build.native": pkg_lwt
 "servers/imaplet_irmin_build.native": pkg_lwt.syntax
@@ -298,7 +338,10 @@ true: annot, bin_annot
 "servers/imaplet_irmin_build.native": use_parsemail
 # Executable imaplet_maildir_index
 "servers/imaplet_maildir_index.native": pkg_cstruct.unix
+"servers/imaplet_maildir_index.native": pkg_dns
+"servers/imaplet_maildir_index.native": pkg_dns.lwt
 "servers/imaplet_maildir_index.native": pkg_fieldslib.syntax
+"servers/imaplet_maildir_index.native": pkg_ipaddr
 "servers/imaplet_maildir_index.native": pkg_irmin.unix
 "servers/imaplet_maildir_index.native": pkg_lwt
 "servers/imaplet_maildir_index.native": pkg_lwt.syntax
@@ -314,7 +357,10 @@ true: annot, bin_annot
 "servers/imaplet_maildir_index.native": use_commands
 "servers/imaplet_maildir_index.native": use_parsemail
 <servers/*.ml{,i,y}>: pkg_cstruct.unix
+<servers/*.ml{,i,y}>: pkg_dns
+<servers/*.ml{,i,y}>: pkg_dns.lwt
 <servers/*.ml{,i,y}>: pkg_fieldslib.syntax
+<servers/*.ml{,i,y}>: pkg_ipaddr
 <servers/*.ml{,i,y}>: pkg_irmin.unix
 <servers/*.ml{,i,y}>: pkg_lwt
 <servers/*.ml{,i,y}>: pkg_lwt.syntax
@@ -331,7 +377,10 @@ true: annot, bin_annot
 <servers/*.ml{,i,y}>: use_parsemail
 # Executable get_messages
 "utils/get_messages.native": pkg_cstruct.unix
+"utils/get_messages.native": pkg_dns
+"utils/get_messages.native": pkg_dns.lwt
 "utils/get_messages.native": pkg_fieldslib.syntax
+"utils/get_messages.native": pkg_ipaddr
 "utils/get_messages.native": pkg_irmin.unix
 "utils/get_messages.native": pkg_lwt
 "utils/get_messages.native": pkg_lwt.syntax
@@ -347,7 +396,10 @@ true: annot, bin_annot
 "utils/get_messages.native": use_imaplet
 "utils/get_messages.native": use_parsemail
 <utils/*.ml{,i,y}>: pkg_cstruct.unix
+<utils/*.ml{,i,y}>: pkg_dns
+<utils/*.ml{,i,y}>: pkg_dns.lwt
 <utils/*.ml{,i,y}>: pkg_fieldslib.syntax
+<utils/*.ml{,i,y}>: pkg_ipaddr
 <utils/*.ml{,i,y}>: pkg_irmin.unix
 <utils/*.ml{,i,y}>: pkg_nocrypto
 <utils/*.ml{,i,y}>: pkg_sexplib.syntax

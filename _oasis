@@ -93,6 +93,7 @@ Library commands
                     Fetchregex,
                     Imap_cmd,
                     Imap_crypto,
+                    Imaplet_dns,
                     Imaplet_types,
                     Irmin_core,
                     Irmin_storage,
@@ -117,6 +118,9 @@ Library commands
                     lwt.unix,
                     lwt.syntax,
                     tls.lwt,
+                    dns,
+                    dns.lwt,
+                    ipaddr,
                     sexplib.syntax,
                     threads,
                     str,
@@ -181,12 +185,12 @@ Executable imaplet_lmtp
   MainIs	  : imaplet_lmtp.ml
   BuildDepends	  : lwt,lwt.unix,lwt.syntax,str,threads,sexplib.syntax,imaplet,imaplet.commands
 
-Executable imaplet_smtp
+Executable smtplet
   Build		  : true
   Install	  : true
   Path		  : servers
   CompiledObject  : native
-  MainIs	  : imaplet_smtp.ml
+  MainIs	  : smtplet.ml
   BuildDepends	  : lwt,lwt.unix,lwt.syntax,str,threads,sexplib.syntax,imaplet,imaplet.commands
 
 Executable imaplet_irmin_read

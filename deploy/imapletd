@@ -33,7 +33,7 @@ case "$1" in
     ;;
   stop)
 	log_daemon_msg "Stopping imaplet" "imaplet"
-	pkill -f imaplet_smtp
+	pkill -f smtplet
 	killproc -p $PIDFILE $DAEMON
 	#start-stop-daemon --stop --quiet --retry 5 --pidfile "$PIDFILE" --name $NAME
 	log_end_msg $?

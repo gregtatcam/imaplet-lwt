@@ -34,3 +34,5 @@
 0.1.12
 * added inactivity timeout
 * added configuration utility
+* added SMTP server
+* added DNS MX lookup for SMTP relay
