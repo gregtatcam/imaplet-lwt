@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: b66ed1e493a5233ae2978021f5512d40)
+# DO NOT EDIT (digest: c5f02813ee78609b9e6740a6f87f9af7)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -277,26 +277,26 @@ true: annot, bin_annot
 "servers/imaplet_lmtp.native": use_commands
 "servers/imaplet_lmtp.native": use_imaplet
 "servers/imaplet_lmtp.native": use_parsemail
-# Executable imaplet_smtp
-"servers/imaplet_smtp.native": pkg_cstruct.unix
-"servers/imaplet_smtp.native": pkg_dns
-"servers/imaplet_smtp.native": pkg_dns.lwt
-"servers/imaplet_smtp.native": pkg_fieldslib.syntax
-"servers/imaplet_smtp.native": pkg_ipaddr
-"servers/imaplet_smtp.native": pkg_irmin.unix
-"servers/imaplet_smtp.native": pkg_lwt
-"servers/imaplet_smtp.native": pkg_lwt.syntax
-"servers/imaplet_smtp.native": pkg_lwt.unix
-"servers/imaplet_smtp.native": pkg_nocrypto
-"servers/imaplet_smtp.native": pkg_re
-"servers/imaplet_smtp.native": pkg_re.posix
-"servers/imaplet_smtp.native": pkg_sexplib.syntax
-"servers/imaplet_smtp.native": pkg_str
-"servers/imaplet_smtp.native": pkg_threads
-"servers/imaplet_smtp.native": pkg_tls.lwt
-"servers/imaplet_smtp.native": use_commands
-"servers/imaplet_smtp.native": use_imaplet
-"servers/imaplet_smtp.native": use_parsemail
+# Executable smtplet
+"servers/smtplet.native": pkg_cstruct.unix
+"servers/smtplet.native": pkg_dns
+"servers/smtplet.native": pkg_dns.lwt
+"servers/smtplet.native": pkg_fieldslib.syntax
+"servers/smtplet.native": pkg_ipaddr
+"servers/smtplet.native": pkg_irmin.unix
+"servers/smtplet.native": pkg_lwt
+"servers/smtplet.native": pkg_lwt.syntax
+"servers/smtplet.native": pkg_lwt.unix
+"servers/smtplet.native": pkg_nocrypto
+"servers/smtplet.native": pkg_re
+"servers/smtplet.native": pkg_re.posix
+"servers/smtplet.native": pkg_sexplib.syntax
+"servers/smtplet.native": pkg_str
+"servers/smtplet.native": pkg_threads
+"servers/smtplet.native": pkg_tls.lwt
+"servers/smtplet.native": use_commands
+"servers/smtplet.native": use_imaplet
+"servers/smtplet.native": use_parsemail
 <servers/*.ml{,i,y}>: use_imaplet
 # Executable imaplet_irmin_read
 "servers/imaplet_irmin_read.native": pkg_cstruct.unix
