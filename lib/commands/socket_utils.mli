@@ -16,12 +16,15 @@
 open Lwt
 open Server_config
 
-val client_send : [`Inet of string*int|`Unix of string] -> (Lwt_io.input_channel ->
-  Lwt_io.output_channel -> unit Lwt.t) -> unit Lwt.t
+val client_send : [`Inet of string*int|`Unix of string] -> ('a ->
+  Lwt_unix.file_descr -> Lwt_io.input_channel -> Lwt_io.output_channel -> 'a Lwt.t) -> 'a -> 'a Lwt.t
 
 val server : [`Inet of string*int|`Unix of string] -> imapConfig -> 
   (Lwt_unix.file_descr option -> Lwt_io.input_channel -> Lwt_io.output_channel -> unit Lwt.t) -> 
   (exn -> unit Lwt.t) -> unit Lwt.t
 
 val starttls : imapConfig -> Lwt_unix.file_descr -> unit -> 
+  (Lwt_io.input_channel * Lwt_io.output_channel) Lwt.t
+
+val starttls_client : string -> Lwt_unix.file_descr -> unit -> 
   (Lwt_io.input_channel * Lwt_io.output_channel) Lwt.t
