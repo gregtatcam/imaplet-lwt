@@ -21,7 +21,7 @@ let _gethostbyname resolver domain =
   let domain =
   match domain with
   | `Name name -> name
-  | `Domain domain -> Name.domain_name_to_string domain 
+  | `Domain domain -> Name.to_string domain 
   in
   Dns_resolver_unix.gethostbyname resolver domain >>= fun ip_list ->
   return (List.fold_left (fun acc ip ->

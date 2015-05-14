@@ -21,7 +21,7 @@ depends: [
   "irmin" {>= "0.9.4"}
   "re"
   "tls" {>= "0.4.0"}
-  "dns" {>= "0.14.1"}
+  "dns" {>= "0.15.0"}
   "menhir"
 ]
 ocaml-version: [ >= "4.01.0" ]
