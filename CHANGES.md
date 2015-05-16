@@ -36,3 +36,4 @@
 * added configuration utility
 * added SMTP server
 * added DNS MX lookup for SMTP relay
+* added authentication required to encrypt the private key with the user's password

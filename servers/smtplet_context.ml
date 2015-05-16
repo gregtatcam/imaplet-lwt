@@ -21,5 +21,22 @@ open Server_config
 type netio = Lwt_io.input_channel * Lwt_io.output_channel*
   [`Reg of Lwt_unix.file_descr|`Ssl|`Starttls of Lwt_unix.file_descr]
 
-type cmd_context = {config:imapConfig;auth:string option;grttype:[`Helo|`Ehlo|`Rset]; io:netio;
-  from:(string*string option);rcpt:(string*string*((int*string list) list) option) list;buff:Buffer.t}
+type cmd_context = { 
+  (* server configuration *) 
+  config:imapConfig;
+  (* user * password *) 
+  auth:(string * string option) option;
+  (* initial greeting type *) 
+  grttype:[`Helo|`Ehlo|`Rset];
+  (* connection io channel *)
+  io:netio;
+  (* user * domain *)
+  from:(string*string option); 
+  (* mx_records = (priority * ip list) list option, 
+   * from dns resolve/gethostbyname - list of domains, 
+   * each domain has list of interfaces
+   * if Some then the message must be relayed
+   *)
+  rcpt:(string*string*((int*string list) list) option) list; 
+  (* data content *)
+  buff:Buffer.t} 

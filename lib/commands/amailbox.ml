@@ -54,7 +54,7 @@ let selected_mbox mailboxt =
   | `Examine s -> Some s
 
 (* create the mailbox type *)
-let create config user =
+let create config user pswd =
   let open Server_config in
   let (inbox_path,mail_path) = 
   match config.data_store with
@@ -62,7 +62,7 @@ let create config user =
   | `Mailbox -> config.inbox_path,Configuration.mailboxes config.mail_path user
   | `Maildir -> config.inbox_path,Configuration.mailboxes config.mail_path user
   in
-  {inbox_path;mail_path;user=Some user;selected=`None;config; keys=Some (Ssl_.get_user_keys ~user config)}
+  {inbox_path;mail_path;user=Some user;selected=`None;config; keys=Some (Ssl_.get_user_keys ~user ?pswd config)}
 
 (* empty type *)
 let empty () =

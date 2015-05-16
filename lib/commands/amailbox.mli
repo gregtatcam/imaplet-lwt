@@ -28,7 +28,7 @@ type amailboxt =
   option;selected:selection;config:Server_config.imapConfig;
   keys:(Ssl_.keys Lwt.t) option}
 
-val create : Server_config.imapConfig -> string -> t
+val create : Server_config.imapConfig -> string -> string option -> t
 
 (** create empty mailbox **)
 val empty : unit -> t 

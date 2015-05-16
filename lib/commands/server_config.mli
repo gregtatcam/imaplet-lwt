@@ -40,9 +40,10 @@ type imapConfig = {
   compress : bool; (* compress messages, but not attachments, default true *)
   user_cert_path : string; (* user's certificate/key location *)
   log : string; (* log location, default /var/log *)
-  log_level:[`Error|`Info1|`Info2|`Info3|`Debug]; (* log level, default error *)
+  log_level:[`Error|`Info1|`Info2|`Info3|`Debug|`None]; (* log level, default error *)
   idle_interval: float; (* wait (sec) between idle 'still here' notifications, default 120 sec *)
   smtp_idle_max: float; (* smtp idle time-out, default 300 sec *)
+  auth_required: bool; (* require user authentication, priv key encrypted with password, default true *)
 }
 
 val default_config : imapConfig

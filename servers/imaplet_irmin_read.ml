@@ -49,11 +49,22 @@ let prompt str =
   uinput := (Str.split (Str.regexp " ") msg);
   return (arg 0)
 
+let get_user_pswd user =
+  if Regex.match_regex ~regx:"^\\([^:]+\\):\\(.+\\)$" user then
+    (Str.matched_group 1 user, Some (Str.matched_group 2 user))
+  else
+    (user,None)
+
+let get_user user =
+  let (user,_) = get_user_pswd user in
+  user
+
 let get_keys srv_config user =
-  Ssl_.get_user_keys ~user srv_config 
+  let (user,pswd) = get_user_pswd user in
+  Ssl_.get_user_keys ~user ?pswd srv_config 
 
 let rec tree user key indent =
-  IrminIntf.create ~user srv_config >>= fun store ->
+  IrminIntf.create ~user:(get_user user) srv_config >>= fun store ->
   IrminIntf.list store key >>= fun l ->
   Lwt_list.iter_s (fun i -> 
     Printf.printf "%s%s%!" indent (Key_.key_to_string (Key_.t_of_list i));
@@ -99,13 +110,13 @@ let append user mailbox =
   prompt "email: " >>= fun email_ ->
   get_keys srv_config user >>= fun keys ->
   let message = message_template from_ to_ subject_ email_ in
-  IrminStorage.create srv_config user mailbox keys >>= fun str ->
+  IrminStorage.create srv_config (get_user user) mailbox keys >>= fun str ->
   IrminStorage.append str message (empty_mailbox_message_metadata())
 
 let rec selected user mailbox mbox =
   let open Storage_meta in
   try
-  prompt (user ^ ":" ^ mailbox ^ ": ") >>= function 
+  prompt ((get_user user) ^ ":" ^ mailbox ^ ": ") >>= function 
   | "help" -> Printf.printf
   "all\nexists\nhelp\nlist\nmeta\nappend\nmessage #\ntree
   \nclose\nremove uid\nstore # +-| flags-list\nquit\n%!";
@@ -114,7 +125,7 @@ let rec selected user mailbox mbox =
   | "append" -> append user mailbox >>= fun () -> selected user mailbox mbox
   | "all" -> IrminMailbox.show_all mbox >>= fun () -> selected user mailbox mbox
   | "tree" -> let (_,key) = Key_.mailbox_of_path mailbox in
-    let key = "imaplet" :: (user :: key) in
+    let key = "imaplet" :: ((get_user user) :: key) in
     tree user key "" >>= fun () -> selected user mailbox mbox
   | "exists" -> IrminMailbox.exists mbox >>= fun res ->
     (
@@ -194,28 +205,28 @@ let main () =
   out_line "type help for commands\n" >>= fun () ->
   let rec request user =
     catch (fun () ->
-    prompt (user ^ ": ") >>= function 
+    prompt ((get_user user) ^ ": ") >>= function 
     | "help" -> Printf.printf "help\nselect mbox\ncrtmailbox mailbox\nlist\ntree\ndelete\ncreate\nuser\nquit\n%!"; request user
     | "user" -> prompt "user? " >>= fun user -> request user
-    | "delete" -> let ac = UserAccount.create srv_config user in
+    | "delete" -> let ac = UserAccount.create srv_config (get_user user) in
       UserAccount.delete_account ac >> request user
     | "crtmailbox" -> let mailbox = arg 1 in
       get_keys srv_config user >>= fun keys ->
-      IrminStorage.create srv_config user mailbox keys >>= fun str ->
+      IrminStorage.create srv_config (get_user user) mailbox keys >>= fun str ->
       IrminStorage.create_mailbox str >>= fun () -> request user
-    | "create" -> let ac = UserAccount.create srv_config user in
+    | "create" -> let ac = UserAccount.create srv_config (get_user user) in
       UserAccount.create_account ac >> request user
     | "tree" -> 
-      let key = Key_.create_account user in
+      let key = Key_.create_account (get_user user) in
       tree user key "" >> request user
     | "select" -> 
       let mailbox = Str.replace_first (Str.regexp "+") " " (arg 1) in
       get_keys srv_config user >>= fun keys ->
-      IrminMailbox.create srv_config user mailbox keys >>= fun mbox ->
+      IrminMailbox.create srv_config (get_user user) mailbox keys >>= fun mbox ->
       selected user mailbox mbox >>= fun () -> request user
     | "list" -> 
       get_keys srv_config user >>= fun keys ->
-      IrminMailbox.create srv_config user "" keys >>= fun mbox ->
+      IrminMailbox.create srv_config (get_user user) "" keys >>= fun mbox ->
       IrminMailbox.list ~subscribed:false ~access:(fun _ -> true) mbox ~init:[] ~f:(
         fun acc item -> return ((item::acc))
       ) >>= fun l ->

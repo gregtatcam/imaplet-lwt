@@ -52,17 +52,24 @@ let add_postmark from_ msg =
   )
 
 (* sending "special" local append on unix socket
+ * should it be SSL? TBD 
  *)
 let send_to_imap addr context =
   Log_.log `Info1 "smtp: sending to imap\n";
   let (_from,_) = context.from in
   let msg = Buffer.contents context.buff in
   let (_to,_,_) = List.nth context.rcpt 0 in
+  let up = context.auth in
+  let pswd = 
+    match up with
+    | Some (_,pswd) -> (match pswd with |Some pswd -> " " ^ pswd|None->"")
+    | None -> ""
+  in
   let msg = add_postmark _from msg in
   client_send addr (fun _ _ inchan outchan ->
     let write buff = Lwt_io.write outchan buff >>= fun () -> Lwt_io.flush outchan in
     let read () = Lwt_io.read_line inchan in
-    write ("a lappend " ^ _to ^ " INBOX {" ^ (string_of_int (String.length msg)) ^ "+}\r\n") >>= fun () ->
+    write ("a lappend " ^ _to ^ pswd ^ " INBOX {" ^ (string_of_int (String.length msg)) ^ "+}\r\n") >>= fun () ->
     write msg >>= fun () ->
     read () >>= fun resp -> (* a OK APPEND completed *)
     write "a logout\r\n" >>= fun () ->
@@ -70,8 +77,12 @@ let send_to_imap addr context =
     return ()
   ) ()
 
-let write context msg = 
-  Log_.log `Info1 (Printf.sprintf "<-- %s\n" msg);
+let write ?log context msg = 
+  begin
+  match log with
+  | Some log -> Log_.log `Info1 (Printf.sprintf "<-- %s\n" log)
+  | None -> Log_.log `Info1 (Printf.sprintf "<-- %s\n" msg)
+  end;
   let (_,w,_) = context.io in
   Lwt_io.write w (msg ^ "\r\n") 
 
@@ -114,6 +125,9 @@ let starttls_required context =
   | `Reg _ when context.config.starttls -> true
   | _ -> false
 
+(* if starttls required then have to do starttls first
+ *
+ *)
 let auth_required context =
   if starttls_required context then
     false
@@ -349,10 +363,19 @@ let syntx_auth next_state ~msg cmd context =
     return `Next
   )
 
-let next ?(isdata=false) ?(msg="503 5.5.1 Command out of sequence") ~next_state context =
+let dolog str context = function
+  | `Ok -> str
+  | `Part ->
+    if context.grttype = `Ehlo && context.auth = None && String.length str > 4 then
+      (String.sub str 0 4) ^ " ..."
+    else
+      str
+  | `None -> "..."
+
+let next ?(log=`Ok) ?(isdata=false) ?(msg="503 5.5.1 Command out of sequence") ~next_state context =
   read context >>= function
   | None -> Log_.log `Debug "smtp: client terminated\n";return `Quit
-  | Some str -> Log_.log `Info3 (Printf.sprintf "--> %s\n" str);
+  | Some str -> Log_.log `Info3 (Printf.sprintf "--> %s\n" (dolog str context log));
   let domatch ?(tmpl="\\(.*\\)$") rx =
     Regex.match_regex ~case:false ~regx:("^[ \t]*" ^ rx ^ tmpl) str in
   let get () = try Str.matched_group 1 str with _ -> "" in
@@ -437,10 +460,10 @@ let authenticate text ?password context =
   | None -> plain_auth text
   | Some password ->
     authenticate_user ~b64:true text ~password ()
-  end >>= fun (user,_,auth) ->
+  end >>= fun (user,pswd,auth) ->
   if auth then (
     write context "235 2.7.0 Authentication successful" >>
-    return (`Authenticated user)
+    return (`Authenticated (user,pswd))
   ) else (
     write context "535 5.7.8 Authentication failed" >>
     return `Rset
@@ -449,19 +472,19 @@ let authenticate text ?password context =
 (* auth is done right after starttls *)
 let rec authplain context =
   Log_.log `Debug "smtp: starting authplain\n";
-  next ~isdata:true ~next_state:[`DataStream] context >>= function
+  next ~log:`None ~isdata:true ~next_state:[`DataStream] context >>= function
   | `DataStream text ->
     authenticate text context
   | _ -> return `Rset (* will not get here, cause of DataStream *)
 
 let rec authlogin user context =
   Log_.log `Debug "smtp starting authlogin\n";
-  next ~isdata:true ~next_state:[`DataStream] context >>= function
+  next ~log:`None ~isdata:true ~next_state:[`DataStream] context >>= function
   | `DataStream text -> 
     begin
     match user with
     | None ->
-      write context "334 UGFzc3dvcmQ6" >> (* 334 Password *)
+      write ~log:"334 ..." context "334 UGFzc3dvcmQ6" >> (* 334 Password *)
       return (`State (authlogin (Some text), context))
     | Some user -> 
       authenticate user ~password:text context
@@ -470,7 +493,13 @@ let rec authlogin user context =
 
 let rec helo context =
   Log_.log `Debug "smtp: starting helo\n";
-  next ~next_state:[`MailFrom;`Ehlo;`Helo;`Noop;`Vrfy;] context >>= function
+  let (next_state,msg) =
+    if context.config.auth_required then
+      ([`Rset;`Ehlo],"530 5.7.0 Must issue a AUTH command first")
+    else
+      ([`MailFrom;`Ehlo;`Helo;`Noop;`Vrfy;],"503 5.5.1 Command out of sequence")
+  in
+  next ~next_state ~msg context >>= function
   | `MailFrom from -> return (`State (mailfrom, {context with from}))
   | cmd -> all (helo) context cmd
 
@@ -485,7 +514,7 @@ let doauth context = function
 
 let rec auth context =
   Log_.log `Debug "smtp starting auth\n";
-  next ~next_state:[`Ehlo;`Helo;`AuthPlain;`AuthLogin]
+  next ~log:`Part ~next_state:[`Ehlo;`Helo;`AuthPlain;`AuthLogin]
       ~msg:"530 5.7.0 Must issue a AUTH command first" context >>= function
   | `AuthPlain text as cmd -> doauth context cmd
   | `AuthLogin as cmd -> doauth context cmd
@@ -501,7 +530,7 @@ let rec ehlo context =
     else
       ([`MailFrom;`Ehlo;`Helo;`Noop;`Rset;`Vrfy],"503")
   in
-  next ~next_state ~msg context >>= function
+  next ~log:`Part ~next_state ~msg context >>= function
   | `MailFrom from -> return (`State (mailfrom, {context with from}))
   | `Starttls sock ->
     starttls context.config sock () >>= fun (r,w) ->
@@ -530,7 +559,7 @@ let greeting context =
     state context >>= function
     | `Quit -> return ()
     | `Ehlo -> run (ehlo) {context with grttype=`Ehlo;buff=Buffer.create 100}
-    | `Authenticated user -> run (ehlo) {context with auth=Some user;grttype=`Ehlo;buff=Buffer.create 100}
+    | `Authenticated up -> run (ehlo) {context with auth=Some up;grttype=`Ehlo;buff=Buffer.create 100}
     | `Helo -> run (helo) {context with grttype=`Helo;buff=Buffer.create 100}
     | `Rset -> 
       if context.grttype = `Ehlo then

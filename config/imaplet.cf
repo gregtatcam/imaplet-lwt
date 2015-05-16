@@ -1,5 +1,8 @@
 # configuration file
 
+# authentication required
+auth_required true
+
 # log file location
 log /var/log
 

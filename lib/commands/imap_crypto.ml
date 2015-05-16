@@ -112,12 +112,15 @@ let encrypt ?(compress=false) data pub =
 let decrypt ?(compressed=false) data priv =
   aes_decrypt ~compressed data priv
 
-let get_hash ?(hash=`Sha256) data =
-  let digest = match hash with
+let digest = function
   | `Sha1 -> Hash.SHA1.digest
   | `Sha256 -> Hash.SHA256.digest
-  in
-  let contid = Cstruct.to_string (Base64.encode (digest (Cstruct.of_string data))) in
+
+let get_hash_raw ?(hash=`Sha256) data =
+  Cstruct.to_string ((digest hash) (Cstruct.of_string data))
+
+let get_hash ?(hash=`Sha256) data =
+  let contid = Cstruct.to_string (Base64.encode ((digest hash) (Cstruct.of_string data))) in
   Str.global_replace (Str.regexp "/") "o057" contid
 
 let contentid hash =

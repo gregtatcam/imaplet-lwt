@@ -25,6 +25,7 @@ open Server_config
 open Parsemail
 
 exception InvalidCommand
+exception PasswordRequired
 exception InvalidInput
 exception Done
 
@@ -83,9 +84,20 @@ let rec args i user mailbox filter isappend =
     | _ -> raise InvalidCommand
 
 let usage () =
-  Printf.printf "usage: imaplet_irmin_build -u [user[:pswd]] -m
+  Printf.printf "usage: imaplet_irmin_build -u [user:pswd] -m
   [mbox:inbox-path:mailboxes-path|maildir:mailboxes-path|archive:mbox-path]
   -f [start-maxmsg:folder,...,folder] -a\n%!"
+
+let get_user_pswd user isappend =
+  if Regex.match_regex ~regx:"^\\([^:]+\\):\\(.+\\)$" user then
+    ((Str.matched_group 1 user),Some (Str.matched_group 2 user))
+  else if srv_config.auth_required || isappend = false then
+    raise PasswordRequired
+  else
+    (user,None)
+
+let get_user (u,p) =
+  u
 
 let commands f =
   try 
@@ -94,9 +106,12 @@ let commands f =
       usage ()
     else
       try 
-        f (Utils.option_value_exn user) (Utils.option_value_exn mbx) filter isappend 
+        let up = get_user_pswd (Utils.option_value_exn user) isappend in
+        f up (Utils.option_value_exn mbx) filter isappend 
       with ex -> Printf.printf "%s\n%!" (Printexc.to_string ex)
-  with _ -> usage ()
+  with 
+  | PasswordRequired -> Printf.printf "password is required: -u user:pswd\n%!"
+  | _ -> usage ()
 
 let rec listdir path mailbox f =
   Printf.printf "listing %s\n%!" path;
@@ -118,19 +133,19 @@ let rec listdir path mailbox f =
 
 let user_keys = ref None
 
-let get_keys user =
+let get_keys (user,pswd) =
   match !user_keys with 
   | None ->
-    Ssl_.get_user_keys ~user srv_config >>= fun keys ->
+    Ssl_.get_user_keys ~user ?pswd srv_config >>= fun keys ->
     user_keys := Some keys;
     return keys
   | Some keys -> return keys
 
 let create_mailbox user ?uidvalidity mailbox =
-  Printf.printf "############# creating mailbox %s %s\n%!" user mailbox;
+  Printf.printf "############# creating mailbox %s %s\n%!" (get_user user) mailbox;
   with_timer (fun() -> 
   get_keys user >>= fun keys ->
-  IrminStorage.create srv_config user mailbox keys >>= fun ist ->
+  IrminStorage.create srv_config (get_user user) mailbox keys >>= fun ist ->
   IrminStorage.create_mailbox ist >>
   return ist) >>= fun ist ->
   match uidvalidity with
@@ -297,7 +312,7 @@ let populate_mailboxes user isappend =
   if isappend then (
     Printf.printf "#### fetching current mailboxes\n%!";
     get_keys user >>= fun keys ->
-    IrminStorage.create srv_config user "" keys >>= fun ist ->
+    IrminStorage.create srv_config (get_user user) "" keys >>= fun ist ->
     IrminStorage.list ~subscribed:true ~access:(fun _ -> true) ist ~init:() ~f:(fun _ f ->
       match f with
       | `Mailbox (f,s) -> Printf.printf "mailbox: %s\n%!" f;gmail_mailboxes := MapStr.add f "" !gmail_mailboxes; return ()
@@ -317,7 +332,7 @@ let append_archive_messages user path filter flags isappend =
     begin
     if MapStr.exists (fun mb _ -> mailbox = mb) !gmail_mailboxes then
       get_keys user >>= fun keys ->
-      with_timer (fun() -> IrminStorage.create srv_config user mailbox keys)
+      with_timer (fun() -> IrminStorage.create srv_config (get_user user) mailbox keys)
     else (
       gmail_mailboxes := MapStr.add mailbox "" !gmail_mailboxes;
       create_mailbox user mailbox
@@ -419,14 +434,15 @@ let create_inbox user inbx =
   with_timer(fun() -> IrminStorage.commit ist)
 
 let create_account user subscriptions =
-  Printf.printf "#### creating user account %s\n%!" user;
-  Lwt_unix.system ("imaplet_create_account -u " ^ user) >>= fun _ ->
+  let (u,p) = user in
+  Printf.printf "#### creating user account %s\n%!" (get_user user);
+  Lwt_unix.system ("imaplet_create_account -u " ^ u ^ ":" ^ (Utils.option_value_exn p)) >>= fun _ ->
   (* get subscriptions - works for dovecot *)
   get_keys user >>= fun keys ->
   catch (fun () ->
     let strm = Lwt_io.lines_of_file subscriptions in
     Lwt_stream.iter_s (fun line -> 
-      IrminStorage.create srv_config user line keys >>= fun ist ->
+      IrminStorage.create srv_config (get_user user) line keys >>= fun ist ->
       IrminStorage.subscribe ist >>
       IrminStorage.commit ist
     ) strm

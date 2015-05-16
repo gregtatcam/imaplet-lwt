@@ -105,11 +105,24 @@ let log msg =
   Lwt_io.with_file ~flags:[O_WRONLY;O_APPEND;O_CREAT] ~mode:Lwt_io.output "/tmp/log/imaplet.log"
   (fun oc -> Lwt_io.write_line oc msg)
 
-let genrsa priv =
-  Printf.sprintf "openssl genrsa -out %s 1024s%!" priv 
+let genrsa user pswd priv =
+  Lwt_process.pread ~stderr:`Dev_null ("openssl",[|"genrsa";"1024s"|]) >>= fun key -> 
+  Lwt_io.with_file ~mode:Lwt_io.output priv (fun w -> 
+    Lwt_io.write w 
+    begin
+    if srv_config.auth_required then (
+      let pswd = Imap_crypto.get_hash_raw (user ^ "\000" ^ pswd) in
+      Imap_crypto.aes_encrypt_pswd ~pswd key
+    ) else (
+      key
+    )
+    end
+  ) >>
+  return key
 
 let reqcert priv pem =
-  Printf.sprintf "openssl req -x509 -batch -new -key %s -out %s%!" priv pem
+  Lwt_process.pwrite ("openssl", 
+    [|"req"; "-x509"; "-batch"; "-new"; "-key"; "/dev/stdin"; "-out"; pem|]) priv 
 
 let failed user_path msg =
   Printf.printf "%s\n%!" msg;
@@ -137,14 +150,14 @@ let () =
         Lwt_unix.mkdir irmin_path 0o775 >>
         Lwt_unix.mkdir cert_path 0o775 >>
         file_cmd priv_path 
-          (fun () -> system (genrsa priv_path ) >>
-	             system (reqcert priv_path pem_path)) >>
-        dir_cmd (Filename.concat irmin_path ".git") 
+          (fun () -> genrsa user pswd priv_path >>= fun key ->
+	             reqcert key pem_path) >>
+          dir_cmd (Filename.concat irmin_path ".git") 
           (fun () -> 
             system ("git init " ^ irmin_path) >>= fun () ->
             let ac = UserAccount.create srv_config user in
             UserAccount.create_account ac >>= fun _ ->
-            Ssl_.get_user_keys ~user srv_config >>= fun keys ->
+            Ssl_.get_user_keys ~user ~pswd srv_config >>= fun keys ->
             let create_mailbox mailbox =
               IrminStorage.create srv_config user mailbox keys >>= fun ist ->
               IrminStorage.create_mailbox ist >>

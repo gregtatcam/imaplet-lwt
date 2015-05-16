@@ -116,14 +116,6 @@ let is_capability capabilities capability =
     Regex.match_regex ~case:false ~regx:capability cap
   ) capabilities 
 
-(*
-let send_ehlo_with_from r w context =
-  send_ehlo r w >>= function
-  | `Ok _ -> send_from r w context
-  | `Failure -> return `Failure
-  | `PermanentFailure err -> return (`PermanentFailure err)
-*)
-
 let send_starttls sock r w context =
   write_relay w "STARTTLS" >>
   read_relay_rc r "^250\\|220" >>= fun res ->
@@ -140,17 +132,6 @@ let send_starttls sock r w context =
       )
   ) else
       return res
-
-(* only support relay via tls *)
-(*
-let send_ehlo_with_starttls sock r w context =
-  send_ehlo r w >>= function
-  | `Ok capabilities 
-      when (is_capability capabilities "starttls") ->
-      send_starttls sock r w context
-  | `Failure -> return `Failure
-  | `PermanentFailure err -> return (`PermanentFailure err)
-*)
 
 let greetings sock r w context =
   read_relay_rc r "^220" >>= function

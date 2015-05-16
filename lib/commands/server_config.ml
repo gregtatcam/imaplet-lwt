@@ -40,9 +40,10 @@ type imapConfig = {
   compress : bool; (* compress messages, but not attachments, default true *)
   user_cert_path : string; (* user's certificate/key location *)
   log : string; (* log location, default /var/log *)
-  log_level:[`Error|`Info1|`Info2|`Info3|`Debug]; (* log level, default error *)
+  log_level:[`Error|`Info1|`Info2|`Info3|`Debug|`None]; (* log level, default error *)
   idle_interval: float; (* wait (sec) between idle 'still here' notifications, default 120 sec *)
   smtp_idle_max: float; (* smtp idle time-out, default 300 sec *)
+  auth_required: bool; (* require user authentication, priv key encrypted with password, default true *)
 }
 
 let default_config = {
@@ -72,18 +73,20 @@ let default_config = {
   log = "/var/log";
   log_level = `Error;
   idle_interval = 120.;
-  smtp_idle_max = 300.
+  smtp_idle_max = 300.;
+  auth_required = true;
 }
 
 let validate_config config =
   let err res msg =
     begin
     if res = false then (
-      return (`Error (Printf.sprintf "%s %s\n%!" msg Install.config_path))
+      return (`Error (Printf.sprintf "%s %s\n" msg Install.config_path))
     ) else
       return `Ok
     end
   in
+  begin
   match config.data_store with
   | `Irmin -> 
       let path = Regex.replace ~regx:"%user%.*$" ~tmpl:"" config.irmin_path in
@@ -97,6 +100,12 @@ let validate_config config =
   | `Maildir ->
     Utils.exists config.mail_path Unix.S_DIR >>= fun res ->
     err res "Invalid Maildir path in "
+  end >>= function
+  | `Error err -> return (`Error err)
+  | `Ok ->
+    err (config.auth_required = false || config.auth_required && config.smtp_starttls = true &&
+      (config.ssl = true || config.starttls = true))
+      "ssl/starttls have to be enabled when auth_required is enabled"
 
 let update_config config net port ssl tls store =
   let port = (match port with |None -> config.port|Some port->port) in
@@ -168,6 +177,7 @@ let config_of_lines lines =
           | "data_store" -> {acc with data_store = (stval n v)}
           | "encrypt" -> {acc with encrypt = (bval n v true)}
           | "compress" -> {acc with encrypt = (bval n v true)}
+          | "auth_required" -> {acc with auth_required = (bval n v true)}
           | "user_cert_path" -> {acc with user_cert_path = v}
           | "idle_interval" -> {acc with idle_interval = fval n v 120.}
           | "smtp_idle_max" -> {acc with smtp_idle_max = fval n v 300.}
@@ -179,6 +189,7 @@ let config_of_lines lines =
             | "info2" -> `Info2
             | "info3" -> `Info3
             | "debug" -> `Debug
+            | "none" -> `None
             | _ -> log n v;`Error}
           | _ -> Printf.fprintf stderr "unknown configuration %s\n%!" n; acc
         ) else 

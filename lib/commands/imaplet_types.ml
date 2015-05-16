@@ -191,7 +191,7 @@ type notAuthenticatedCmd =
   | Cmd_Starttls (** start tls negotiation **)
   | Cmd_Authenticate of authtype * string option (** authentication mechanism **)
   | Cmd_Login of string * string (** user * password **)
-  | Cmd_Lappend of string * string * literal (** user * password **)
+  | Cmd_Lappend of string * string option * string * literal (** user * password * mailbox **)
   
 type authenticatedCmd =  
   | Cmd_Select of string * bool (** mailbox name * condstore **) 

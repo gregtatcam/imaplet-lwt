@@ -182,18 +182,18 @@ let handle_authenticate context auth_type text =
       Lwt_mutex.lock context.client_timed_out >> raise ClientTimedOut;
       Lwt_io.read_line context.!netr
     ] >>= fun text ->
-    Log_.log `Info3 (Printf.sprintf "----> %s: %s\n%!" (Int64.to_string context.id) text);
+    Log_.log `Info3 (Printf.sprintf "----> %s: %s\n" (Int64.to_string context.id) text);
     return text
   end >>= fun text ->
   Account.authenticate auth_type text >>= function
     | `Ok (m,u,p) -> response context (Some State_Authenticated) m (Some
-    (Amailbox.create context.config u))
+    (Amailbox.create context.config u (Some p)))
     | `Error e -> response context None e None
 
 let handle_login context user password =
   Account.login user password >>= function
     | `Ok (m,u,p) -> response context (Some State_Authenticated) m (Some
-    (Amailbox.create context.config u))
+    (Amailbox.create context.config u (Some p)))
     | `Error e -> response context None e None
 
 let handle_starttls context =
@@ -434,7 +434,7 @@ let handle_search context charset search buid =
       else 
         s ^ " " ^ acc) "" r
     ) ^ modseq)) >>
-    let resp = Printf.sprintf "SEARCH completed %02fsec%!" (Unix.gettimeofday () -. t) in
+    let resp = Printf.sprintf "SEARCH completed %02fsec" (Unix.gettimeofday () -. t) in
     response context None (Resp_Ok(None, resp)) None
 
 let handle_fetch context sequence fetchattr changedsince buid =
@@ -446,7 +446,7 @@ let handle_fetch context sequence fetchattr changedsince buid =
   | `NotSelectable ->  response context None (Resp_No(None,"Mailbox is not selectable")) None
   | `Error e -> response context None (Resp_No(None,e)) None
   | `Ok ->
-    let resp = Printf.sprintf "FETCH completed %02fsec%!" (Unix.gettimeofday () -. t) in
+    let resp = Printf.sprintf "FETCH completed %02fsec" (Unix.gettimeofday () -. t) in
     response context None (Resp_Ok(None, resp)) None
 
 let handle_store context sequence flagsatt flagsval changedsince buid =
@@ -499,8 +499,8 @@ let handle_notauthenticated context = function
   | Cmd_Authenticate (a,s) -> handle_authenticate context a s 
   | Cmd_Login (u, p) -> handle_login context u p 
   | Cmd_Starttls -> handle_starttls context
-  | Cmd_Lappend (user,mailbox,literal) -> 
-      let mbx = Amailbox.create context.config user in
+  | Cmd_Lappend (user,pswd,mailbox,literal) -> 
+      let mbx = Amailbox.create context.config user pswd in
       let context = {context with mailbox = ref mbx} in
       handle_append context mailbox None None literal 
 
@@ -543,11 +543,29 @@ let handle_command context =
   | Done -> response context (Some State_Logout) (Resp_Bad(None,"")) None
   | _ -> response context None (Resp_Bad(None, "Bad Command")) None
 
+let dolog buff msgt context = 
+  let buff =
+  begin
+  match msgt with
+  | `Smtp ->
+    if Regex.match_regex ~regx:"^a lappend" buff then
+      "lappend ..."
+    else
+      buff
+  | _ ->
+    if context.!state = State_Notauthenticated then
+      "notauthenticated ..."
+    else
+      buff
+  end
+  in
+  Log_.log `Info3 (Printf.sprintf "----> %s: %s\n" (Int64.to_string context.id) buff)
+
 (* read a line from the network
  * if the line ends with literal {N} and it is not the append
  * then read N bytes, otherwise return the buffer
  *)
-let rec read_network context buffer =
+let rec read_network msgt context buffer =
   begin
   catch ( fun () ->
     Lwt.pick [
@@ -573,7 +591,7 @@ let rec read_network context buffer =
       return `Done
   | `Ok buff ->
   context.client_last_active := Unix.gettimeofday ();
-  Log_.log `Info3 (Printf.sprintf "----> %s: %s\n%!" (Int64.to_string context.id) buff);
+  dolog buff msgt context;
   (** does command end in the literal {[0-9]+} ? **)
   let i = match_regex_i buff ~regx:"{\\([0-9]+\\)[+]?}$" in
   if i < 0 then (
@@ -608,7 +626,7 @@ let rec read_network context buffer =
       ] >>= function
       | `Ok str ->
         Buffer.add_string buffer str;
-        read_network context buffer
+        read_network msgt context buffer
       | `Timeout ->
         return (`Error "timeout")
       | `Done -> return `Done
@@ -621,7 +639,7 @@ let get_command msgt context =
   let open Lex in
   catch (fun () ->
     let buffer = Buffer.create 0 in
-    read_network context buffer >>= function
+    read_network msgt context buffer >>= function
     | `Done -> return `Done
     | `Error err -> return (`Error err)
     | `Ok buff ->
