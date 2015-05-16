@@ -2,7 +2,7 @@ Install instructions for Ubuntu
 
 1. New user account creattion.
 You can create a new user account via link to your server like
-  htts://server/imaplet.html
+  htts://server/cgi-bin/imaplet.pl
 In order to do this you need to install apache2 web server.
 Alternativelly you can create a new user account by running from the command line
 sudo imaplet_create_account
@@ -24,7 +24,7 @@ If the target machine doesn't have the development environment then
 install imaplet on a development machine. Run imaplet_deploy - this creates
 imaplet-deploy.tar.gz in the current directory.
 Copy imaplet-deploy.tar.gz to the target machine, unzip and run deploy.sh [-a]
-located in ./deploy folder. '-a' option installs cgi and html files for apache.
+located in ./deploy folder. '-a' option installs cgi files for apache.
 
 3. install imaplet as the service
 If you installed imaplet directly via opam or manually on the target machine then

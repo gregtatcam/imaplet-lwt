@@ -26,11 +26,9 @@ fi
 
 if [ $1 = "-a" ];
 then
-  mkdir -p /var/www/html
   mkdir -p /usr/lib/cgi-bin
   mkdir -p /usr/local/apache2/cgi-bin
-  cp -f imaplet.html /var/www/html/imaplet.html
-  cp -f crt.pl /usr/lib/cgi-bin/crt.pl
+  cp -f imaplet.pl /usr/lib/cgi-bin/imaplet.pl
   rm -rf /usr/local/apache2/cgi-bin/imaplet_create_account
   ln -s /usr/local/share/imaplet_create_account /usr/local/apache2/cgi-bin/imaplet_create_account
 fi

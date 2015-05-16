@@ -154,7 +154,7 @@ let () =
 	             reqcert key pem_path) >>
           dir_cmd (Filename.concat irmin_path ".git") 
           (fun () -> 
-            system ("git init " ^ irmin_path) >>= fun () ->
+            Lwt_process.pread ~stderr:`Dev_null ~stdin:`Dev_null ("git",[|"init";irmin_path|]) >>= fun _ -> 
             let ac = UserAccount.create srv_config user in
             UserAccount.create_account ac >>= fun _ ->
             Ssl_.get_user_keys ~user ~pswd srv_config >>= fun keys ->
@@ -173,8 +173,8 @@ let () =
           Printf.printf "success\n%!";
           return ()
       ) (function
-        | SystemFailed msg -> failed !created ("system failed " ^ msg)
-        | AccountExists -> failed !created "account exists failed"
-        | ex -> failed !created ("failed " ^ (Printexc.to_string ex)))
+        | SystemFailed msg -> failed !created ("failed: " ^ msg)
+        | AccountExists -> failed !created "failed: account exists"
+        | ex -> failed !created ("failed: " ^ (Printexc.to_string ex)))
     )
   )
