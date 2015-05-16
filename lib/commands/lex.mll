@@ -179,34 +179,34 @@ let bodypeek = (['b' 'B'] ['o' 'O'] ['d' 'D'] ['y' 'Y'] '.' ['p' 'P'] ['e' 'E'] 
   
 rule read context =
   parse
-  | '\r' '\n'  			{ Log_.log `Debug "l:CRLF 1\n%!"; context := `Tag; CRLF }
-  | eof      			{ Log_.log `Debug "l:EOF\n%!"; EOF }
-  | body as b                   { Log_.log `Debug (spr "l:body %s\n%!" b); BODYFETCH(b) }
-  | bodypeek as b               { Log_.log `Debug (spr "l:body.peek %s\n%!" b); BODYPEEK(b) }
-  | '('				{ Log_.log `Debug "l:(\n%!"; LP}
-  | ')'				{ Log_.log `Debug "l:)\n%!"; RP}
-  | ' '    			{ Log_.log `Debug "l:SP\n%!"; SP }
-  | '{' (['0'-'9']+ as n) '+' '}'   { Log_.log `Debug (spr "l:literal-plus %s\n%!" n); LITERALPL(int_of_string(n)) }
-  | '{' (['0'-'9']+ as n) '}'   { Log_.log `Debug (spr "l:literal %s\n%!" n); LITERAL(int_of_string(n)) }
+  | '\r' '\n'  			{ Log_.log `Debug "l:CRLF 1\n"; context := `Tag; CRLF }
+  | eof      			{ Log_.log `Debug "l:EOF\n"; EOF }
+  | body as b                   { Log_.log `Debug (spr "l:body %s\n" b); BODYFETCH(b) }
+  | bodypeek as b               { Log_.log `Debug (spr "l:body.peek %s\n" b); BODYPEEK(b) }
+  | '('				{ Log_.log `Debug "l:(\n"; LP}
+  | ')'				{ Log_.log `Debug "l:)\n"; RP}
+  | ' '    			{ Log_.log `Debug "l:SP\n"; SP }
+  | '{' (['0'-'9']+ as n) '+' '}'   { Log_.log `Debug (spr "l:literal-plus %s\n" n); LITERALPL(int_of_string(n)) }
+  | '{' (['0'-'9']+ as n) '}'   { Log_.log `Debug (spr "l:literal %s\n" n); LITERAL(int_of_string(n)) }
   | '\"' quoted_chars '\"' as qs
-                                { Log_.log `Debug (spr "l:qs %s\n%!" qs); 
+                                { Log_.log `Debug (spr "l:qs %s\n" qs); 
                                   if match_date qs then
                                     DATE(qs)
                                   else
                                     QUOTED_STRING (qs) }
-  | done                        { Log_.log `Debug "l:DONE\n%!"; DONE }
-  | anychar as cmd              { Log_.log `Debug (spr "l:maybe cmd %s\n%!" cmd);
+  | done                        { Log_.log `Debug "l:DONE\n"; DONE }
+  | anychar as cmd              { Log_.log `None (spr "l:maybe cmd %s\n" cmd);
                                 if !context <> `Tag then (
                                   try 
                                     MapStr.find (String.uppercase cmd) keyword_table 
                                   with Not_found -> 
-                                    Log_.log `Debug (spr "l:command not found %s\n%!" cmd); 
+                                    Log_.log `None (spr "l:command not found %s\n" cmd); 
                                     ATOM_CHARS (cmd)
                                 ) else (
                                   Log_.log `Debug (spr "l:tag %s\n" cmd); context := `Any; TAG (cmd)
                                 )
                                 }
-  | '\\' (atom_chars as fl)       { Log_.log `Debug (spr "l:flag %s\n%!" fl); try MapStr.find fl flags_table 
+  | '\\' (atom_chars as fl)       { Log_.log `Debug (spr "l:flag %s\n" fl); try MapStr.find fl flags_table 
                                   with Not_found -> 
                                     FLEXTENSION (fl)
                                 }

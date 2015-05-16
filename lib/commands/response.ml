@@ -89,7 +89,7 @@ end
 
 let write_resp id w ?(tag="*") resp =
   let send_wcrlf w str = 
-    Log_.log `Info3 (Printf.sprintf "<-- %s: %s\n%!" (Int64.to_string id) str);
+    Log_.log `Info3 (Printf.sprintf "<-- %s: %s\n" (Int64.to_string id) str);
     Lwt_io.write w (str ^ Regex.crlf) >> Lwt_io.flush w
   in
   match resp with

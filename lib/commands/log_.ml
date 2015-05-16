@@ -37,7 +37,7 @@ let is l allowed =
 let log level msg =
   let prt =
   match srv_config.log_level with
-  | `Debug -> true
+  | `Debug when level <> `None-> true
   | `Info3 when (is level [`Info3;`Info2;`Info1;`Error]) -> true 
   | `Info2 when (is level [`Info2;`Info1;`Error]) -> true 
   | `Info1 when (is level [`Info1;`Error]) -> true 

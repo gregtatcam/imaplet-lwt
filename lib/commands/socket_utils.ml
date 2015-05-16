@@ -86,7 +86,7 @@ let rec accept_conn sock cert =
   (fun ex ->
   match ex with
   | End_of_file -> accept_conn sock cert
-  | _ -> Log_.log `Error (Printf.sprintf "socket: accept_conn exception %s %s\n%!"
+  | _ -> Log_.log `Error (Printf.sprintf "socket: accept_conn exception %s %s\n"
     (Printexc.to_string ex) (Printexc.get_backtrace()));
     accept_conn sock cert
   )
@@ -125,7 +125,7 @@ let client_send addr f init =
   return acc
 
 let addr_to_string = function
-  | `Inet (addr,port) -> Printf.sprintf "%s:%d%!" addr port
+  | `Inet (addr,port) -> Printf.sprintf "%s:%d" addr port
   | `Unix file -> file
 
 (**
@@ -136,7 +136,7 @@ let server addr config f err =
   init_all addr config >>= fun (cert,sock) ->
   let rec connect f sock cert =
     accept_conn sock cert >>= fun (sock_c,(netr,netw)) ->
-    Log_.log `Debug (Printf.sprintf "socket: accepted client connection %s\n%!" (addr_to_string addr));
+    Log_.log `Debug (Printf.sprintf "socket: accepted client connection %s\n" (addr_to_string addr));
     async ( fun () ->
       catch( fun () ->
         f sock_c netr netw >>

@@ -13,6 +13,7 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
+
 %token ALL
 %token ANSWERED
 %token APPEND
@@ -181,7 +182,7 @@ command_auth:
   | c = c_create { c }
   | c = c_delete { c }
   | c = c_examine { c }
-  | c = c_idle { Log_.log `Debug "p:idle command\n"; c }
+  | c = c_idle { c }
   | c = c_list  { c }
   | c = c_lsub { c }
   | c = c_rename { c }
@@ -198,8 +199,12 @@ append_cmd:
   | APPEND; SP; m = mailbox {Log_.log `Debug (spr "p:append_cmd %s\n" m); (m)}
 
 c_lappend:
-  | LAPPEND; SP; u = user; SP; m = mailbox; SP; l = literal 
-    {Log_.log `Debug (spr "p:c_lappend %s %s\n" u m); Cmd_Lappend (u,m,l)}
+  | LAPPEND; SP; u = user; SP; p = opt_pswd; m = mailbox; SP; l = literal 
+    {Log_.log `Debug (spr "p:c_lappend %s\n" m); Cmd_Lappend (u,p,m,l)}
+
+opt_pswd:
+  | {None}
+  | p = password; SP {Some p}
 
 literal:
   | n = LITERAL {Log_.log `Debug (spr "p:literal %d\n" n);Literal(n)}
@@ -278,7 +283,7 @@ password:
   | a = astring { Regex.dequote a }
 
 astring:
-  | s = ATOM_CHARS { Log_.log `Debug "p:astring\n"; s }
+  | s = ATOM_CHARS { s }
   | q = quoted { q }
 
 (** needs more definition, if plain then can be followed by the base64 **)

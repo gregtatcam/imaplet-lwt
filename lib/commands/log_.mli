@@ -14,6 +14,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 
-val log : [`Error|`Info1|`Info2|`Info3|`Debug] -> string -> unit
+val log : [`Error|`Info1|`Info2|`Info3|`Debug|`None] -> string -> unit
 
 val set_log : string -> unit
