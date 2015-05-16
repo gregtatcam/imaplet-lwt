@@ -543,29 +543,11 @@ let handle_command context =
   | Done -> response context (Some State_Logout) (Resp_Bad(None,"")) None
   | _ -> response context None (Resp_Bad(None, "Bad Command")) None
 
-let dolog buff msgt context = 
-  let buff =
-  begin
-  match msgt with
-  | `Smtp ->
-    if Regex.match_regex ~regx:"^a lappend" buff then
-      "lappend ..."
-    else
-      buff
-  | _ ->
-    if context.!state = State_Notauthenticated then
-      "notauthenticated ..."
-    else
-      buff
-  end
-  in
-  Log_.log `Info3 (Printf.sprintf "----> %s: %s\n" (Int64.to_string context.id) buff)
-
 (* read a line from the network
  * if the line ends with literal {N} and it is not the append
  * then read N bytes, otherwise return the buffer
  *)
-let rec read_network msgt context buffer =
+let rec read_network context buffer =
   begin
   catch ( fun () ->
     Lwt.pick [
@@ -591,7 +573,6 @@ let rec read_network msgt context buffer =
       return `Done
   | `Ok buff ->
   context.client_last_active := Unix.gettimeofday ();
-  dolog buff msgt context;
   (** does command end in the literal {[0-9]+} ? **)
   let i = match_regex_i buff ~regx:"{\\([0-9]+\\)[+]?}$" in
   if i < 0 then (
@@ -611,7 +592,7 @@ let rec read_network msgt context buffer =
       Buffer.add_string buffer "\r\n";
       return (`Ok (Buffer.contents buffer))
     ) else if ((Buffer.length buffer) + len) > 10240 then (
-      return (`Error "command too long")
+      return (`Error ((String.sub (Buffer.contents buffer) 0 500) ^ " command too long"))
     ) else (
       (if match_regex literal ~regx:"[+]}$" = false then
         write_resp context.id context.!netw (Resp_Cont(""))
@@ -626,12 +607,27 @@ let rec read_network msgt context buffer =
       ] >>= function
       | `Ok str ->
         Buffer.add_string buffer str;
-        read_network msgt context buffer
+        read_network context buffer
       | `Timeout ->
         return (`Error "timeout")
       | `Done -> return `Done
     )
   )
+
+let dolog buff cmd context =
+  let log_msg =
+  match cmd.command with
+  | Notauthenticated cmd ->
+    begin
+    match cmd with
+    | Cmd_Authenticate _ -> "AUTHENTICATE ..."
+    | Cmd_Login _ -> "LOGIN ..."
+    | Cmd_Lappend _ -> "A LAPPEND ..."
+    | _ -> buff
+    end
+  | _ -> buff
+  in
+  Log_.log `Info3 (Printf.sprintf "----> %s: %s\n" (Int64.to_string context.id) log_msg)
 
 let get_command msgt context =
   let open Parsing in
@@ -639,14 +635,20 @@ let get_command msgt context =
   let open Lex in
   catch (fun () ->
     let buffer = Buffer.create 0 in
-    read_network msgt context buffer >>= function
+    read_network context buffer >>= function
     | `Done -> return `Done
     | `Error err -> return (`Error err)
     | `Ok buff ->
     let lexbuff = Lexing.from_string buff in
     let current_cmd = 
     (
-      let current_cmd = (Parser.request (Lex.read (ref `Tag)) lexbuff) in
+      let current_cmd = 
+        try
+          (Parser.request (Lex.read (ref `Tag)) lexbuff)
+        with Parser.Error -> 
+          raise (SyntaxError ("bad command, parser: " ^ (try String.sub buff 0 100 with _-> buff)))
+      in
+      dolog buff current_cmd context;
       (* if last command idle then next could only be done *)
       if Stack.is_empty context.!commands then
         current_cmd
@@ -661,11 +663,9 @@ let get_command msgt context =
           current_cmd
       )
     ) in
-    begin
-    try
-    let _ = Stack.pop context.!commands in ()
-    with _ -> ()
-    end;
+    (try
+      let _ = Stack.pop context.!commands in ()
+    with _ -> ());
     Stack.push current_cmd context.!commands ;
     return (`Ok )
   )
@@ -682,7 +682,9 @@ let rec client_requests msgt context =
   catch ( fun () ->
     get_command msgt context >>= function
     | `Done -> return `Done
-    | `Error e -> write_resp context.id context.!netw (Resp_Bad(None,e)) >> client_requests msgt context
+    | `Error e -> 
+      Log_.log `Error (e ^ "\n");
+      write_resp context.id context.!netw (Resp_Bad(None,e)) >> client_requests msgt context
     | `Ok -> handle_command context >>= fun response ->
       if context.!state = State_Logout then
         return `Done

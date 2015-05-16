@@ -77,12 +77,8 @@ let send_to_imap addr context =
     return ()
   ) ()
 
-let write ?log context msg = 
-  begin
-  match log with
-  | Some log -> Log_.log `Info1 (Printf.sprintf "<-- %s\n" log)
-  | None -> Log_.log `Info1 (Printf.sprintf "<-- %s\n" msg)
-  end;
+let write context msg = 
+  Log_.log `Info1 (Printf.sprintf "<-- %s\n" msg);
   let (_,w,_) = context.io in
   Lwt_io.write w (msg ^ "\r\n") 
 
@@ -110,7 +106,7 @@ let buffer_ends buffer str =
 let syntx_helo next_state ~msg str context =
   if List.exists (fun s -> s = `Helo) next_state = false then (
     write context msg >>
-    return `Next
+    return `NextOutOfSeq
   ) else if Regex.match_regex ~regx:"^[ \t]+\\([^ \t]\\)+$" str then (
     write context "250 OK" >>
     return `Helo
@@ -139,7 +135,7 @@ let auth_required context =
 let syntx_ehlo next_state ~msg str context =
   if List.exists (fun s -> s = `Ehlo) next_state = false then (
     write context msg >>
-    return `Next
+    return `NextOutOfSeq
   ) else if Regex.match_regex ~regx:"^[ \t]+\\([^ \t]+\\)$" str then (
     Lwt_unix.gethostname () >>= fun host ->
     let host = "250-" ^ host in
@@ -164,7 +160,7 @@ let syntx_ehlo next_state ~msg str context =
 let syntx_rset next_state ~msg context =
   if List.exists (fun s -> s = `Rset) next_state = false then (
     write context msg >>
-    return `Next
+    return `NextOutOfSeq
   ) else (
     write context "250 OK" >>
     return `Rset
@@ -173,7 +169,7 @@ let syntx_rset next_state ~msg context =
 let syntx_noop next_state ~msg context =
   if List.exists (fun s -> s = `Noop) next_state = false then (
     write context msg >>
-    return `Next
+    return `NextOutOfSeq
   ) else (
     write context "250 OK" >> 
     return `Next
@@ -182,7 +178,7 @@ let syntx_noop next_state ~msg context =
 let syntx_vrfy next_state ~msg str context =
   if List.exists (fun s -> s = `Vrfy) next_state = false then (
     write context msg >>
-    return `Next
+    return `NextOutOfSeq
   ) else if Regex.match_regex ~regx:"^[ \t]+<?\\([^ @<>\t]+\\)$" str then (
     let user = Str.matched_group 1 str in
     authenticate_user user () >>= fun (_,_,auth) ->
@@ -205,7 +201,7 @@ let syntx_quit context =
 let syntx_from next_state ~msg cmd context =
   if List.exists (fun s -> s = `MailFrom) next_state = false then (
     write context msg >>
-    return `Next
+    return `NextOutOfSeq
   ) else if Regex.match_regex ~case:false ~regx:"^[ \t]+FROM:[ \t]*<?\\([^ <>@\t]+\\)\\(@\\([^>]*\\)\\)?" cmd then (
     let user = Str.matched_group 1 cmd in
     let domain = try Some (Str.matched_group 3 cmd) with Not_found -> None in
@@ -221,7 +217,7 @@ let get_interfaces () =
   Lwt_unix.gethostbyname host >>= fun res ->
   return (Array.fold_left (fun acc addr -> 
     (Unix.string_of_inet_addr addr) :: acc
-  ) ["127.0.0.1";"0.0.0.0"] res.h_addr_list)
+  ) ["127.0.0.1";"0.0.0.0"] res.Lwt_unix.h_addr_list)
 
 let in_my_domain interface domain =
   Log_.log `Info2 (Printf.sprintf "### detecting send to domain %s %s\n" interface domain);
@@ -255,7 +251,7 @@ let in_my_domain interface domain =
 let syntx_rcpt next_state ~msg cmd context =
   if List.exists (fun s -> s = `RcptTo) next_state = false then (
     write context msg >>
-    return `Next
+    return `NextOutOfSeq
   ) else if Regex.match_regex ~case:false ~regx:"^[ \t]+TO:[ \t]*<?\\([^ <>@\t]+\\)@\\([^>]*\\)" cmd then (
     let user = Str.matched_group 1 cmd in
     let domain =  Str.matched_group 2 cmd in
@@ -318,7 +314,7 @@ let syntx_rcpt next_state ~msg cmd context =
 let syntx_data next_state ~msg cmd context =
   if List.exists (fun s -> s = `Data) next_state = false then (
     write context msg >>
-    return `Next
+    return `NextOutOfSeq
   ) else if Regex.match_regex ~regx:"^[ \t]*$" cmd then (
     write context "354 End data with <CR><LF>.<CR><LF>" >>
     return `Data
@@ -330,7 +326,7 @@ let syntx_data next_state ~msg cmd context =
 let syntx_starttls next_state ~msg cmd context =
   if List.exists (fun s -> s = `Starttls) next_state = false then (
     write context msg >>
-    return `Next
+    return `NextOutOfSeq
   ) else if Regex.match_regex ~regx:"^[ \t]*$" cmd = false then (
     write context "501 5.5.2 Syntax error" >>
     return `Next
@@ -348,7 +344,7 @@ let syntx_starttls next_state ~msg cmd context =
 let syntx_auth next_state ~msg cmd context =
   if List.exists (fun s -> s = `AuthPlain || s = `AuthLogin) next_state = false then (
     write context msg >>
-    return `Next
+    return `NextOutOfSeq
   ) else if Regex.match_regex ~case:false 
     ~regx:"^[ \t]+PLAIN[ \t]+\\([^ \t]+\\)$" cmd then (
     return (`AuthPlain (Str.matched_group 1 cmd))
@@ -360,22 +356,14 @@ let syntx_auth next_state ~msg cmd context =
     return `AuthLogin
   ) else (
     write context "501 5.5.2 Syntax error" >>
-    return `Next
+    return `NextAuthError
   )
 
-let dolog str context = function
-  | `Ok -> str
-  | `Part ->
-    if context.grttype = `Ehlo && context.auth = None && String.length str > 4 then
-      (String.sub str 0 4) ^ " ..."
-    else
-      str
-  | `None -> "..."
-
-let next ?(log=`Ok) ?(isdata=false) ?(msg="503 5.5.1 Command out of sequence") ~next_state context =
+let next ?(isdata=false) ?(msg="503 5.5.1 Command out of sequence") ~cur_state ~next_state context =
   read context >>= function
   | None -> Log_.log `Debug "smtp: client terminated\n";return `Quit
-  | Some str -> Log_.log `Info3 (Printf.sprintf "--> %s\n" (dolog str context log));
+  | Some str -> 
+  begin
   let domatch ?(tmpl="\\(.*\\)$") rx =
     Regex.match_regex ~case:false ~regx:("^[ \t]*" ^ rx ^ tmpl) str in
   let get () = try Str.matched_group 1 str with _ -> "" in
@@ -407,6 +395,18 @@ let next ?(log=`Ok) ?(isdata=false) ?(msg="503 5.5.1 Command out of sequence") ~
     write context "502 5.5.1 Error: command not recognized" >>
     return `Next
   )
+  end >>= fun res ->
+  let log_msg =
+  match res with
+  | `AuthPlain _ -> "AUTH PLAIN ..."
+  | `AuthLogin -> "AUTH LOGIN ..."
+  | `NextAuthError -> "AUTH error ..."
+  | `NextOutOfSeq when (String.lowercase (String.sub str 0 4)) = "auth" -> "AUTH out of seq ..."
+  | `DataStream _ when cur_state = `AuthPlain || cur_state = `AuthLogin -> "AUTH data ..."
+  | _ -> str
+  in
+  Log_.log `Info3 (Printf.sprintf "%s\n" log_msg);
+  return res
 
 let all state context = function
   | `Quit -> return `Quit
@@ -418,7 +418,7 @@ let all state context = function
 
 let rec datastream context =
   Log_.log `Debug "smtp: starting datastream\n";
-  next ~isdata:true ~next_state:[`DataStream] context >>= function
+  next ~isdata:true ~cur_state:`DataStream ~next_state:[`DataStream] context >>= function
   | `DataStream str ->
     if buffer_ends context.buff "\r\n" && str = "." then (
       let (_,_,mx) = List.hd context.rcpt in
@@ -443,14 +443,14 @@ let rec datastream context =
 
 let rec rcptto context =
   Log_.log `Debug "smtp: starting rcptto\n";
-  next ~next_state:[`RcpTo;`Data;`Vrfy;`Noop;`Helo;`Ehlo;`Rset] context >>= function
+  next ~cur_state:`RcptTo ~next_state:[`RcpTo;`Data;`Vrfy;`Noop;`Helo;`Ehlo;`Rset] context >>= function
   | `RcptTo r -> return (`State (rcptto, {context with rcpt = r :: context.rcpt}))
   | `Data -> return (`State (datastream,context))
   | cmd -> all (rcptto) context cmd
 
 let rec mailfrom context =
   Log_.log `Debug "smtp: starting mailfrom\n";
-  next ~next_state:[`RcptTo;`Vrfy;`Noop;`Helo;`Ehlo;`Rset] context >>= function 
+  next ~cur_state:`MailFrom ~next_state:[`RcptTo;`Vrfy;`Noop;`Helo;`Ehlo;`Rset] context >>= function 
   | `RcptTo r -> return (`State (rcptto, {context with rcpt = r :: context.rcpt}))
   | cmd -> all (mailfrom) context cmd
 
@@ -472,19 +472,19 @@ let authenticate text ?password context =
 (* auth is done right after starttls *)
 let rec authplain context =
   Log_.log `Debug "smtp: starting authplain\n";
-  next ~log:`None ~isdata:true ~next_state:[`DataStream] context >>= function
+  next ~isdata:true ~cur_state:`AuthPlain ~next_state:[`DataStream] context >>= function
   | `DataStream text ->
     authenticate text context
   | _ -> return `Rset (* will not get here, cause of DataStream *)
 
 let rec authlogin user context =
   Log_.log `Debug "smtp starting authlogin\n";
-  next ~log:`None ~isdata:true ~next_state:[`DataStream] context >>= function
+  next ~isdata:true ~cur_state:`AuthLogin ~next_state:[`DataStream] context >>= function
   | `DataStream text -> 
     begin
     match user with
     | None ->
-      write ~log:"334 ..." context "334 UGFzc3dvcmQ6" >> (* 334 Password *)
+      write context "334 UGFzc3dvcmQ6" >> (* 334 Password *)
       return (`State (authlogin (Some text), context))
     | Some user -> 
       authenticate user ~password:text context
@@ -499,7 +499,7 @@ let rec helo context =
     else
       ([`MailFrom;`Ehlo;`Helo;`Noop;`Vrfy;],"503 5.5.1 Command out of sequence")
   in
-  next ~next_state ~msg context >>= function
+  next ~cur_state:`Helo ~next_state ~msg context >>= function
   | `MailFrom from -> return (`State (mailfrom, {context with from}))
   | cmd -> all (helo) context cmd
 
@@ -514,7 +514,7 @@ let doauth context = function
 
 let rec auth context =
   Log_.log `Debug "smtp starting auth\n";
-  next ~log:`Part ~next_state:[`Ehlo;`Helo;`AuthPlain;`AuthLogin]
+  next ~cur_state:`AuthPlain ~next_state:[`Ehlo;`Helo;`AuthPlain;`AuthLogin]
       ~msg:"530 5.7.0 Must issue a AUTH command first" context >>= function
   | `AuthPlain text as cmd -> doauth context cmd
   | `AuthLogin as cmd -> doauth context cmd
@@ -530,7 +530,7 @@ let rec ehlo context =
     else
       ([`MailFrom;`Ehlo;`Helo;`Noop;`Rset;`Vrfy],"503")
   in
-  next ~log:`Part ~next_state ~msg context >>= function
+  next ~cur_state:`Ehlo ~next_state ~msg context >>= function
   | `MailFrom from -> return (`State (mailfrom, {context with from}))
   | `Starttls sock ->
     starttls context.config sock () >>= fun (r,w) ->
@@ -547,7 +547,7 @@ let rec start context =
     else 
       ([`Ehlo;`Helo;`Rset;`Noop;`Vrfy],"503")
   in
-  next ~next_state ~msg context >>= function
+  next ~cur_state:`Rset ~next_state ~msg context >>= function
   | `Starttls sock ->
     starttls context.config sock () >>= fun (r,w) ->
     return (`State (auth, {context with io = (r,w,`Starttls sock)}))
