@@ -156,8 +156,7 @@ Executable imaplet
                     ../certificates/server.key($datadir/imaplet),
                     ../config/imaplet.cf($datadir/imaplet),
                     ../config/users($datadir/imaplet),
-                    ../deploy/crt.pl($datadir/imaplet),
-                    ../deploy/imaplet.html($datadir/imaplet),
+                    ../deploy/imaplet.pl($datadir/imaplet),
                     ../deploy/deploy.sh($datadir/imaplet),
                     ../deploy/imapletd($datadir/imaplet)
 
