@@ -142,7 +142,7 @@ let greetings sock r w context =
       return (`PermanentFailure "starttls is required for relay"))
   | res -> return res
 
-let send_relayed ip context =
+let send_relayed ip ports context =
   Log_.log `Info1 (Printf.sprintf "### relaying message to ip: %s\n" ip);
   let rec send = function
     | port :: tl ->
@@ -158,7 +158,7 @@ let send_relayed ip context =
       end
     | [] -> return (`PermanentFailure "failed establish connection to SMTP server default ports")
   in
-  send [25;587] 
+  send ports
 
 let failed on_failure err context =
   Lwt_unix.gethostname () >>= fun host ->
@@ -169,7 +169,7 @@ let failed on_failure err context =
   | Some domain -> domain
   in
   let from = ("mailer-daemon", Some domain) in
-  let rcpt = [(user,domain,None)] in
+  let rcpt = [(user,domain,`None)] in
   let len = Buffer.length context.buff in
   let msg = 
 "From: Mail Delivery Subsystem <mailer-daemon@" ^ domain ^ ">
@@ -193,29 +193,30 @@ Delivery to the following recipient failed permanently:
  * assume only one receipient for now TBD *)
 let rec relay context on_failure =
   Log_.log `Info2 "### relaying message\n";
-  let (user, domain, mx_rr) = List.hd context.rcpt in
-  match mx_rr with
-  | Some mx ->
+  let (user, domain, relay_rec) = List.hd context.rcpt in
+  let send relay_rec ip ports =
+    send_relayed ip ports context >>= function 
+    | `Ok -> 
+      Log_.log `Info2 "### relay succeeded\n";
+      return ()
+    | `Failure ->
+      Log_.log `Info2 "### relay failure, retrying\n";
+      Lwt_unix.sleep 60. >>
+      relay {context with rcpt = [(user, domain, relay_rec)]} on_failure
+    | `PermanentFailure err -> 
+      Log_.log `Info2 "### permanent relay failure\n";
+      failed on_failure err context
+  in
+  match relay_rec with
+  | `MXRelay relay_rec ->
     begin
-      match mx with 
-      | (pri,ips) :: tl ->
-        begin
+      match relay_rec with 
         (* is trying on one interface ok? TBD *)
-        send_relayed (List.hd ips) context >>= function 
-        | `Ok -> 
-          Log_.log `Info2 "### relay succeeded\n";
-          return ()
-        | `Failure ->
-          Log_.log `Info2 "### relay failure, retrying\n";
-          Lwt_unix.sleep 60. >>
-          relay {context with rcpt = [(user, domain, Some tl)]} on_failure
-        | `PermanentFailure err -> 
-          Log_.log `Info2 "### permanent relay failure\n";
-          failed on_failure err context
-        end
+      | (pri,ips) :: tl -> send (`MXRelay tl) (List.hd ips) [25;587;2587]
       | [] ->
         Log_.log `Info2 "### mx rr records are empty, can't relay\n"; 
         failed on_failure "failed establish connection to SMTP server interfaces" context
     end
-  | None -> 
-    Log_.log `Info2 "### no mx rr records, can't relay\n"; return ()
+  | `DirectRelay (ip,port) -> send `None ip [port]
+  | `None ->  
+    Log_.log `Info2 "### no mx rr/direct records, can't relay\n"; return ()

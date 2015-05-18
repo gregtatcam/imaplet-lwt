@@ -21,6 +21,15 @@ open Server_config
 type netio = Lwt_io.input_channel * Lwt_io.output_channel*
   [`Reg of Lwt_unix.file_descr|`Ssl|`Starttls of Lwt_unix.file_descr]
 
+(* relay_records = `None|DirectRelay of ip -> directly relay to ip|
+ * MXRelay (priority * ip list) list, relay based on DNS MX:
+ * from dns resolve/gethostbyname - list of domains, 
+ * each domain has list of interfaces
+ * if Some then the message must be relayed
+ * user * doman * relay_records
+ *)
+type relayRecord = [`None|`DirectRelay of string*int|`MXRelay of (int*string list) list]
+
 type cmd_context = { 
   (* server configuration *) 
   config:imapConfig;
@@ -32,11 +41,7 @@ type cmd_context = {
   io:netio;
   (* user * domain *)
   from:(string*string option); 
-  (* mx_records = (priority * ip list) list option, 
-   * from dns resolve/gethostbyname - list of domains, 
-   * each domain has list of interfaces
-   * if Some then the message must be relayed
-   *)
-  rcpt:(string*string*((int*string list) list) option) list; 
+  (* user * domain * relay *)
+  rcpt:(string*string*relayRecord) list; 
   (* data content *)
   buff:Buffer.t} 
