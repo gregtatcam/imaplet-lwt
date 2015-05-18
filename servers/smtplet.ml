@@ -593,17 +593,23 @@ let mkcontext config sock inchan outchan =
   in
   {config;auth=None;grttype=`Rset;io;from=("",None);rcpt=[];buff=Buffer.create 100}
 
+let rec server_on_port addr port config =
+  server (`Inet (addr, port)) config (fun sock r w ->
+    greeting (mkcontext config sock r w))
+    (fun ex -> Log_.log `Error (Printf.sprintf "### smtplet: exception %s\n"
+    (Printexc.to_string ex)); server_on_port addr port config)
+
+let ports_str ports =
+  List.fold_left (fun acc p -> acc ^ " " ^ (string_of_int p)) "" ports
+
 let _ =
   Lwt_main.run (
     (* temp, overwrite ssl/starttls with smtp_ssl/smtp_starttls *)
     let config = {srv_config with
       ssl=srv_config.smtp_ssl;starttls=srv_config.smtp_starttls} in
-    Log_.log `Info1 (Printf.sprintf "### smtplet: started %s %s:%d:%b:%b\n" 
+    Log_.log `Info1 (Printf.sprintf "### smtplet: started %s %s:%s:%b:%b\n" 
       (ImapTime.to_string (ImapTime.now()))
-      config.smtp_addr config.smtp_port config.ssl config.starttls);
-    server (`Inet (config.smtp_addr,config.smtp_port)) config 
-    (fun sock inchan outchan ->
-      greeting (mkcontext config sock inchan outchan)
-    ) (fun ex -> Log_.log `Error (Printf.sprintf "### smtplet: exception %s\n"
-    (Printexc.to_string ex)); return ())
+      config.smtp_addr (ports_str config.smtp_port) config.ssl config.starttls);
+    Lwt_list.iter_p (fun port ->
+      server_on_port config.smtp_addr port config) config.smtp_port
   )

@@ -133,20 +133,24 @@ Current configuration will be saved in %s.back.\n%!" Install.config_path;
   Printf.printf "\n--- Configuring SMTP Server.\n";
   Printf.printf "The following configuration should support the most common cases\n%!";
   Printf.printf "Interface to accept client connections on: 0.0.0.0 (any)\n%!";
-  Printf.printf "Port to accept client connections on: 587\n%!";
+  Printf.printf "Ports to accept client connections on: 25,587\n%!";
   Printf.printf "SSL(uncommon email client support): disabled\n%!";
   Printf.printf "STARTTLS: enabled\n%!";
   confirm "Do you want to proceed?\nY(yes)|N(different configuration)|C(cancel):" ync >>= fun res ->
+  let get_ports ports =
+    List.fold_left (fun acc p -> (int_of_string p) :: acc) [] (Str.split
+    (Str.regexp ",") ports)
+  in
   begin
     if res then
-      return ("0.0.0.0",587,false,true)
+      return ("0.0.0.0",[25;587],false,true)
     else (
       get_interfaces () >>= fun (intfs,intfs_str,conf) ->
       confirm intfs_str conf >>= fun addr ->
-      input "Enter port:" "^[1-9]+" >>= fun port ->
+        input "Enter port:" "^[0-9]+\\(,[0-9]+\\)*$" >>= fun ports ->
       input "STARTTLS enabled Y(yes)|N(no):" "^[YyNn]$" >>= fun starttls ->
       input "SSL enabled N(no)|Y(yes):" "^[YyNn]$" >>= fun ssl ->
-      return (addr,int_of_string port, bool_of_yn ssl, bool_of_yn starttls)
+      return (addr,get_ports ports, bool_of_yn ssl, bool_of_yn starttls)
     )
   end >>= fun (smtp_addr,smtp_port,smtp_ssl,smtp_starttls) ->
   let config = {config with smtp_addr;smtp_port;smtp_ssl;smtp_starttls} in
@@ -176,6 +180,10 @@ space)\n%!";
   | "5" -> return (`Debug,"debug")
   | _ -> return (`Error,"error")
   end >>= fun (log_level,level_str) ->
+  let ports_to_str ports =
+    List.fold_left (fun acc p -> if acc = "" then (string_of_int p) else
+      (string_of_int p) ^ "," ^ acc) "" ports
+  in
   let config = {config with log_level} in
   Printf.printf "\n### Entered configuration:\n%!";
   Printf.printf "Account location: %s\n%!" account_location;
@@ -184,7 +192,7 @@ space)\n%!";
   Printf.printf "IMAP SSL: %s\n%!" (bool_to_ed config.ssl);
   Printf.printf "IMAP STARTTLS: %s\n%!" (bool_to_ed config.starttls);
   Printf.printf "SMTP interface: %s\n%!" config.smtp_addr;
-  Printf.printf "SMTP port: %d\n%!" config.smtp_port;
+  Printf.printf "SMTP ports: %s\n%!" (ports_to_str config.smtp_port);
   Printf.printf "SMTP SSL: %s\n%!" (bool_to_ed config.smtp_ssl);
   Printf.printf "SMTP STARTTLS: %s\n%!" (bool_to_ed config.smtp_starttls);
   Printf.printf "Logging location: %s\n%!" config.log;
@@ -201,7 +209,7 @@ space)\n%!";
       let map = MapStr.add "^ssl" ("ssl " ^ (string_of_bool config.ssl)) map in
       let map = MapStr.add "^starttls" ("starttls " ^ (string_of_bool config.starttls)) map in
       let map = MapStr.add "^smtp_addr" ("smtp_addr " ^ config.smtp_addr) map in
-      let map = MapStr.add "^smtp_port" ("smtp_port " ^ (string_of_int config.smtp_port)) map in
+      let map = MapStr.add "^smtp_port" ("smtp_port " ^ (ports_to_str config.smtp_port)) map in
       let map = MapStr.add "^smtp_ssl" ("smtp_ssl " ^ (string_of_bool config.smtp_ssl)) map in
       let map = MapStr.add "^smtp_starttls" ("smtp_starttls " ^ (string_of_bool config.smtp_starttls)) map in
       let map = MapStr.add "^log" ("log " ^ config.log) map in

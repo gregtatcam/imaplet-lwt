@@ -24,7 +24,7 @@ type imapConfig = {
   max_msg_size : int;
   imap_name : string; (* greeting name, default imaplet *)
   smtp_addr : string; (* smtp server address, default 127.0.0.1 *)
-  smtp_port : int; (* smtp server port, default 25 *)
+  smtp_port : int list; (* smtp server ports to listen on, default [25;587] *)
   smtp_ssl : bool; (* ssl enabled for smtp, default false *)
   smtp_starttls : bool; (* starttls enabled for smtp, default false *)
   addr : string; (* server port, default 127.0.0.1 *)
@@ -56,7 +56,7 @@ let default_config = {
   max_msg_size = 0;
   imap_name = "imaplet";
   smtp_addr = "127.0.0.1";
-  smtp_port = 25;
+  smtp_port = [25;587];
   smtp_ssl = false;
   smtp_starttls = true;
   addr = "127.0.0.1";
@@ -165,7 +165,12 @@ let config_of_lines lines =
           | "irmin_expand" -> {acc with irmin_expand = bval n v false}
           | "max_msg_size" -> {acc with max_msg_size = ival n v 10_000_000}
           | "smtp_addr" -> {acc with smtp_addr = v}
-          | "smtp_port" -> {acc with smtp_port = ival n v 24}
+          | "smtp_port" -> 
+            let smtp_port = List.fold_left (fun acc p -> 
+              (int_of_string p) :: acc
+            ) [] (Str.split (Str.regexp ",") v)
+            in
+            { acc with smtp_port}
           | "smtp_ssl" -> {acc with smtp_ssl = bval n v false}
           | "smtp_starttls" -> {acc with smtp_starttls = bval n v true}
           | "addr" -> {acc with addr = v}

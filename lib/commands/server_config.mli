@@ -24,7 +24,7 @@ type imapConfig = {
   max_msg_size : int; (* max email size *)
   imap_name : string; (* greeting name, default imaplet *)
   smtp_addr : string; (* smtp server address, default 127.0.0.1 *)
-  smtp_port : int; (* smtp server port, default 24 *)
+  smtp_port : int list; (* smtp server port, default [25;587] *)
   smtp_ssl : bool; (* ssl enabled for smtp, default false *)
   smtp_starttls : bool; (* starttls enabled for smtp, default false *)
   addr : string; (* server address, default 127.0.0.1 *)
