@@ -34,7 +34,7 @@ val make_email_message : string -> Mailbox.Message.t
 
 val option_value : 'a option -> default:'a -> 'a
 
-val option_value_exn : 'a option -> 'a
+val option_value_exn : ?ex:exn -> 'a option -> 'a
 
 val list_find : 'a list -> ('a -> bool) -> bool
 

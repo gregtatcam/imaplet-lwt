@@ -126,9 +126,9 @@ let option_value o ~default =
   | Some v -> v
   | None -> default
 
-let option_value_exn = function
+let option_value_exn ?(ex=Not_found) = function
   | Some v -> v
-  | None -> raise Not_found
+  | None -> raise ex
 
 let list_find l f =
   List.exists f l
