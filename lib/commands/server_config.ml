@@ -34,6 +34,7 @@ type imapConfig = {
   data_path : string; (* pam/key path, default datadir/imaplet *)
   pem_name : string; (* pem file name, default server.pem *)
   key_name : string; (* private key file name, default server.key *)
+  pub_name : string; (* public key file name, default server.pub *)
   users_path : string; (* users file path, default datadir/imaplet *)
   data_store : [`Irmin|`Mailbox|`Maildir]; (* type of storage, only irmin supported so far *)
   encrypt : bool; (* encrypt messages, default true *)
@@ -65,6 +66,7 @@ let default_config = {
   data_path = Install.data_path;
   pem_name = "server.pem";
   key_name = "server.key";
+  pub_name = "server.pub";
   users_path = Install.users_path;
   data_store = `Irmin;
   encrypt = true;
@@ -173,6 +175,7 @@ let config_of_lines lines =
           | "data_path" -> {acc with data_path = v};
           | "pem_name" -> {acc with pem_name = v}
           | "key_name" -> {acc with key_name = v}
+          | "pub_name" -> {acc with pub_name = v}
           | "users_path" -> {acc with users_path = v}
           | "data_store" -> {acc with data_store = (stval n v)}
           | "encrypt" -> {acc with encrypt = (bval n v true)}

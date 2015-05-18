@@ -68,6 +68,9 @@ pem_name server.pem
 # key name
 key_name server.key
 
+# public key
+pub_name server.pub
+
 # users path default datadir/imaplet
 #users_path ""
  

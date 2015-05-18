@@ -27,6 +27,7 @@ open Parsemail
 exception KeyDoesntExist
 exception DuplicateUID
 exception InvalidKey of string
+exception EmptyPrivateKey
 
 module Store = Irmin.Basic (Irmin_git.FS) (Irmin.Contents.String)
 module View = Irmin.View(Store)
@@ -698,6 +699,7 @@ module IrminMailbox :
       | `NotFound -> return `NotFound
       | `Ok (seq,uid) -> 
         let (_,priv) = mbox.pubpriv in
+        let priv = Utils.option_value_exn ~ex:EmptyPrivateKey priv in
         let lazy_hashes = Lazy.from_fun (fun () -> get_hashes mbox uid) in
         return (`Ok (
           build_lazy_message_inst

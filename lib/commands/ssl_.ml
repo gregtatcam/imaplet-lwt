@@ -15,14 +15,37 @@
  *)
 open Lwt
 open Server_config
+open X509
 open X509.Encoding.Pem
+open Sexplib.Conv
 
 exception PasswordRequired
+exception FailedPubKey
 
-type keys = Nocrypto.Rsa.pub * Nocrypto.Rsa.priv
+type keys = Nocrypto.Rsa.pub * Nocrypto.Rsa.priv option
 
 let get_pub_key priv =
   Nocrypto.Rsa.pub_of_priv priv
+
+let pub_of_priv_string priv =
+  get_pub_key (PK.of_pem_cstruct1 (Cstruct.of_string priv))
+
+let pub_of_cert_string cert =
+  let cert = Cert.of_pem_cstruct1 (Cstruct.of_string cert) in
+  match (X509.cert_pubkey cert) with
+  | Some key ->
+    begin
+    match key with
+    | `RSA pub_key -> pub_key
+    | _ -> raise FailedPubKey
+    end
+  | None -> raise FailedPubKey
+
+let sexp_of_pub pub =
+  Nocrypto.Rsa.sexp_of_pub pub
+
+let pub_of_sexp sexp =
+  Nocrypto.Rsa.pub_of_sexp sexp
 
 let create_cert config = 
   X509_lwt.private_of_pems
@@ -42,22 +65,27 @@ let get_user_keys ~user ?pswd config =
     let p = Filename.concat config.user_cert_path name in
     Regex.replace ~regx:"%user%" ~tmpl:user p 
   in
+  let of_pem key =
+    (PK.of_pem_cstruct1 (Cstruct.of_string key))
+  in
   Lwt_io.with_file ~mode:Lwt_io.input (path config.key_name) (fun r ->
     Lwt_io.read r
   ) >>= fun key ->
-  let key =
+  let priv =
   if key_encrypted key then (
     match pswd with
     | Some pswd ->
       let pswd = Imap_crypto.get_hash_raw (user ^ "\000" ^ pswd) in
-      (Imap_crypto.aes_decrypt_pswd ~pswd key)
-    | None -> raise PasswordRequired
+      Some (of_pem (Imap_crypto.aes_decrypt_pswd ~pswd key))
+    | None -> None (*raise PasswordRequired*)
   ) else ( (* should raise if auth_required and the key is not encrypted? TBD *)
-    key 
+    Some (of_pem key)
   )
   in
-  let priv = (PK.of_pem_cstruct1 (Cstruct.of_string key)) in
-  return (get_pub_key priv,priv)
+  Lwt_io.with_file ~mode:Lwt_io.input (path config.pem_name) (fun r ->
+    Lwt_io.read r
+  ) >>= fun cert ->
+  return (pub_of_cert_string cert, priv)
 
 let get_system_keys config =
   create_cert config >>= fun (_,priv) ->

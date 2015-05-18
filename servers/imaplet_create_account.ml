@@ -19,6 +19,7 @@ open Commands
 open Server_config
 open Irmin_core
 open Irmin_storage
+open Sexplib.Conv
 
 exception InvalidCommand
 exception SystemFailed of string
@@ -105,20 +106,20 @@ let log msg =
   Lwt_io.with_file ~flags:[O_WRONLY;O_APPEND;O_CREAT] ~mode:Lwt_io.output "/tmp/log/imaplet.log"
   (fun oc -> Lwt_io.write_line oc msg)
 
-let genrsa user pswd priv =
-  Lwt_process.pread ~stderr:`Dev_null ("openssl",[|"genrsa";"1024s"|]) >>= fun key -> 
-  Lwt_io.with_file ~mode:Lwt_io.output priv (fun w -> 
+let genrsa user pswd priv_path pub_path =
+  Lwt_process.pread ~stderr:`Dev_null ("openssl",[|"genrsa";"1024s"|]) >>= fun priv_key -> 
+  Lwt_io.with_file ~mode:Lwt_io.output priv_path (fun w -> 
     Lwt_io.write w 
     begin
     if srv_config.auth_required then (
       let pswd = Imap_crypto.get_hash_raw (user ^ "\000" ^ pswd) in
-      Imap_crypto.aes_encrypt_pswd ~pswd key
+      Imap_crypto.aes_encrypt_pswd ~pswd priv_key
     ) else (
-      key
+      priv_key
     )
     end
-  ) >>
-  return key
+  ) >> 
+  return priv_key
 
 let reqcert priv pem =
   Lwt_process.pwrite ("openssl", 
@@ -139,6 +140,7 @@ let () =
     let irmin_path = Regex.replace ~regx:"%user%" ~tmpl:user srv_config.irmin_path in
     let priv_path = Filename.concat cert_path srv_config.key_name in
     let pem_path = Filename.concat cert_path srv_config.pem_name in
+    let pub_path = Filename.concat cert_path srv_config.pub_name in
     Lwt_main.run (
       catch (fun () ->
         (if force then
@@ -150,7 +152,7 @@ let () =
         Lwt_unix.mkdir irmin_path 0o775 >>
         Lwt_unix.mkdir cert_path 0o775 >>
         file_cmd priv_path 
-          (fun () -> genrsa user pswd priv_path >>= fun key ->
+          (fun () -> genrsa user pswd priv_path pub_path >>= fun key ->
 	             reqcert key pem_path) >>
           dir_cmd (Filename.concat irmin_path ".git") 
           (fun () -> 
