@@ -111,12 +111,6 @@ Current configuration will be saved in %s.back.\n%!" Install.config_path;
   let config = {config with irmin_path = account_location ^ "/%user%/repo";
     user_cert_path = account_location ^ "/%user%/cert"} in
   system ("mkdir -p " ^ account_location) >>= fun () ->
-  Printf.printf "\nAuthentication required setting encrypts user's private key\n%!"; 
-  Printf.printf "with password, forces SSL/TLS in IMAP/SMTP Servers, and forces\n%!";
-  Printf.printf "authenticatin in SMTP Server.\n%!";
-  input "Authentication required Y(yes)|N(no):" "^[YyNn]$" >>= fun auth_required ->
-  let auth_required = bool_of_yn auth_required in
-  let config = {config with auth_required} in
   Printf.printf "\n--- Configuring IMAP Server.\n";
   Printf.printf "The following configuration should support the most common cases\n%!";
   Printf.printf "Interface to accept client connections on: 0.0.0.0 (any)\n%!";
@@ -130,14 +124,8 @@ Current configuration will be saved in %s.back.\n%!" Install.config_path;
       get_interfaces () >>= fun (intfs,intfs_str,conf) ->
       confirm intfs_str conf >>= fun addr ->
       input "Enter port:" "^[1-9]+" >>= fun port ->
-      (if auth_required then 
-        (Printf.printf "SSL enabled: Y\n%!"; return "y")
-      else
-        input "SSL enabled Y(yes)|N(no):" "^[YyNn]$") >>= fun ssl ->
-      (if auth_required then 
-        (Printf.printf "STARTTLS enabled: Y\n%!"; return "y")
-      else
-        input "STARTTLS enabled Y(yes)|N(no):" "^[YyNn]$") >>= fun starttls ->
+      input "SSL enabled Y(yes)|N(no):" "^[YyNn]$" >>= fun ssl ->
+      input "STARTTLS enabled Y(yes)|N(no):" "^[YyNn]$" >>= fun starttls ->
       return (addr,int_of_string port,bool_of_yn ssl, bool_of_yn starttls)
     )
   end >>= fun (addr,port,ssl,starttls) ->
@@ -156,10 +144,7 @@ Current configuration will be saved in %s.back.\n%!" Install.config_path;
       get_interfaces () >>= fun (intfs,intfs_str,conf) ->
       confirm intfs_str conf >>= fun addr ->
       input "Enter port:" "^[1-9]+" >>= fun port ->
-      (if auth_required then 
-        (Printf.printf "STARTTLS enabled: Y\n%!"; return "y")
-      else
-        input "STARTTLS enabled Y(yes)|N(no):" "^[YyNn]$") >>= fun starttls ->
+      input "STARTTLS enabled Y(yes)|N(no):" "^[YyNn]$" >>= fun starttls ->
       input "SSL enabled N(no)|Y(yes):" "^[YyNn]$" >>= fun ssl ->
       return (addr,int_of_string port, bool_of_yn ssl, bool_of_yn starttls)
     )
@@ -194,7 +179,6 @@ space)\n%!";
   let config = {config with log_level} in
   Printf.printf "\n### Entered configuration:\n%!";
   Printf.printf "Account location: %s\n%!" account_location;
-  Printf.printf "Authentication required: %s\n%!" (bool_to_ed config.auth_required);
   Printf.printf "IMAP interface: %s\n%!" config.addr;
   Printf.printf "IMAP port: %d\n%!" config.port;
   Printf.printf "IMAP SSL: %s\n%!" (bool_to_ed config.ssl);
