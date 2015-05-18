@@ -58,8 +58,11 @@ let send_to_imap addr context =
   Log_.log `Info1 "smtp: sending to imap\n";
   let (_from,_) = context.from in
   let msg = Buffer.contents context.buff in
-  let (_to,_,_) = List.nth context.rcpt 0 in
+  let (_to,_,_) = List.hd context.rcpt in
   let up = context.auth in
+  (* if auth_required on the reciever side then need the password, overall
+   * problem with the relayed SMTP - no password for the account
+   *)
   let pswd = 
     match up with
     | Some (_,pswd) -> (match pswd with |Some pswd -> " " ^ pswd|None->"")
@@ -122,13 +125,14 @@ let starttls_required context =
   | _ -> false
 
 (* if starttls required then have to do starttls first
- *
  *)
 let auth_required context =
   if starttls_required context then
     false
   else if context.grttype = `Ehlo then
-    context.auth = None
+    (* need to figure out when to make auth
+     * required *)
+    (*context.auth = None tmp *) false
   else
     false
 
@@ -145,10 +149,10 @@ let syntx_ehlo next_state ~msg str context =
     let cap =
       if tls then
         host :: ("250-STARTTLS" :: ("250-AUTH PLAIN LOGIN" :: cap))
-      else if auth then
+      else (*if auth then tmp *)
         host :: ("250-AUTH PLAIN LOGIN" :: cap)
-      else
-        host :: cap
+      (*else
+        host :: cap*)
     in
     Lwt_list.iter_s (fun c -> write context c) cap >>
     return `Ehlo
@@ -263,7 +267,7 @@ let syntx_rcpt next_state ~msg cmd context =
       authenticate_user user () >>= fun (_,_,auth) ->
       if auth then (
         write context "250 OK" >>
-        return (`RcptTo (user,domain,None))
+        return (`RcptTo (user,domain,`None))
       ) else (
         write context "550 5.7.8 : Recipient address rejected: User unknown in local recipient table" >>
         return `Next
@@ -293,12 +297,22 @@ let syntx_rcpt next_state ~msg cmd context =
       if valid then (
         Log_.log `Info1 (Printf.sprintf "### scheduling to relay to domain %s\n" domain);
         Imaplet_dns.resolve domain >>= fun mx_rr ->
+        (* might be relaying directly to another device in the same network,
+         * need a way to figure it out?
+         *)
         if List.length mx_rr > 0 then (
-         write context "250 OK" >>
-         return (`RcptTo (user,domain,Some mx_rr))
+          write context "250 OK" >>
+          return (`RcptTo (user,domain,`MXRelay mx_rr))
+        ) else if (try let _ = Unix.inet_addr_of_string domain in true with _ -> false) then (
+          (* temp work around for direct send - if the address is ip then use
+           * it, need to make a more general case, look at the headers, check if
+           * STUN mapped address in the header (additional header X-?) matches
+           * this STUN mapped address *)
+          write context "250 OK" >>
+          return (`RcptTo (user,domain, `DirectRelay (domain,2587)))
         ) else (
-         write context "550 5.1.2 : Invalid domain" >>
-         return `Next
+          write context "550 5.1.2 : Invalid domain" >>
+          return `Next
         )
       ) else (
         write context "550 5.7.8 : From address rejected: User unknown in local
@@ -405,7 +419,7 @@ let next ?(isdata=false) ?(msg="503 5.5.1 Command out of sequence") ~cur_state ~
   | `DataStream _ when cur_state = `AuthPlain || cur_state = `AuthLogin -> "AUTH data ..."
   | _ -> str
   in
-  Log_.log `Info3 (Printf.sprintf "%s\n" log_msg);
+  Log_.log `Info3 (Printf.sprintf "--> %s\n" log_msg);
   return res
 
 let all state context = function
@@ -421,8 +435,8 @@ let rec datastream context =
   next ~isdata:true ~cur_state:`DataStream ~next_state:[`DataStream] context >>= function
   | `DataStream str ->
     if buffer_ends context.buff "\r\n" && str = "." then (
-      let (_,_,mx) = List.hd context.rcpt in
-      if mx = None then (
+      let (_,_,relay_rec) = List.hd context.rcpt in
+      if relay_rec = `None then (
         catch (fun () ->
          send_to_imap imap_addr context >>
          write context "250 OK"
@@ -497,7 +511,7 @@ let rec helo context =
     if context.config.auth_required then
       ([`Rset;`Ehlo],"530 5.7.0 Must issue a AUTH command first")
     else
-      ([`MailFrom;`Ehlo;`Helo;`Noop;`Vrfy;],"503 5.5.1 Command out of sequence")
+      ([`MailFrom;`Ehlo;`Helo;`Noop;`Vrfy;`Rset],"503 5.5.1 Command out of sequence")
   in
   next ~cur_state:`Helo ~next_state ~msg context >>= function
   | `MailFrom from -> return (`State (mailfrom, {context with from}))
@@ -524,11 +538,11 @@ let rec ehlo context =
   Log_.log `Debug "smtp: starting ehlo\n";
   let (next_state,msg) = 
     if starttls_required context then
-      ([`Ehlo;`Helo;`Starttls],"530 5.7.0 Must issue a STARTTLS command first")
+      ([`Ehlo;`Helo;`Rset;`Starttls],"530 5.7.0 Must issue a STARTTLS command first")
     else if auth_required context then
-      ([`Ehlo;`Helo;`AuthPlain;`AuthLogin],"530 5.7.0 Must issue a AUTH command first")
+      ([`Ehlo;`Helo;`Rset;`AuthPlain;`AuthLogin],"530 5.7.0 Must issue a AUTH command first")
     else
-      ([`MailFrom;`Ehlo;`Helo;`Noop;`Rset;`Vrfy],"503")
+      ([`MailFrom;`Ehlo;`Helo;`Noop;`Rset;`Vrfy;(*tmp*)`AuthPlain;`AuthLogin],"503")
   in
   next ~cur_state:`Ehlo ~next_state ~msg context >>= function
   | `MailFrom from -> return (`State (mailfrom, {context with from}))
@@ -543,7 +557,7 @@ let rec start context =
   Log_.log `Debug "smtp: starting state\n";
   let (next_state,msg) =
     if starttls_required context then
-      ([`Ehlo;`Helo;`Starttls],"530 5.7.0 Must issue a STARTTLS command first")
+      ([`Ehlo;`Helo;`Rset;`Starttls],"530 5.7.0 Must issue a STARTTLS command first")
     else 
       ([`Ehlo;`Helo;`Rset;`Noop;`Vrfy],"503")
   in
