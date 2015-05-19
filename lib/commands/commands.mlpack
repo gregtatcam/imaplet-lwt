@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: 8c7888e78bfdd811c35e64ad2b0623ff)
+# DO NOT EDIT (digest: 87c2cb0e869a7040c39c425e32fdb6b7)
 Account
 Amailbox
 Configuration
@@ -10,6 +10,7 @@ Email_parse
 Fetchregex
 Imap_cmd
 Imap_crypto
+Imaplet_stun
 Imaplet_dns
 Imaplet_types
 Irmin_core

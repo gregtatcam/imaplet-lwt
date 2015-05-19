@@ -93,6 +93,7 @@ Library commands
                     Fetchregex,
                     Imap_cmd,
                     Imap_crypto,
+                    Imaplet_stun,
                     Imaplet_dns,
                     Imaplet_types,
                     Irmin_core,
@@ -231,3 +232,11 @@ Executable client
   CompiledObject  : native
   MainIs	  : client.ml
   BuildDepends	  : lwt,lwt.unix,lwt.syntax,re,re.posix,threads,tls.lwt
+
+Executable stun
+  Build		  : true
+  Install	  : false
+  Path		  : utils
+  CompiledObject  : native
+  MainIs	  : stun.ml
+  BuildDepends	  : lwt,lwt.unix,lwt.syntax,re,re.posix,threads,tls.lwt,imaplet,imaplet.commands

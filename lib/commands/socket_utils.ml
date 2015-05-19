@@ -27,9 +27,9 @@ let try_close_sock sock =
     match sock with |None->return()|Some sock->Lwt_unix.close sock)
   (function _ -> return ())
 
-let init_socket addr port =
+let init_socket ?(stype=Unix.SOCK_STREAM) addr port =
   let sockaddr = Unix.ADDR_INET (Unix.inet_addr_of_string addr, port) in
-  let socket = Lwt_unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+  let socket = Lwt_unix.socket Unix.PF_INET stype 0 in
   Lwt_unix.setsockopt socket Unix.SO_REUSEADDR true;
   Lwt_unix.bind socket sockaddr;
   return socket
@@ -58,14 +58,25 @@ let create_srv_socket addr =
   Lwt_unix.listen socket 10;
   return socket
 
-let create_clnt_socket addr =
+let create_clnt_socket ?(stype=Unix.SOCK_STREAM) ?interface addr =
+  let (socket,sockaddr) =
+  begin
   match addr with
   | `Inet (addr,port) ->
     let sockaddr = Unix.ADDR_INET (Unix.inet_addr_of_string addr, port) in
-    (Lwt_unix.socket Unix.PF_INET Unix.SOCK_STREAM 0,sockaddr)
+    (Lwt_unix.socket Unix.PF_INET stype 0,sockaddr)
   | `Unix file ->
     let sockaddr = Unix.ADDR_UNIX file in
-    (Lwt_unix.socket Unix.PF_UNIX Unix.SOCK_STREAM 0 ,sockaddr)
+    (Lwt_unix.socket Unix.PF_UNIX stype 0 ,sockaddr)
+  end
+  in
+  if stype = Unix.SOCK_DGRAM then (
+    match interface with
+    | Some intf -> Lwt_unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_of_string intf, 0))
+    | None -> Lwt_unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_any, 0))
+  );
+  (socket,sockaddr)
+
 
 let accept_ssl sock cert =
   Tls_lwt.accept cert sock >>= fun (channels, addr) ->
@@ -123,6 +134,18 @@ let client_send addr f init =
   Lwt_unix.close socket >>
   try_close inchan >> try_close outchan >>
   return acc
+
+let client_send_dgram ?interface addr f init =
+  let (socket,sockaddr) = create_clnt_socket ~stype:Unix.SOCK_DGRAM ?interface addr in
+  let send msg =
+    Lwt_unix.sendto socket msg 0 (String.length msg) [] sockaddr in
+  let recv msg =
+    Lwt_unix.recvfrom socket msg 0 (String.length msg) [] >>= fun (size,sockaddr) ->
+    match sockaddr with
+    | ADDR_INET (inetaddr,port) -> return (size,Unix.string_of_inet_addr inetaddr,port)
+    | _ -> assert(false)
+  in
+  f init recv send
 
 let addr_to_string = function
   | `Inet (addr,port) -> Printf.sprintf "%s:%d" addr port

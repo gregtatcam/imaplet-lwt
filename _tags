@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: c5f02813ee78609b9e6740a6f87f9af7)
+# DO NOT EDIT (digest: 4d76e525e64ddb30883a1d2d1ecf266f)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -60,6 +60,7 @@ true: annot, bin_annot
 "lib/commands/fetchregex.cmx": for-pack(Commands)
 "lib/commands/imap_cmd.cmx": for-pack(Commands)
 "lib/commands/imap_crypto.cmx": for-pack(Commands)
+"lib/commands/imaplet_stun.cmx": for-pack(Commands)
 "lib/commands/imaplet_dns.cmx": for-pack(Commands)
 "lib/commands/imaplet_types.cmx": for-pack(Commands)
 "lib/commands/irmin_core.cmx": for-pack(Commands)
@@ -395,18 +396,6 @@ true: annot, bin_annot
 "utils/get_messages.native": use_commands
 "utils/get_messages.native": use_imaplet
 "utils/get_messages.native": use_parsemail
-<utils/*.ml{,i,y}>: pkg_cstruct.unix
-<utils/*.ml{,i,y}>: pkg_dns
-<utils/*.ml{,i,y}>: pkg_dns.lwt
-<utils/*.ml{,i,y}>: pkg_fieldslib.syntax
-<utils/*.ml{,i,y}>: pkg_ipaddr
-<utils/*.ml{,i,y}>: pkg_irmin.unix
-<utils/*.ml{,i,y}>: pkg_nocrypto
-<utils/*.ml{,i,y}>: pkg_sexplib.syntax
-<utils/*.ml{,i,y}>: pkg_str
-<utils/*.ml{,i,y}>: use_commands
-<utils/*.ml{,i,y}>: use_imaplet
-<utils/*.ml{,i,y}>: use_parsemail
 # Executable client
 "utils/client.native": pkg_lwt
 "utils/client.native": pkg_lwt.syntax
@@ -415,12 +404,44 @@ true: annot, bin_annot
 "utils/client.native": pkg_re.posix
 "utils/client.native": pkg_threads
 "utils/client.native": pkg_tls.lwt
+# Executable stun
+"utils/stun.native": pkg_cstruct.unix
+"utils/stun.native": pkg_dns
+"utils/stun.native": pkg_dns.lwt
+"utils/stun.native": pkg_fieldslib.syntax
+"utils/stun.native": pkg_ipaddr
+"utils/stun.native": pkg_irmin.unix
+"utils/stun.native": pkg_lwt
+"utils/stun.native": pkg_lwt.syntax
+"utils/stun.native": pkg_lwt.unix
+"utils/stun.native": pkg_nocrypto
+"utils/stun.native": pkg_re
+"utils/stun.native": pkg_re.posix
+"utils/stun.native": pkg_sexplib.syntax
+"utils/stun.native": pkg_str
+"utils/stun.native": pkg_threads
+"utils/stun.native": pkg_tls.lwt
+"utils/stun.native": use_commands
+"utils/stun.native": use_imaplet
+"utils/stun.native": use_parsemail
+<utils/*.ml{,i,y}>: pkg_cstruct.unix
+<utils/*.ml{,i,y}>: pkg_dns
+<utils/*.ml{,i,y}>: pkg_dns.lwt
+<utils/*.ml{,i,y}>: pkg_fieldslib.syntax
+<utils/*.ml{,i,y}>: pkg_ipaddr
+<utils/*.ml{,i,y}>: pkg_irmin.unix
 <utils/*.ml{,i,y}>: pkg_lwt
 <utils/*.ml{,i,y}>: pkg_lwt.syntax
 <utils/*.ml{,i,y}>: pkg_lwt.unix
+<utils/*.ml{,i,y}>: pkg_nocrypto
 <utils/*.ml{,i,y}>: pkg_re
 <utils/*.ml{,i,y}>: pkg_re.posix
+<utils/*.ml{,i,y}>: pkg_sexplib.syntax
+<utils/*.ml{,i,y}>: pkg_str
 <utils/*.ml{,i,y}>: pkg_threads
 <utils/*.ml{,i,y}>: pkg_tls.lwt
+<utils/*.ml{,i,y}>: use_commands
+<utils/*.ml{,i,y}>: use_imaplet
+<utils/*.ml{,i,y}>: use_parsemail
 # OASIS_STOP
 true: use_menhir

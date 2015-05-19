@@ -40,3 +40,4 @@
 * updated Ubuntu deployment scripts
 * derive pub key from cert; priv key encrypted with user password, not available on smtp relay
 * multiple ports connection option for SMTP server
+* added simple library and utility for stun protocol
