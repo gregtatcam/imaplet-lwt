@@ -17,8 +17,7 @@ open Lwt
 open Socket_utils
 
 exception InvalidField of int * int * int
-exception InvalidResponse of
-  [`Failed|`RespLength|`Cookie|`TransId|`XorMappedAddr|`AttrLength|`IPv4]
+exception InvalidResponse of string
 exception Timeout
 
 let transid () =
@@ -60,6 +59,16 @@ let field resp offset size =
   in
   List.rev (iter offset [])
 
+let get_length length =
+  let length = (lor) ((lsl) (List.hd length) 8) (List.nth length 1) in
+  let m = (mod) length 4 in
+  (* values are padded to 4 bytes, length contains the value part prior to
+   * padding *)
+  if m = 0 then
+    length
+  else
+    length + 4 - m
+
 let validate field value ex =
   if field <> value then
     raise (InvalidResponse ex)
@@ -67,12 +76,12 @@ let validate field value ex =
 let xor x1 x2 =
   List.map2 (fun x1 x2 -> (lxor) x1 x2) x1 x2
 
-let get_port rsp_port =
-  let port = xor rsp_port [0x21;0x12] in
+let get_port ~_xor port =
+  let port = if _xor then xor port [0x21;0x12] else port in
   (lor) ((lsl) (List.hd port) 8) (List.nth port 1)
 
-let get_ip rsp_ip =
-  let ip = xor rsp_ip magic_cookie in
+let get_ip ~_xor ip =
+  let ip = if _xor then xor ip magic_cookie else ip in
   List.fold_left (fun acc p ->
     if acc = "" then
       (string_of_int p)
@@ -80,28 +89,49 @@ let get_ip rsp_ip =
       acc ^ "." ^ (string_of_int p)
   ) "" ip
 
+let mapped_addr = [0x00;0x001]
+let xor_mapped_addr = [0x00;0x20]
+
+let get_mapped_addr ?(_xor=false) resp offset =
+  let attr_length = field resp (offset + 2) 2 in
+  validate attr_length [0x00;0x08] "attribute length";
+  let reserved = field resp (offset + 4) 1 in validate reserved [0x00] "marker";
+  let prot_family = field resp (offset + 5) 1 in validate prot_family [0x01] "not IPv4";
+  let port = field resp (offset + 6) 2 in
+  let ip = field resp (offset + 8) 4 in
+  (get_ip ~_xor ip,get_port ~_xor port)
+
+let get_attributes resp =
+  let rec get_attr resp offset =
+    if offset + 4 > (String.length resp) then (
+      None
+    ) else (
+      let attr_type = field resp offset 2 in
+      if attr_type = xor_mapped_addr then (
+        Some (get_mapped_addr ~_xor:true resp offset)
+      ) else if attr_type = mapped_addr then (
+        Some (get_mapped_addr resp offset)
+      ) else (
+        let attr_length = get_length (field resp (offset + 2) 2) in
+        get_attr resp (offset + 4 + attr_length) 
+      )
+    )
+  in get_attr resp 20 
+
 let stun_request ?interface addr port =
   client_send_dgram ?interface (`Inet (addr,port)) (fun _  rdr wr ->
-    Printf.printf "writing to the STUN server\n%!";
     let (transid,msg) = request() in
     wr msg >>= fun s ->
-    Printf.printf "written to the STUN server size: %d\n%!" s;
-    let buff = String.create 1000 in
+    let buff = String.create 2048 in
     Lwt.pick [
       (Lwt_unix.sleep 5. >> return `Timeout);
       (rdr buff >>= fun (size,_,_) -> return (`Ok size));] >>= function
     | `Timeout -> raise Timeout
     | `Ok size ->
     let resp = (String.sub buff 0 size) in
-    let rsp_type = field resp 0 2 in validate rsp_type [0x01;0x01] `Failed;
-    let rsp_length =  field resp 2 2 in validate rsp_length [0x00;0x0c] `RespLength;
-    let rsp_cookie = field resp 4 4 in validate rsp_cookie magic_cookie `Cookie;
-    let rsp_transid = field resp 8 12 in validate rsp_transid transid `TransId;
-    let rsp_attr_type = field resp 20 2 in validate rsp_attr_type [0x00;0x20] `XorMappedAddr;
-    let rsp_attr_length = field resp 22 2 in validate rsp_attr_length [0x00;0x08] `AttrLength;
-    let rsp_reserved = field resp 24 1 in (* 0x00 *)
-    let rsp_prot_family = field resp 25 1 in validate rsp_prot_family [0x01] `IPv4;
-    let rsp_port = field resp 26 2 in (* XOR-d with 16 bits of cookie *)
-    let rsp_ip = field resp 28 4 in (* XOR-d with cookie *)
-    return (get_ip rsp_ip, get_port rsp_port)
-  ) ("",0)
+    let rsp_type = field resp 0 2 in validate rsp_type [0x01;0x01] "failed type";
+    let rsp_length =  field resp 2 2 in 
+    let rsp_cookie = field resp 4 4 in validate rsp_cookie magic_cookie "invalid cookie";
+    let rsp_transid = field resp 8 12 in validate rsp_transid transid "invalid transid";
+    return (get_attributes resp)
+  ) None

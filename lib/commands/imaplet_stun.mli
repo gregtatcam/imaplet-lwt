@@ -15,4 +15,4 @@
  *)
 open Lwt
 
-val stun_request : ?interface:string -> string -> int -> (string * int ) Lwt.t
+val stun_request : ?interface:string -> string -> int -> (string * int ) option Lwt.t

@@ -4,35 +4,51 @@ open Commands
 
 exception InvalidCommand
 
-let rec args i srv intf =
+let rec args i srv port intf =
   if i >= Array.length Sys.argv then
-    srv,intf
+    srv,port,intf
   else
     match Sys.argv.(i) with 
-    | "-s" -> args (i+2) (Some Sys.argv.(i+1)) intf
-    | "-i" -> args (i+2) srv (Some Sys.argv.(i+1))
+    | "-s" -> args (i+2) (Some Sys.argv.(i+1)) port intf
+    | "-p" -> args (i+2) srv (int_of_string Sys.argv.(i+1)) intf
+    | "-i" -> args (i+2) srv port (Some Sys.argv.(i+1))
     | _ -> raise InvalidCommand
 
 let usage () =
-  Printf.printf "usage: stun -s [stun server] -i [interface ip]\n%!"
+  Printf.printf "usage: stun -s [stun server] -p [port] -i [interface ip]\n%!"
 
 let commands f =
   try 
-    let srv,intf = args 1 None None in
+    let srv,port,intf = args 1 None 3478 None in
       try 
-        f srv intf
+        f srv port intf
       with ex -> Printf.printf "%s\n" (Printexc.to_string ex)
   with _ -> usage ()
 
-let () =
-  commands (fun srv intf ->
-  Lwt_main.run (
-    Printf.printf "starting request\n%!";
-    let srv = match srv with |Some srv -> srv | None -> "stun.l.google.com" in
+let get_stun_ip srv =
+  let srv = match srv with |Some srv -> srv | None -> "stun.l.google.com" in
+  if try let _ = Unix.inet_addr_of_string srv in true with _ -> false then
+    return (Some srv)
+  else (
     Imaplet_dns.gethostbyname srv >>= fun ips ->
+    if ips <> [] then
+      return (Some (List.hd ips))
+    else
+      return None
+  )
+
+let () =
+  commands (fun srv port intf ->
+  Lwt_main.run (
     catch (fun () ->
-    Imaplet_stun.stun_request ?interface:intf (List.hd ips) 19302 >>= fun (addr,port) ->
-    Printf.printf "%s %d\n%!" addr port;
-    return ())
+      get_stun_ip srv >>= function
+      | Some ip ->
+        begin
+        Imaplet_stun.stun_request ?interface:intf ip port >>= function
+        | Some (addr,port) -> Printf.printf "%s %d\n%!" addr port; return ()
+        | None -> Printf.printf "no mapped address present in the response\n%!"; return ()
+        end
+      | None -> Printf.printf "can't resolve stun server domain name\n%!"; return ()
+    )
     (fun ex -> Printf.printf "%s\n%!" (Printexc.to_string ex);return())
   ))
