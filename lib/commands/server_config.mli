@@ -45,6 +45,8 @@ type imapConfig = {
   idle_interval: float; (* wait (sec) between idle 'still here' notifications, default 120 sec *)
   smtp_idle_max: float; (* smtp idle time-out, default 300 sec *)
   auth_required: bool; (* require user authentication, priv key encrypted with password, default true *)
+  stun_header: bool; (* include STUN mapped address in the header - can be used
+  for direct communication with a peer, default false *)
 }
 
 val default_config : imapConfig

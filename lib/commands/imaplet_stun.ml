@@ -18,7 +18,6 @@ open Socket_utils
 
 exception InvalidField of int * int * int
 exception InvalidResponse of string
-exception Timeout
 
 let transid () =
   let open Nocrypto.Rng in
@@ -123,11 +122,11 @@ let stun_request ?interface addr port =
     let (transid,msg) = request() in
     wr msg >>= fun s ->
     let buff = String.create 2048 in
-    Lwt.pick [
-      (Lwt_unix.sleep 5. >> return `Timeout);
-      (rdr buff >>= fun (size,_,_) -> return (`Ok size));] >>= function
-    | `Timeout -> raise Timeout
-    | `Ok size ->
+    Utils.with_timeout 5. (fun () ->
+      rdr buff >>= fun (size,_,_) -> return (Some size)
+    ) (fun _ -> return None) >>= function
+    | None -> return None
+    | Some size ->
     let resp = (String.sub buff 0 size) in
     let rsp_type = field resp 0 2 in validate rsp_type [0x01;0x01] "failed type";
     let rsp_length =  field resp 2 2 in 

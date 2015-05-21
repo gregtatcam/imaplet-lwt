@@ -16,4 +16,4 @@
 open Lwt
 open Smtplet_context
 
-val relay : cmd_context -> (cmd_context -> unit Lwt.t) -> unit Lwt.t
+val relay : bool -> cmd_context -> (cmd_context -> unit Lwt.t) -> unit Lwt.t

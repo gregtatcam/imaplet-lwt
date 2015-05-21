@@ -56,13 +56,12 @@ let add_postmark from_ msg =
  *)
 let send_to_imap addr context =
   Log_.log `Info1 "smtp: sending to imap\n";
-  let (_from,_) = context.from in
-  let msg = Buffer.contents context.buff in
+  let (_from,domain) = context.from in
+  let msg = Stun_maint.cache_stun_records domain (Buffer.contents context.buff) in
+  Log_.log `Info3 (Printf.sprintf "%s" (if String.length msg > 1000 then
+    (String.sub msg 0 1000) else (msg)));
   let (_to,_,_) = List.hd context.rcpt in
-  let up = context.auth in
-  (* if auth_required on the reciever side then need the password, overall
-   * problem with the relayed SMTP - no password for the account
-   *)
+  let up = context.auth in (* maybe don't need this TBD *)
   let pswd = 
     match up with
     | Some (_,pswd) -> (match pswd with |Some pswd -> " " ^ pswd|None->"")
@@ -131,8 +130,9 @@ let auth_required context =
     false
   else if context.grttype = `Ehlo then
     (* need to figure out when to make auth
-     * required *)
-    (*context.auth = None tmp *) false
+     * required if at all, since the relay would not have
+     * the password *)
+    (*context.auth = None *) false
   else
     false
 
@@ -216,16 +216,9 @@ let syntx_from next_state ~msg cmd context =
     return `Next
   )
 
-let get_interfaces () =
-  Lwt_unix.gethostname () >>= fun host ->
-  Lwt_unix.gethostbyname host >>= fun res ->
-  return (Array.fold_left (fun acc addr -> 
-    (Unix.string_of_inet_addr addr) :: acc
-  ) ["127.0.0.1";"0.0.0.0"] res.Lwt_unix.h_addr_list)
-
 let in_my_domain interface domain =
   Log_.log `Info2 (Printf.sprintf "### detecting send to domain %s %s\n" interface domain);
-  get_interfaces () >>= fun my_ips ->
+  Utils.get_interfaces () >>= fun my_ips ->
   begin
   (* is this ip? *)
   if (try let _ = Unix.inet_addr_of_string domain in true with _ -> false) then (
@@ -273,9 +266,9 @@ let syntx_rcpt next_state ~msg cmd context =
         return `Next
       )
     (* have to relay, only allow authenticated users to relay *)
-    ) else if context.auth = None then (
+    (* ) else if context.auth = None then (
       write context "550 5.7.1 : Authentication required" >>
-      return `Next
+      return `Next *)
     ) else (
       (* from user must have the account *)
       let valid_from context =
@@ -444,7 +437,7 @@ let rec datastream context =
         (fun ex -> write context "554 5.5.0 Transaction failed") >> 
         return `Rset
       ) else (
-        async (fun () -> Smtplet_relay.relay context (send_to_imap imap_addr));
+        async (fun () -> Smtplet_relay.relay context.config.stun_header context (send_to_imap imap_addr));
         write context "250 OK" >>
         return `Rset
       )
@@ -610,6 +603,7 @@ let _ =
     Log_.log `Info1 (Printf.sprintf "### smtplet: started %s %s:%s:%b:%b\n" 
       (ImapTime.to_string (ImapTime.now()))
       config.smtp_addr (ports_str config.smtp_port) config.ssl config.starttls);
+    Stun_maint.start config;
     Lwt_list.iter_p (fun port ->
       server_on_port config.smtp_addr port config) config.smtp_port
   )

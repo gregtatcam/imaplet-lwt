@@ -45,6 +45,8 @@ type imapConfig = {
   idle_interval: float; (* wait (sec) between idle 'still here' notifications, default 120 sec *)
   smtp_idle_max: float; (* smtp idle time-out, default 300 sec *)
   auth_required: bool; (* require user authentication, priv key encrypted with password, default true *)
+  stun_header: bool; (* include STUN mapped address in the header - can be used
+  for direct communication with a peer, default false *)
 }
 
 let default_config = {
@@ -77,6 +79,7 @@ let default_config = {
   idle_interval = 120.;
   smtp_idle_max = 300.;
   auth_required = true;
+  stun_header = false;
 }
 
 let validate_config config =
@@ -190,6 +193,7 @@ let config_of_lines lines =
           | "idle_interval" -> {acc with idle_interval = fval n v 120.}
           | "smtp_idle_max" -> {acc with smtp_idle_max = fval n v 300.}
           | "log" -> {acc with log = v}
+          | "stun_header" -> {acc with stun_header = (bval n v false)}
           | "log_level" -> {acc with log_level =
             match v with
             | "error" -> `Error

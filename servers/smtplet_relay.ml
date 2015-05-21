@@ -46,7 +46,8 @@ let send_data r w context =
   write_relay w "DATA" >>
   read_relay_rc r "^250\\|354" >>= fun res ->
   if res = `Ok then (
-    let lwt_buff = Lwt_bytes.of_bytes (Buffer.contents context.buff) in
+    let content = Stun_maint.add_header(Buffer.contents context.buff) in
+    let lwt_buff = Lwt_bytes.of_bytes content in
     let dc = Lwt_io.of_bytes ~mode:Lwt_io.input lwt_buff in
     let rec send () =
       Lwt_io.read_line_opt dc >>= function
@@ -191,7 +192,7 @@ Delivery to the following recipient failed permanently:
 
 (* relay the message 
  * assume only one receipient for now TBD *)
-let rec relay context on_failure =
+let rec relay try_stun context on_failure =
   Log_.log `Info2 "### relaying message\n";
   let (user, domain, relay_rec) = List.hd context.rcpt in
   let send relay_rec ip ports =
@@ -202,21 +203,28 @@ let rec relay context on_failure =
     | `Failure ->
       Log_.log `Info2 "### relay failure, retrying\n";
       Lwt_unix.sleep 60. >>
-      relay {context with rcpt = [(user, domain, relay_rec)]} on_failure
+      relay false {context with rcpt = [(user, domain, relay_rec)]} on_failure
     | `PermanentFailure err -> 
       Log_.log `Info2 "### permanent relay failure\n";
       failed on_failure err context
   in
-  match relay_rec with
-  | `MXRelay relay_rec ->
-    begin
-      match relay_rec with 
-        (* is trying on one interface ok? TBD *)
-      | (pri,ips) :: tl -> send (`MXRelay tl) (List.hd ips) [25;587;2587]
-      | [] ->
-        Log_.log `Info2 "### mx rr records are empty, can't relay\n"; 
-        failed on_failure "failed establish connection to SMTP server interfaces" context
-    end
-  | `DirectRelay (ip,port) -> send `None ip [port]
-  | `None ->  
-    Log_.log `Info2 "### no mx rr/direct records, can't relay\n"; return ()
+  match Stun_maint.match_stun_records domain with
+  | Some record when try_stun -> 
+    Log_.log `Info2 (Printf.sprintf 
+      "### relaying based on stun: private %s, public %s, ports %s\n" 
+      record.privateaddr record.pubaddr (Stun_maint.ports_to_string record.ports));
+    send relay_rec record.privateaddr record.ports
+  | _ ->
+    match relay_rec with
+    | `MXRelay relay_rec ->
+      begin
+        match relay_rec with 
+          (* is trying on one interface ok? TBD *)
+        | (pri,ips) :: tl -> send (`MXRelay tl) (List.hd ips) [25;587;2587]
+        | [] ->
+          Log_.log `Info2 "### mx rr records are empty, can't relay\n"; 
+          failed on_failure "failed establish connection to SMTP server interfaces" context
+      end
+    | `DirectRelay (ip,port) -> send `None ip [port]
+    | `None ->  
+      Log_.log `Info2 "### no mx rr/direct records, can't relay\n"; return ()
