@@ -23,7 +23,8 @@ let _gethostbyname resolver domain =
   | `Name name -> name
   | `Domain domain -> Name.to_string domain 
   in
-  Dns_resolver_unix.gethostbyname resolver domain >>= fun ip_list ->
+  Utils.with_timeout 10. (fun () -> Dns_resolver_unix.gethostbyname resolver domain)
+  (fun _ -> return []) >>= fun ip_list ->
   return (List.fold_left (fun acc ip ->
     (Ipaddr.to_string ip) :: acc
   ) [] ip_list)
@@ -39,7 +40,11 @@ let gethostbyaddr addr =
 let resolve domain =
   let domain = Name.string_to_domain_name domain in
   Dns_resolver_unix.create () >>= fun resolver ->
-  Dns_resolver_unix.resolve resolver Q_IN Q_MX domain >>= fun result ->
+  Utils.with_timeout 30. (fun () -> 
+    Dns_resolver_unix.resolve resolver Q_IN Q_MX domain >>= fun result ->
+    return (Some result)
+  ) (fun _ -> return None) >>= function
+  | Some result ->
   Lwt_list.fold_left_s (fun acc rr ->
     match rr.rdata with
     | MX (pri,domain) ->
@@ -48,3 +53,4 @@ let resolve domain =
     | _ -> return acc
   ) [] result.answers >>= fun res ->
   return (List.sort (fun (pri1,_) (pri2,_) -> compare pri1 pri2) res)
+  | None -> return []
