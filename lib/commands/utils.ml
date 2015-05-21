@@ -188,3 +188,30 @@ let str_sexp_of_list l =
 let list_of_str_sexp str =
   let sexp = Sexp.of_string str in
   list_of_sexp (fun i -> string_of_sexp i) sexp 
+
+let with_timeout t f g =
+  let open Lwt in
+  catch (fun () ->
+    Lwt_unix.with_timeout t f
+  ) (fun ex -> g ex)
+
+(* how to get all interfaces w/out system call?
+ * gethostbyname on rasppi returns only hosts content
+ *)
+let get_interfaces () =
+  let open Lwt in
+  let strm = Lwt_process.pread_lines ("",[|"ifconfig"|]) in
+  let rec read acc =
+    Lwt_stream.get strm >>= function
+    | Some l ->
+      if Regex.match_regex 
+      ~regx:"^[ \t]*inet[ \t]+\\([^0-9]+\\)?\\([0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+\\)" l then
+        (
+          let ip = Str.matched_group 2 l in
+          read (ip :: acc)
+        )
+      else
+        read acc
+    | None -> return acc
+  in
+  read []
