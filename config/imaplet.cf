@@ -82,3 +82,6 @@ encrypt true
 
 # compress message, but not attachment
 compress true
+
+# include mapped address in the Received email header
+stun_header false
