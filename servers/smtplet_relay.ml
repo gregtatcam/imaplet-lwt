@@ -25,7 +25,7 @@ let write_relay w msg =
 
 let read_relay r =
   Lwt.pick [
-    (Lwt_unix.sleep 30. >> return None);
+    (Lwt_unix.sleep 60. >> return None);
     Lwt_io.read_line_opt r;
   ] >>= function
   | Some str -> Log_.log `Info3 (Printf.sprintf "--> relayed: %s\n" str); return (Some str)
@@ -149,7 +149,7 @@ let send_relayed ip ports context =
     | port :: tl ->
       begin
       Lwt.pick [
-       Lwt_unix.sleep 30. >> return `Timeout;
+       Lwt_unix.sleep 60. >> return `Timeout;
        client_send (`Inet (ip,port)) (fun res sock ic oc ->
          greetings sock ic oc context
        ) `Ok >>= fun res -> return (`Ok res);
