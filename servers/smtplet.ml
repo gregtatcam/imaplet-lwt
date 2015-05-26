@@ -591,17 +591,20 @@ let mkcontext config sock inchan outchan =
   in
   {config;auth=None;grttype=`Rset;io;from=("",None);rcpt=[];buff=Buffer.create 100}
 
-let rec server_on_port addr port config =
+let server_on_port addr port config =
+  Log_.log `Info2 (Printf.sprintf "### start accepting on %s:%d\n" addr port);
   server (`Inet (addr, port)) config (fun sock r w ->
     greeting (mkcontext config sock r w))
     (fun ex -> Log_.log `Error (Printf.sprintf "### smtplet: exception %s\n"
-    (Printexc.to_string ex)); server_on_port addr port config)
+    (Printexc.to_string ex)); return ())
 
 let ports_str ports =
   List.fold_left (fun acc p -> acc ^ " " ^ (string_of_int p)) "" ports
 
 let _ =
+  Printexc.record_backtrace true;
   Lwt_main.run (
+    Lwt_unix.handle_unix_error (fun () -> 
     (* temp, overwrite ssl/starttls with smtp_ssl/smtp_starttls *)
     let config = {srv_config with
       ssl=srv_config.smtp_ssl;starttls=srv_config.smtp_starttls} in
@@ -611,4 +614,5 @@ let _ =
     Stun_maint.start config;
     Lwt_list.iter_p (fun port ->
       server_on_port config.smtp_addr port config) config.smtp_port
+    ) ()
   )
