@@ -165,7 +165,7 @@ let server addr config f err =
         f sock_c netr netw >>
         try_close netr >> try_close netw >> try_close_sock sock_c
       ) 
-      (function ex -> (err ex) >> try_close netr >> try_close netw >> try_close_sock sock_c)
+      (function ex -> try_close netr >> try_close netw >> try_close_sock sock_c >> err ex)
     ); connect f sock cert
   in
   connect f sock cert
