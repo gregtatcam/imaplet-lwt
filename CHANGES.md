@@ -44,3 +44,4 @@
 * added Received: header to relayed email; includes private and mapped address; could be used for direct communication between peers
 0.1.13
 * added domain configuration
+* smtp crash fix - Socket_utils.server was recursing on exception, should just return
