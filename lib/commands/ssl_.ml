@@ -27,9 +27,7 @@ type keys = Nocrypto.Rsa.pub * Nocrypto.Rsa.priv option
 let get_pub_key priv =
   Nocrypto.Rsa.pub_of_priv priv
 
-let pub_of_priv_string priv =
-  get_pub_key (PK.of_pem_cstruct1 (Cstruct.of_string priv))
-
+(* get public key from certificate string *)
 let pub_of_cert_string cert =
   let cert = Cert.of_pem_cstruct1 (Cstruct.of_string cert) in
   match (X509.cert_pubkey cert) with
@@ -47,19 +45,23 @@ let sexp_of_pub pub =
 let pub_of_sexp sexp =
   Nocrypto.Rsa.pub_of_sexp sexp
 
+(* create certificate configuration from certificate and 
+ * private key server files *)
 let create_cert config = 
   X509_lwt.private_of_pems
   ~cert:(Install.data_path ^ "/" ^ config.pem_name)
   ~priv_key:(Install.data_path ^ "/" ^ config.key_name)
 
-let create_user_cert ~cert ~priv_key =
-  X509_lwt.private_of_pems ~cert ~priv_key
-
+(* check if the private key is encrypted *)
 let key_encrypted key =
   let prefix = "-----BEGIN RSA PRIVATE KEY-----" in
   (String.length key > String.length prefix &&
   String.sub key 0 (String.length prefix) = prefix) = false
 
+(* get user public and private keys 
+ * decrypt the private key file if encrypted
+ * get the public key from the certificate file
+ *)
 let get_user_keys ~user ?pswd config =
   let path name =
     let p = Filename.concat config.user_cert_path name in
@@ -91,6 +93,7 @@ let get_system_keys config =
   create_cert config >>= fun (_,priv) ->
   return (get_pub_key priv,priv)
 
+(* initialize ssl, create certificate *)
 let init_ssl config =  
   Tls_lwt.rng_init () >>
   create_cert config >>= fun cert ->
