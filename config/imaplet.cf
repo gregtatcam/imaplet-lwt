@@ -85,3 +85,6 @@ compress true
 
 # include mapped address in the Received email header
 stun_header false
+
+# domain, by default host name
+# domain

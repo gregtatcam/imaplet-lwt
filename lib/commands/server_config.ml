@@ -47,6 +47,7 @@ type imapConfig = {
   auth_required: bool; (* require user authentication, priv key encrypted with password, default true *)
   stun_header: bool; (* include STUN mapped address in the header - can be used
   for direct communication with a peer, default false *)
+  domain: string; (* email domain, by default host name *)
 }
 
 let default_config = {
@@ -80,6 +81,7 @@ let default_config = {
   smtp_idle_max = 300.;
   auth_required = true;
   stun_header = false;
+  domain = Unix.gethostname ();
 }
 
 let validate_config config =
@@ -203,6 +205,7 @@ let config_of_lines lines =
             | "debug" -> `Debug
             | "none" -> `None
             | _ -> log n v;`Error}
+          | "domain" -> {acc with domain = v}
           | _ -> Printf.fprintf stderr "unknown configuration %s\n%!" n; acc
         ) else 
           acc

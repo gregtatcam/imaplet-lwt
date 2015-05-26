@@ -216,13 +216,18 @@ let syntx_from next_state ~msg cmd context =
     return `Next
   )
 
-let in_my_domain interface domain =
-  Log_.log `Info2 (Printf.sprintf "### detecting send to domain %s %s\n" interface domain);
+let in_my_domain context domain =
+  let interface = context.config.smtp_addr in
+  let mydomain = context.config.domain in
+  Log_.log `Info2 
+    (Printf.sprintf "### detecting send to domain %s on interface %s, my domain %s\n" 
+    domain interface mydomain) ;
   Utils.get_interfaces () >>= fun my_ips ->
   begin
-  (* is this ip? *)
-  if (try let _ = Unix.inet_addr_of_string domain in true with _ -> false) then (
-    return [domain]
+  if context.config.domain = domain then (
+    return my_ips (* it's my domain *)
+  ) else if (try let _ = Unix.inet_addr_of_string domain in true with _ -> false) then (
+    return [domain] (* already ip *)
   ) else (
     Imaplet_dns.gethostbyname domain
   )
@@ -252,7 +257,7 @@ let syntx_rcpt next_state ~msg cmd context =
   ) else if Regex.match_regex ~case:false ~regx:"^[ \t]+TO:[ \t]*<?\\([^ <>@\t]+\\)@\\([^>]*\\)" cmd then (
     let user = Str.matched_group 1 cmd in
     let domain =  Str.matched_group 2 cmd in
-    in_my_domain context.config.smtp_addr domain >>= fun res ->
+    in_my_domain context domain >>= fun res ->
     if res = `NoInterface then ( (* sent to wrong interface *)
       write context "550 5.1.2 : Not accepting on this network interface" >>
       return `Next
@@ -278,7 +283,7 @@ let syntx_rcpt next_state ~msg cmd context =
           if domain = None then
             return true
           else (
-            in_my_domain context.config.smtp_addr (Utils.option_value_exn domain) >>= function
+            in_my_domain context (Utils.option_value_exn domain) >>= function
             | `Yes -> return true
             | _ -> return false
           )

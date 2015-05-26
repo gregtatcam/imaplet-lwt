@@ -42,3 +42,5 @@
 * multiple ports connection option for SMTP server
 * added simple library and utility for stun protocol to obtain mapped address of the server
 * added Received: header to relayed email; includes private and mapped address; could be used for direct communication between peers
+0.1.13
+* added domain configuration

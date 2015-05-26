@@ -47,6 +47,7 @@ type imapConfig = {
   auth_required: bool; (* require user authentication, priv key encrypted with password, default true *)
   stun_header: bool; (* include STUN mapped address in the header - can be used
   for direct communication with a peer, default false *)
+  domain: string; (* email domain, by default host name *)
 }
 
 val default_config : imapConfig
