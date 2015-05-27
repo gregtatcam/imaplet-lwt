@@ -18,6 +18,7 @@ The important parameters to set:
 - smtp_ssl: this option is rarely suppported by email clients, default is false
 - smtp_starttls: set to true to support STARTTLS, default is true
 - log: location of the log files (imaplet.log and smtplet.log), by default it is /var/log. You can also set the logging go to stderr or stdout by setting the log to stderr|stdout
+- domain: your email server domain name, by default the host name
 - create new user account 
   run 'sudo imaplet_create_account -u name:password'. This will create necessary folders, create some typical email boxes (INBOX, Drafts,etc), and update 'users' file containing user name/password. User's account by default is created in /var/mail/accounts. You have to create this directory if it doesn't exist.
 - import email archive
