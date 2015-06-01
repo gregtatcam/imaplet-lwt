@@ -162,8 +162,9 @@ let create config =
             rem_id id;
             try_close ctx.!netr >> try_close ctx.!netw >> try_close_sock sock_c 
         )
-        (function _ -> 
-          Log_.log `Info1 (Printf.sprintf "### closed client connection %s\n" (Int64.to_string id));
+        (fun ex -> 
+          Log_.log `Info1 (Printf.sprintf "### closed client connection %s: %s\n" (Int64.to_string id)
+            (Printexc.to_string ex));
           rem_id id; try_close netr >> try_close netw >> try_close_sock sock_c) >>= fun () ->
         return `Ok
       ); 

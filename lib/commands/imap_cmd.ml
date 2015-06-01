@@ -561,7 +561,10 @@ let rec read_network context buffer =
     | End_of_file -> 
       Log_.log `Info1 (Printf.sprintf "### received EOF on network read %s\n" (Int64.to_string context.id)); 
       return `Done
-    | _ -> raise ex
+    | _ -> 
+      Log_.log `Info1 (Printf.sprintf "### read error %s: %s\n" 
+        (Int64.to_string context.id) (Printexc.to_string ex)); 
+      return `Done
   )
   end >>= function
   | `Done -> return `Done
