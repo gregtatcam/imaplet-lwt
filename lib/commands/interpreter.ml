@@ -374,7 +374,12 @@ let rec _exec_search_all search_one keys =
         ) else
           return true
       ) true kl
-    ) (function |ExecDone -> return false|ex -> raise ex)
+    ) (function 
+      |ExecDone -> return false
+      |ex -> 
+        Log_.log `Error (Printf.sprintf "### search error %s\n" (Printexc.to_string ex)); 
+        return false
+    )
   | OrKey (k1,k2) ->
       lwt res1 = _exec_search_all search_one k1 in
       if res1 then
