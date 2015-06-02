@@ -46,4 +46,4 @@
 * added domain configuration
 * smtp crash fix - Socket_utils.server was recursing on exception, should just return
 0.1.14
-* fixed tls dependency to 0.4.0
+* improve network read error handling
