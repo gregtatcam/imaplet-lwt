@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: 4d76e525e64ddb30883a1d2d1ecf266f)
+# DO NOT EDIT (digest: 8b8d7dd94aeb3699922d0ce021f9f649)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -376,6 +376,26 @@ true: annot, bin_annot
 <servers/*.ml{,i,y}>: pkg_zip
 <servers/*.ml{,i,y}>: use_commands
 <servers/*.ml{,i,y}>: use_parsemail
+# Executable imaplet_init_maildir
+"utils/imaplet_init_maildir.native": pkg_cstruct.unix
+"utils/imaplet_init_maildir.native": pkg_dns
+"utils/imaplet_init_maildir.native": pkg_dns.lwt
+"utils/imaplet_init_maildir.native": pkg_fieldslib.syntax
+"utils/imaplet_init_maildir.native": pkg_ipaddr
+"utils/imaplet_init_maildir.native": pkg_irmin.unix
+"utils/imaplet_init_maildir.native": pkg_lwt
+"utils/imaplet_init_maildir.native": pkg_lwt.syntax
+"utils/imaplet_init_maildir.native": pkg_lwt.unix
+"utils/imaplet_init_maildir.native": pkg_nocrypto
+"utils/imaplet_init_maildir.native": pkg_re
+"utils/imaplet_init_maildir.native": pkg_re.posix
+"utils/imaplet_init_maildir.native": pkg_sexplib.syntax
+"utils/imaplet_init_maildir.native": pkg_str
+"utils/imaplet_init_maildir.native": pkg_threads
+"utils/imaplet_init_maildir.native": pkg_tls.lwt
+"utils/imaplet_init_maildir.native": use_commands
+"utils/imaplet_init_maildir.native": use_imaplet
+"utils/imaplet_init_maildir.native": use_parsemail
 # Executable get_messages
 "utils/get_messages.native": pkg_cstruct.unix
 "utils/get_messages.native": pkg_dns
