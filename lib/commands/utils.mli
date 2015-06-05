@@ -40,7 +40,7 @@ val list_find : 'a list -> ('a -> bool) -> bool
 
 val list_findi : 'a list -> (int -> 'a -> bool) -> (int * 'a) option
 
-val with_file : string -> flags:Lwt_unix.open_flag list ->
+val with_file : ?lock:bool -> string -> flags:Lwt_unix.open_flag list ->
   perms:Lwt_unix.file_perm -> mode:'a Lwt_io.mode -> 
   f:('a Lwt_io.channel -> 'b Lwt.t) -> 'b Lwt.t 
 
@@ -57,3 +57,5 @@ val lines_of_file : string -> init:'a -> f:(string -> 'a -> 'a Lwt.t) -> 'a Lwt.
 val with_timeout : float -> (unit -> 'a Lwt.t) -> (exn -> 'a Lwt.t) -> 'a Lwt.t
 
 val get_interfaces : unit -> string list Lwt.t
+
+val fold_email_with_file : string -> ('a -> string -> 'a Lwt.t) -> 'a -> 'a Lwt.t

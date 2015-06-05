@@ -146,12 +146,38 @@ let list_findi l f =
   in
   findi l 0 f
 
-let with_file path ~flags ~perms ~mode ~f =
+let lock_from_open_flags flags =
+  List.fold_left (fun l fl ->
+    match fl with
+    | Unix.O_RDONLY -> if l = Unix.F_LOCK then l else Unix.F_RLOCK
+    | Unix.O_WRONLY|Unix.O_RDWR|Unix.O_APPEND -> Unix.F_LOCK
+    | _ -> l
+  ) F_RLOCK flags
+
+let _lock lock fd flags = 
+  let open Lwt in
+  if lock then
+    Lwt_unix.lockf fd (lock_from_open_flags flags) 0
+  else
+    return ()
+
+let _unlock lock fd = 
+  let open Lwt in
+  if lock then
+    Lwt_unix.lockf fd F_ULOCK 0
+  else
+    return ()
+
+let with_file ?(lock=false) path ~flags ~perms ~mode ~f =
   let open Lwt in
   Lwt_unix.openfile path flags perms >>= fun fd ->
+  _lock lock fd flags >>= fun () ->
   let ch = Lwt_io.of_fd ~close:(fun () -> return ()) ~mode fd in
   Lwt.finalize (fun () -> f ch)
-  (fun () -> Lwt_io.close ch >> Lwt_unix.close fd)
+  (fun () -> 
+    _unlock lock fd >>
+    Lwt_io.close ch >> Lwt_unix.close fd
+  )
 
 let lines_of_file file ~init ~f =
   let strm = Lwt_io.lines_of_file file in
@@ -215,3 +241,37 @@ let get_interfaces () =
     | None -> return acc
   in
   read []
+
+let postmark = "^from [^ ]+ " ^ Regex.dayofweek ^ " " ^ Regex.mon ^ " " ^
+  "[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] [0-9]+"
+
+let is_postmark line =
+  Regex.match_regex ~case:false ~regx:postmark line
+
+let rec get_message ic buffer f acc =
+  let open Lwt in
+  Lwt_io.read_line_opt ic >>= function
+  | None -> 
+    if Buffer.length buffer > 0 then
+      let content = Buffer.contents buffer in
+      Buffer.clear buffer;
+      f acc content
+    else
+      return acc
+  | Some line ->
+    let line = line ^ "\n" in
+    if is_postmark line && (Buffer.length buffer >0) then (
+      let content = Buffer.contents buffer in
+      Buffer.clear buffer;
+      Buffer.add_string buffer line;
+      f acc content >>= fun acc ->
+      get_message ic buffer f acc 
+    ) else (
+      Buffer.add_string buffer line;
+      get_message ic buffer f acc
+    )
+
+let fold_email_with_file file f init =
+  Lwt_io.with_file ~mode:Lwt_io.Input file (fun ic ->
+    get_message ic (Buffer.create 100) f init
+  )
