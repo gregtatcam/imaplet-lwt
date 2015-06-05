@@ -217,6 +217,14 @@ Executable imaplet_maildir_index
   MainIs	  : imaplet_maildir_index.ml
   BuildDepends	  : lwt,lwt.unix,lwt.syntax,zip,tls.lwt,str,threads,sexplib.syntax,nocrypto,imaplet.commands,imaplet.parsemail
 
+Executable imaplet_init_maildir
+  Build$:           flag(utils)
+  Install	  : false
+  Path		  : utils
+  CompiledObject  : native
+  MainIs	  : imaplet_init_maildir.ml
+  BuildDepends	  : lwt,lwt.unix,lwt.syntax,str,threads,sexplib.syntax,imaplet,imaplet.commands
+
 Executable get_messages
   Build$:           flag(utils)
   Install	  : false
