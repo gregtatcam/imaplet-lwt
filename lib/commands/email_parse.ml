@@ -109,7 +109,7 @@ let email_raw_content email =
   | Some rc -> Octet_stream.to_string rc
   | None -> ""
 
-let email_content pub_key config attachment get_contid email transform =
+let email_content pub_key config attachment email transform =
   match (Email.raw_content email) with
   | Some rc -> 
     let content = Octet_stream.to_string rc in
@@ -122,22 +122,12 @@ let email_content pub_key config attachment get_contid email transform =
     let size = Bytes.length content in
     let lines = Utils.lines content in
     if config.encrypt = true && attachment then (
-      let (contid,content) = conv_encrypt ~compress:config.compress content pub_key in
-      let contid =
-      match get_contid with
-      |None -> contid
-      |Some contid -> contid
-      in
-      return (contid,content,size,lines)
+      let (_(*contid*),content) = conv_encrypt ~compress:config.compress content pub_key in
+      return (content,size,lines)
     ) else (
-      let contid = 
-      match get_contid with
-      | None -> get_hash content
-      | Some contid -> contid
-      in
-      return (contid,content,size,lines)
+      return (content,size,lines)
     )
-  | None -> return ("","",0,0) 
+  | None -> return ("",0,0) 
 
 let do_encrypt pub_key config data =
   if config.encrypt then
@@ -161,6 +151,14 @@ let get_header_descr headers headers_buff transform =
   Buffer.add_string headers_buff headers_sexp_str;
   (part,descr)
 
+(* parse the email message into MIME parts
+ * all headers are concat together and saved as a separate blob.
+ * attachments are saved each into a separate blob.
+ * all other content is concat together, along with a map that references
+ * all parts, their storage location, and their location inside the message,
+ * and all saved into a separate blob. all blobs are saved under
+ * user/Storage/hash key where the hash is the hash of the whole message
+ *)
 let do_encrypt_content pub_key config email save_attachment hash transform =
   let content_buff = Buffer.create 100 in
   let headers_buff = Buffer.create 100 in
@@ -193,10 +191,10 @@ let do_encrypt_content pub_key config email save_attachment hash transform =
          * the count, 0 - postmark, 1 - headers, 2 - content, 3+ - attachments
          * just need to keep the number of attachments
          *)
-        let get_contid = Some (string_of_int (3 + attachments)) in
-        email_content pub_key config attach get_contid email transform >>= fun (contid,content,size,lines) -> 
+        email_content pub_key config attach email transform >>= fun (content,size,lines) -> 
         if attach then ( (* consider adding Content-type: message/external-body...  *)
-          save_attachment hash contid content >>= fun () ->
+          let attach_contid = (string_of_int (3 + attachments)) in
+          save_attachment hash attach_contid content >>= fun () ->
           (* +1 for crlf - header crlf content *)
           let part = 
           if multipart then 
@@ -208,7 +206,7 @@ let do_encrypt_content pub_key config email save_attachment hash transform =
             {
               part;
               header=header_descr;
-              content=`Attach_map contid 
+              content=`Attach_map attach_contid 
             },totsize+part.size,totlines+part.lines,1 + attachments)
         ) else (
           let offset = Buffer.length content_buff in
@@ -287,7 +285,10 @@ let rec printable buffer str =
 
 let get_decrypt_attachment priv_key config get_attachment contid =
   get_attachment contid >>= fun attachment ->
-  return (conv_decrypt ~compressed:config.compress attachment priv_key)
+  if config.encrypt then
+    return (conv_decrypt ~compressed:config.compress attachment priv_key)
+  else
+    return attachment
 
 let header_of_sexp_str str =
   let sexp = Sexp.of_string str in
