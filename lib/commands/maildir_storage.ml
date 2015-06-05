@@ -22,6 +22,8 @@ open Imaplet_types
 open Lazy_message
 open Parsemail
 
+exception EmptyPrivateKey
+
 module MapStr = Map.Make(String)
 module MapFlag = Map.Make(
   struct
@@ -142,7 +144,10 @@ module MaildirPath : sig
   val root : t -> string
   val trim_mailbox : t -> string -> string
 end = struct
-  (* root * mailbox *)
+  (* root * mailbox 
+   * root is location of Maildir, for inst. /User/dovecot/Maildir
+   * mailbox is relative to the root
+   *)
   type t = {root:string;mailbox:string;config:Server_config.imapConfig}
 
   let mailbox t =
@@ -151,10 +156,15 @@ end = struct
   let root t =
     t.root
 
+  (* .Foo.Foo1.Foo2 -> Foo/Foo1/Foo2
+   * maildir structure is flat with subfolders separated by "."
+   * imaplet internally maintains Unix mailbox path
+   *)
   let maildir_path_to_unix path =
    let path = Regex.replace ~regx:"^\\." ~tmpl:"" path in
    Regex.replace ~regx:"\\." ~tmpl:"/" path
 
+  (* convert unix path to maildir format Foo/Foo1/Foo2 -> .Foo.Foo1.Foo2 *)
   let unix_path_to_maildir path =
    let path = Regex.replace ~regx:"^/" ~tmpl:"" path in
    let path = Regex.replace ~regx:"/" ~tmpl:"." path in
@@ -166,6 +176,9 @@ end = struct
     let open Server_config in
     let mailbox =
       let lcase = String.lowercase mailbox in
+      (* inbox doesn't have it's own folder, messages are placed into
+       * tmp/cur/new under directly under Maildir
+       *)
       if lcase = ".inbox" || lcase = "inbox" || mailbox = "." || mailbox = "" then
         ""
       else
@@ -235,12 +248,12 @@ end
 
 (* initial file name secs.rand.host *)
 let init_message_file_name internal_date =
-  let t = Pervasives.int_of_float ((Unix.gettimeofday())*.100.) in
+  let t = Int64.of_float ((Unix.gettimeofday())*.100.) in
   let internal_date = Pervasives.int_of_float (Dates.ImapTime.to_float internal_date) in
   let host = Unix.gethostname() in
-  Random.init t;
-  let r = Int64.to_string (Random.int64 (Int64.of_int t)) in
-  Printf.sprintf "%d.%0xd.%s.%s" internal_date t r host
+  Random.init (Int64.to_int t);
+  let r = Int64.to_string (Random.int64 t) in
+  Printf.sprintf "%d.%0Lx.%s.%s" internal_date t r host
 
 let mail_flags : (string*mailboxFlags) list =
   [ "a", Flags_Keyword "$NotJunk";
@@ -302,7 +315,7 @@ let make_message_file_name mailbox metadata =
 (* 1415570721.20f64da12ed.129054952358.dhcp-172-17-153-93.eduroam.wireless.private.cam.ac.uk,S=2514,M=0:2,Sa *)
 let message_file_name_to_data mailbox file =
   let _ = Regex.match_regex
-    ~regx:"^\\([^\\.]+\\)\\.\\([^,]+\\),S=\\([0-9]+\\),M=\\([0-9]+\\):2,\\(.+\\)$"
+    ~regx:"^\\([^\\.]+\\)\\.\\([^,]+\\),S=\\([0-9]+\\),M=\\([0-9]+\\):2,\\(.*\\)$"
     file 
   in
   let internal = Dates.ImapTime.of_float (float_of_string (Str.matched_group 1 file) ) in
@@ -321,7 +334,7 @@ let update_message_file_name mailbox file metadata =
 
 (* read mailbox metadata *)
 let read_mailbox_metadata path =
-  Utils.with_file path ~flags:[Unix.O_RDONLY] ~perms:0o660 ~mode:Lwt_io.Input 
+  Utils.with_file ~lock:true path ~flags:[Unix.O_RDONLY] ~perms:0o660 ~mode:Lwt_io.Input 
   ~f:(fun ci ->
     Lwt_io.read ci >>= fun sexp_str ->
     return (mailbox_metadata_of_sexp (Sexp.of_string sexp_str))
@@ -329,40 +342,41 @@ let read_mailbox_metadata path =
 
 (* write mailbox metadata *)
 let write_mailbox_metadata path metadata =
-  Utils.with_file path ~flags:[Unix.O_WRONLY;Unix.O_TRUNC] ~perms:0o660 ~mode:Lwt_io.Output 
+  Utils.with_file ~lock:true path ~flags:[Unix.O_WRONLY;Unix.O_TRUNC] ~perms:0o660 ~mode:Lwt_io.Output 
   ~f:(fun co ->
     Lwt_io.write co (Sexp.to_string (sexp_of_mailbox_metadata metadata)) >>
     Lwt_io.flush co
   ) 
 
-(* read mailbox metadata *)
+(* read mailbox uidlist: uid filename *)
 let read_uidlist path =
-  Utils.with_file path ~flags:[Unix.O_RDONLY] ~perms:0o660 ~mode:Lwt_io.Input 
+  Utils.with_file ~lock:true path ~flags:[Unix.O_RDONLY] ~perms:0o660 ~mode:Lwt_io.Input 
   ~f:(fun ci ->
-    let rec read_line acc =
+    let rec read_line cnt acc =
       Lwt_io.read_line_opt ci >>= function
       | Some line ->
         let _ = Regex.match_regex ~regx:"^\\([0-9]+\\) \\(.+\\)$" line in
         let uid = int_of_string (Str.matched_group 1 line) and
             file = Str.matched_group 2 line in
-        read_line ((uid,file) :: acc)
+        read_line (cnt + 1) ((cnt,uid,file) :: acc)
       | None -> return acc
     in
-    read_line []
-  ) 
+    read_line 1 []
+  ) >>= fun l ->
+  return (List.rev l)
 
-(* write mailbox metadata *)
+(* write mailbox uidlist *)
 let write_uidlist path l =
-  Utils.with_file path ~flags:[Unix.O_WRONLY;Unix.O_TRUNC] ~perms:0o660 ~mode:Lwt_io.Output 
+  Utils.with_file ~lock:true path ~flags:[Unix.O_WRONLY;Unix.O_TRUNC] ~perms:0o660 ~mode:Lwt_io.Output 
   ~f:(fun co ->
-    Lwt_list.iter_s (fun (uid,file) ->
+    Lwt_list.iter_s (fun (_,uid,file) ->
       Lwt_io.write_line co ((string_of_int uid) ^ " " ^ file)
     ) l
   ) 
 
-(* write mailbox metadata *)
+(* append to uidlist *)
 let append_uidlist path uid file =
-  Utils.with_file path ~flags:[Unix.O_WRONLY;Unix.O_APPEND] ~perms:0o660 ~mode:Lwt_io.Output 
+  Utils.with_file ~lock:true path ~flags:[Unix.O_WRONLY;Unix.O_APPEND] ~perms:0o660 ~mode:Lwt_io.Output 
   ~f:(fun co ->
     Lwt_io.write_line co ((string_of_int uid) ^ " " ^ file)
   ) 
@@ -372,7 +386,7 @@ let subscribe_path mail_path user =
   
 (* read subscribe *)
 let read_subscribe path =
-  Utils.with_file path ~flags:[Unix.O_RDONLY] ~perms:0o660 ~mode:Lwt_io.Input 
+  Utils.with_file ~lock:true path ~flags:[Unix.O_RDONLY] ~perms:0o660 ~mode:Lwt_io.Input 
   ~f:(fun ci ->
     Lwt_io.read ci >>= fun sexp_str ->
     return (list_of_sexp (fun s -> string_of_sexp s) (Sexp.of_string sexp_str))
@@ -380,13 +394,15 @@ let read_subscribe path =
 
 (* write subscribe *)
 let write_subscribe path l =
-  Utils.with_file path ~flags:[Unix.O_WRONLY;Unix.O_TRUNC] ~perms:0o660 ~mode:Lwt_io.Output 
+  Utils.with_file ~lock:true path ~flags:[Unix.O_WRONLY;Unix.O_TRUNC] ~perms:0o660 ~mode:Lwt_io.Output 
   ~f:(fun co ->
     Lwt_io.write co (Sexp.to_string (sexp_of_list (fun s -> sexp_of_string s) l)) >>
     Lwt_io.flush co
   ) 
 
-type storage_ = {user: string; mailbox: MaildirPath.t;config:Server_config.imapConfig}
+(* maildir storage type *)
+type storage_ = {user: string; mailbox:
+  MaildirPath.t;config:Server_config.imapConfig;keys:Ssl_.keys;}
 
 module MaildirStorage : Storage_intf with type t = storage_ =
 struct
@@ -394,7 +410,7 @@ struct
 
   (* user *)
   let create config user mailbox keys =
-    return {user;mailbox = MaildirPath.create config user mailbox;config}
+    return {user;mailbox = MaildirPath.create config user mailbox;config;keys}
 
   (* mailbox supports both folders and messages *)
   let exists t = 
@@ -436,7 +452,10 @@ struct
     Lwt_unix.mkdir (MaildirPath.to_maildir t.mailbox) 0o777 >>
     create_file (MaildirPath.file_path t.mailbox `Metadata ) >>
     create_file (MaildirPath.file_path t.mailbox `Uidlist ) >>
-    update_mailbox_metadata t (empty_mailbox_metadata()) >>
+    Lwt_unix.mkdir (MaildirPath.file_path t.mailbox (`Cur "") ) 0o777 >>
+    Lwt_unix.mkdir (MaildirPath.file_path t.mailbox (`New "") ) 0o777 >>
+    Lwt_unix.mkdir (MaildirPath.file_path t.mailbox (`Tmp "") ) 0o777 >>
+    update_mailbox_metadata t (empty_mailbox_metadata ~uidvalidity:(new_uidvalidity()) ()) >>
     update_uidlist t []
 
   (* delete mailbox *)
@@ -519,22 +538,35 @@ struct
       f acc (`Mailbox (MaildirPath.to_unix_path file,cnt)) 
     ) mailboxes init
 
+  let encrypt t message =
+    let (pub_key,_) = t.keys in
+    if t.config.encrypt then
+      Imap_crypto.encrypt ~compress:t.config.compress message pub_key
+    else
+      message
+
+  let decrypt t message =
+    let (_,priv_key) = t.keys in
+    let priv_key = Utils.option_value_exn ~ex:EmptyPrivateKey priv_key in
+    if t.config.encrypt then
+      Imap_crypto.decrypt ~compressed:t.config.compress message priv_key
+    else
+      message
+
   (* append message(s) to selected mailbox *)
   let append t message message_metadata =
-    (* uidlist needs to be locked TBD , maybe have a separate thread to sync 
-     * the read/write(Lwt_mvar?)
-     *)
     let file = make_message_file_name (MaildirPath.to_maildir t.mailbox) message_metadata in
     let tmp_file = MaildirPath.file_path t.mailbox (`Tmp file) in
-    append_uidlist (MaildirPath.file_path t.mailbox `Uidlist) message_metadata.uid file >>= fun () ->
     Utils.with_file tmp_file ~flags:[Unix.O_CREAT;Unix.O_WRONLY] ~perms:0o660 ~mode:Lwt_io.Output
     ~f:(fun co ->
-      Lwt_io.write co (Sexp.to_string (Mailbox.Message.sexp_of_t message))
+      Lwt_io.write co (encrypt t (Mailbox.Message.to_string message))
     ) >>= fun () ->
     let cur_file = current t file in
-    Lwt_unix.rename tmp_file cur_file >>
-    return ()
+    Lwt_unix.link tmp_file cur_file >>
+    Lwt_unix.unlink tmp_file >>
+    append_uidlist (MaildirPath.file_path t.mailbox `Uidlist) message_metadata.uid file 
 
+  (* return sequence,uid,file size,file name  *)
   let get_file t position uids = 
     let len = List.length uids in
     if len = 0 then return `Eof
@@ -546,13 +578,9 @@ struct
         return (`Ok (seq,uid,st.Unix.st_size,file))
       ) (fun _ -> return `NotFound)
     in
-    let rec find seq uid = function
-      | [] -> raise Not_found
-      | (u,f) :: uids ->
-        if u = uid then
-          (seq,u,f)
-        else
-          find (seq-1) uid uids
+    (* search through uid/filename list *)
+    let find uid uids = 
+      List.find (fun (_,u,_) -> u = uid) uids
     in
     match position with
     | `Sequence seq -> 
@@ -561,13 +589,13 @@ struct
       else if seq = 0 then
         return `NotFound
       else
-        let (uid,file) = List.nth uids (len - seq)
+        let (_,uid,file) = List.nth uids (seq - 1)
         in (size t seq uid file)
     | `UID uid ->
       try 
-        let (seq,uid,file) = find len uid uids in (size t seq uid file)
+        let (seq,uid,file) = find uid uids in (size t seq uid file)
       with _ ->
-        let (u,_) = List.nth uids 1 in
+        let (_,u,_) = List.nth uids (len - 1) in
         if uid > u then
           return `Eof
         else
@@ -579,7 +607,7 @@ struct
     fetch_uidlist t  >>= fun uids ->
     get_file t position uids >>= function
     | `Ok (_,uid,_,file) ->
-      let uids = List.filter (fun (u,_) -> u <> uid) uids in
+      let uids = List.filter (fun (_,u,_) -> u <> uid) uids in
       update_uidlist t uids >>= fun () ->
       Lwt_unix.unlink (current t file)
     | _ -> return ()
@@ -590,7 +618,9 @@ struct
       Utils.with_file (current t file) ~flags:[Unix.O_RDONLY] ~perms:0o660 ~mode:Lwt_io.Input
       ~f:(fun ci ->
         Lwt_io.read ci >>= fun buffer -> 
-        let message = Mailbox.Message.t_of_sexp (Sexp.of_string buffer) in
+        let seq = Mailbox.With_seq.of_string (decrypt t buffer) in
+        let message = Utils.option_value_exn 
+          (Mailbox.With_seq.fold_message seq ~f:(fun _ message -> Some message) ~init:None) in
         let (internal_date,_,modseq,flags) = message_file_name_to_data t.mailbox file in
         let metadata = {uid;modseq;internal_date;size;flags} in
         return (`Ok (Lazy_message.build_lazy_message_inst (module LazyMaildirMessage)
@@ -621,9 +651,12 @@ struct
     | `Ok (seq,uid,_,src) ->
       let dst = update_message_file_name (MaildirPath.to_maildir t.mailbox) src message_metadata in
       Lwt_unix.rename (current t src) (current t dst) >>= fun () ->
-      let l1,l2 = List.partition (fun (u,_) -> uid < u) uids in
-      let (hd::tl) = l2 in
-      let uids = List.concat [l1;[(uid,dst)];l2] in
+      let uids = List.fold_right (fun (s,u,f) acc -> 
+        if u = uid then 
+          (s,u,dst) :: acc 
+        else 
+          (s,u,f) :: acc
+      ) uids [] in
       update_uidlist t uids 
     | _ -> return ()
 

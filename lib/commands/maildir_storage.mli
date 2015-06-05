@@ -39,7 +39,7 @@ val message_file_name_to_data : string -> string ->
 
 val write_mailbox_metadata : string -> Storage_meta.mailbox_metadata -> unit Lwt.t
 
-val write_uidlist : string -> (int*string) list -> unit Lwt.t
+val write_uidlist : string -> (int*int*string) list -> unit Lwt.t
 
 val append_uidlist : string -> int -> string -> unit Lwt.t
 
@@ -49,6 +49,7 @@ val make_message_file_name : string -> Storage_meta.mailbox_message_metadata -> 
 
 val create_file : ?overwrite:bool -> ?perms:int -> string -> unit Lwt.t
 
-type storage_ = {user: string; mailbox: MaildirPath.t; config: Server_config.imapConfig}
+type storage_ = {user: string; mailbox: MaildirPath.t; config:
+  Server_config.imapConfig; keys: Ssl_.keys}
 
 module MaildirStorage : Storage_intf with type t = storage_
