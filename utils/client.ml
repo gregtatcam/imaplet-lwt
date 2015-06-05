@@ -18,6 +18,7 @@ open Lwt
 (*
  structure of the script file
  server command, like: a1 select inbox
+    append filename - needs to be expanded
  client response regex: [^ ]+ \\(OK\\|BAD\\|NO\\)
  all client responses are red untilf the regex is matched, 
  each server command should follow by the client response regex
@@ -139,10 +140,28 @@ let write_echo oc command =
     Printf.printf "%s%!" command;
   Lwt_io.write oc command >> Lwt_io.flush oc
 
-let exec_command strm oc =
+(* send append to the server *)
+let handle_append ic oc mailbox msgfile =
+  Utils.fold_email_with_file msgfile (fun cnt message ->
+    let cmd = 
+      Printf.sprintf "A%d APPEND %s {%d+}" cnt mailbox (String.length message + 2) in
+    write_echo oc cmd >>
+    write_echo oc message >>
+    read_net_echo ic >>
+    return (cnt + 1)
+  ) 0 >>= fun _ ->
+  return ()
+
+let exec_command strm ic oc =
   read_script strm >>= function
   | None -> return `Done
-  | Some command -> write_echo oc command >> return `Ok
+  | Some command -> 
+    if Regex.match_regex ~regx:"^append[ \t]+\\([^ \t]+\\)[ \t]+\\([^ \t]+\\)$" command then (
+      handle_append ic oc (Str.matched_group 1 command) (Str.matched_group 2 command) >>
+      return `OkAppend
+    ) else (
+      write_echo oc command >> return `Ok
+    )
 
 let read_response strm ic =
   read_script strm >>= function
@@ -172,8 +191,9 @@ let () =
   commands (fun script addr port ssl ->
     Lwt_main.run (catch(fun() ->
         let rec exec strm ic oc =
-          exec_command strm oc >>= function
+          exec_command strm ic oc >>= function
           | `Done -> return ()
+          | `OkAppend -> exec strm ic oc
           | `Ok -> read_response strm ic >>= function
             | `Done -> return ()
             | `Ok -> exec strm ic oc 
