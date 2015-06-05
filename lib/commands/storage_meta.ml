@@ -50,8 +50,8 @@ type mbox_index = [`Header of mbox_mailbox_metadata | `Record of mbox_message_me
 
 let new_uidvalidity() =
   let t = Dates.ImapTime.now() in
-  let f = (Dates.ImapTime.to_float t) in
-  string_of_int (Pervasives.int_of_float f)
+  let f = (Dates.ImapTime.to_float t) *. 100. in
+  Int64.to_string (Int64.of_float f)
 
 let empty_mailbox_metadata ?uidvalidity ?(selectable=true) () =
   let uidvalidity =
