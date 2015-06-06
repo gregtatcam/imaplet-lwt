@@ -123,24 +123,24 @@ let rec selected user mailbox mbox =
   selected user mailbox mbox
   | "quit" -> raise Quit
   | "append" -> append user mailbox >>= fun () -> selected user mailbox mbox
-  | "all" -> IrminMailbox.show_all mbox >>= fun () -> selected user mailbox mbox
+  | "all" -> GitMailbox.show_all mbox >>= fun () -> selected user mailbox mbox
   | "tree" -> let (_,key) = Key_.mailbox_of_path mailbox in
     let key = "imaplet" :: ((get_user user) :: key) in
     tree user key "" >>= fun () -> selected user mailbox mbox
-  | "exists" -> IrminMailbox.exists mbox >>= fun res ->
+  | "exists" -> GitMailbox.exists mbox >>= fun res ->
     (
      match res with
     | `No -> Printf.printf "no\n%!"
     | `Folder -> Printf.printf "folder\n%!"
     | `Mailbox -> Printf.printf "storage\n%!"
     ); selected user mailbox mbox
-  | "meta" -> IrminMailbox.read_mailbox_metadata mbox >>= fun meta ->
+  | "meta" -> GitMailbox.read_mailbox_metadata mbox >>= fun meta ->
     Printf.printf "%s\n%!" (Sexp.to_string (sexp_of_mailbox_metadata meta));
     selected user mailbox mbox
   | "message" -> let pos = arg 1 in
     (
     let pos = int_of_string pos in
-    IrminMailbox.read_message mbox (`Sequence pos) >>= function
+    GitMailbox.read_message mbox (`Sequence pos) >>= function
     | `Ok (module LM:LazyMessage_inst) ->
       LM.LazyMessage.get_message_metadata LM.this >>= fun meta ->
       LM.LazyMessage.get_email LM.this >>= fun (module LE:LazyEmail_inst) ->
@@ -154,7 +154,7 @@ let rec selected user mailbox mbox =
   | "store" -> let pos = arg 1 in
   (
     let pos = int_of_string pos in
-    IrminMailbox.read_message_metadata mbox (`Sequence pos) >>= function
+    GitMailbox.read_message_metadata mbox (`Sequence pos) >>= function
     | `Ok (meta) ->
       let (_,flags) = List.fold_left 
       (fun (i,acc) el -> Printf.printf "%s\n%!" el;if i < 3 then (i+1,acc) else
@@ -170,7 +170,7 @@ let rec selected user mailbox mbox =
       | "|" -> {meta with flags}
       | _ -> raise InvalidCmd
       )
-      in IrminMailbox.update_message_metadata mbox (`Sequence pos) meta >>= fun res ->
+      in GitMailbox.update_message_metadata mbox (`Sequence pos) meta >>= fun res ->
         ( match res with
         | `Ok -> Printf.printf "updated\n%!"
         | `Eof -> Printf.printf "eof\n%!"
@@ -179,16 +179,16 @@ let rec selected user mailbox mbox =
     | `NotFound -> Printf.printf "not found\n%!"; return ()
     | `Eof -> Printf.printf "eof\n%!"; return ()
   ) >>= fun () -> selected user mailbox mbox
-  | "remove" -> let uid = arg 1 in IrminMailbox.delete_message mbox (`UID
+  | "remove" -> let uid = arg 1 in GitMailbox.delete_message mbox (`UID
   (int_of_string uid)) >>= fun () ->
       selected user mailbox mbox
   (*
-  | "expunge" -> IrminMailbox.expunge mbox >>= fun deleted ->
+  | "expunge" -> GitMailbox.expunge mbox >>= fun deleted ->
       List.iter deleted ~f:(fun i -> Printf.printf "deleted %d\n%!" i);
       selected user mailbox mbox
   *)
   | "list" -> 
-    IrminMailbox.list ~subscribed:false ~access:(fun _ -> true) mbox ~init:[] ~f:(
+    GitMailbox.list ~subscribed:false ~access:(fun _ -> true) mbox ~init:[] ~f:(
       fun acc item -> return ((item::acc))
     ) >>= fun l ->
     List.iter (fun i ->
@@ -222,12 +222,12 @@ let main () =
     | "select" -> 
       let mailbox = Str.replace_first (Str.regexp "+") " " (arg 1) in
       get_keys srv_config user >>= fun keys ->
-      IrminMailbox.create srv_config (get_user user) mailbox keys >>= fun mbox ->
+      GitMailbox.create srv_config (get_user user) mailbox keys >>= fun mbox ->
       selected user mailbox mbox >>= fun () -> request user
     | "list" -> 
       get_keys srv_config user >>= fun keys ->
-      IrminMailbox.create srv_config (get_user user) "" keys >>= fun mbox ->
-      IrminMailbox.list ~subscribed:false ~access:(fun _ -> true) mbox ~init:[] ~f:(
+      GitMailbox.create srv_config (get_user user) "" keys >>= fun mbox ->
+      GitMailbox.list ~subscribed:false ~access:(fun _ -> true) mbox ~init:[] ~f:(
         fun acc item -> return ((item::acc))
       ) >>= fun l ->
       List.iter (fun i -> match i with

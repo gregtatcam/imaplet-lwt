@@ -19,23 +19,24 @@ open Irmin_core
 open Storage_meta
 open Server_config
 
-type storage_ = {user:string;mailbox:IrminMailbox.t;config:imapConfig}
+type ('a) _storage = {user:string;mailbox:'a;config:imapConfig}
 
-module IrminStorage : Storage_intf with type t = storage_ =
+module GitStorageMake(GM:GitMailboxIntf) : Storage_intf 
+  with type t = (GM.t) _storage =
 struct
-  type t = storage_
+  type t = (GM.t) _storage
 
   (* user *)
   let create config user mailbox keys =
-    IrminMailbox.create config user mailbox keys >>= fun mailbox ->
+    GM.create config user mailbox keys >>= fun mailbox ->
     return {user;mailbox;config}
 
   let exists t = 
-    IrminMailbox.exists t.mailbox
+    GM.exists t.mailbox
 
   (* status *)
   let status t =
-    IrminMailbox.read_mailbox_metadata t.mailbox
+    GM.read_mailbox_metadata t.mailbox
 
   (* select mailbox *)
   let select t =
@@ -47,65 +48,68 @@ struct
 
   (* create mailbox *)
   let create_mailbox t =
-    IrminMailbox.create_mailbox t.mailbox
+    GM.create_mailbox t.mailbox
 
   (* delete mailbox *)
   let delete t = 
-    IrminMailbox.delete_mailbox t.mailbox
+    GM.delete_mailbox t.mailbox
 
   (* rename mailbox1 mailbox2 *)
   let rename t mailbox2 =
-    IrminMailbox.move_mailbox t.mailbox mailbox2
+    GM.move_mailbox t.mailbox mailbox2
 
   (* subscribe mailbox.
    * subscribe and unsubscribe should be in a separate module TBD 
    *)
   let subscribe t =
-    IrminMailbox.subscribe t.mailbox
+    GM.subscribe t.mailbox
 
   (* unsubscribe mailbox *)
   let unsubscribe t =
-    IrminMailbox.unsubscribe t.mailbox
+    GM.unsubscribe t.mailbox
 
   (* list 
    * returns list of files/folders with list of flags 
    *)
   let list t ~subscribed ?(access=(fun _ -> true)) ~init ~f =
-    IrminMailbox.list t.mailbox ~subscribed ~access ~init ~f
+    GM.list t.mailbox ~subscribed ~access ~init ~f
 
   (* append message(s) to selected mailbox *)
   let append t message message_metadata =
-    IrminMailbox.append_message t.mailbox message message_metadata
+    GM.append_message t.mailbox message message_metadata
 
   (* delete a message *)
   let delete_message t position = 
-    IrminMailbox.delete_message t.mailbox position
+    GM.delete_message t.mailbox position
 
   (* fetch messages from selected mailbox *)
   let fetch t position =
-    IrminMailbox.read_message t.mailbox position
+    GM.read_message t.mailbox position
 
   (* fetch messages from selected mailbox *)
   let fetch_message_metadata t position =
-    IrminMailbox.read_message_metadata t.mailbox position
+    GM.read_message_metadata t.mailbox position
 
   (* store flags to selected mailbox *)
   let store t position message_metadata =
-    IrminMailbox.update_message_metadata t.mailbox position message_metadata >>= fun _ ->
+    GM.update_message_metadata t.mailbox position message_metadata >>= fun _ ->
     return ()
 
   (* store mailbox metadata *)
   let store_mailbox_metadata t mailbox_metadata =
-    IrminMailbox.update_mailbox_metadata t.mailbox mailbox_metadata
+    GM.update_mailbox_metadata t.mailbox mailbox_metadata
 
   (* copy messages from selected mailbox *)
   let copy t pos t2 message_metadata =
-    IrminMailbox.copy_mailbox t.mailbox pos t2.mailbox message_metadata
+    GM.copy_mailbox t.mailbox pos t2.mailbox message_metadata
 
   (* commit all updates to the mailbox *)
   let commit t =
-    IrminMailbox.commit t.mailbox
+    GM.commit t.mailbox
 
   let uid_to_seq t uid =
-    IrminMailbox.uid_to_seq t.mailbox uid
+    GM.uid_to_seq t.mailbox uid
 end
+
+module IrminStorage = GitStorageMake(GitMailbox)
+module GitWorkdirStorage = GitStorageMake(GitWorkdirMailbox)

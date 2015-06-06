@@ -47,3 +47,4 @@
 * smtp crash fix - Socket_utils.server was recursing on exception, should just return
 0.1.14
 * improve network read error handling
+* added new storage type - git working directory, mirrors git as is, all updates overwrite the content

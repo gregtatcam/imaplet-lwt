@@ -25,21 +25,31 @@ exception InvalidCommand
 exception SystemFailed of string
 exception AccountExists
 
-let rec args i user force =
-  if i >= Array.length Sys.argv then
-    user,force
+let get_mbox_type t =
+  if t = "irmin" then
+    `Irmin
+  else if t = "workdir" then
+    `GitWorkdir
   else
+    raise InvalidCommand
+
+let rec args i user force mbox_type =
+  if i >= Array.length Sys.argv then
+    user,force,mbox_type
+  else (
     match Sys.argv.(i) with 
-    | "-u" -> args (i+2) (Some Sys.argv.(i+1)) force
-    | "-f" -> args (i+1) user true
+    | "-u" -> args (i+2) (Some Sys.argv.(i+1)) force mbox_type
+    | "-f" -> args (i+1) user true mbox_type
+    | "-t" -> args (i+2) user force (get_mbox_type Sys.argv.(i+1))
     | _ -> raise InvalidCommand
+  )
 
 let usage () =
-  Printf.printf "usage: imaplet_create_account -u [user:pswd] [-f]\n%!"
+  Printf.printf "usage: imaplet_create_account -u [user:pswd] [-f] -t [irmin|workdir]\n%!"
 
 let commands f =
   try 
-    let (user,force) = args 1 None false in
+    let (user,force,mbox_type) = args 1 None false `Irmin in
     if user = None || 
       Regex.match_regex ~regx:("^\\([^:]+\\):\\([^:]+\\)$")
       (Utils.option_value_exn user) = false then
@@ -47,7 +57,7 @@ let commands f =
     else
       try 
         f (Str.matched_group 1 (Utils.option_value_exn user)) 
-          (Str.matched_group 2 (Utils.option_value_exn user)) force
+          (Str.matched_group 2 (Utils.option_value_exn user)) force mbox_type
       with ex -> Printf.printf "%s\n%!" (Printexc.to_string ex)
   with _ -> usage ()
 
@@ -133,8 +143,19 @@ let failed user_path msg =
 
 let created = ref None
 
+let factory mbox_type user mailbox keys =
+  let open Server_config in
+  let open Storage in
+  let open Mailbox_storage in
+  let open Maildir_storage in
+  match mbox_type with
+  | `Irmin -> build_strg_inst (module IrminStorage) srv_config user mailbox keys
+  | `GitWorkdir -> build_strg_inst (module GitWorkdirStorage) srv_config user mailbox keys
+  | `Mailbox -> build_strg_inst (module MailboxStorage) srv_config user mailbox keys
+  | `Maildir -> build_strg_inst (module MaildirStorage) srv_config user mailbox keys
+
 let () =
-  commands (fun user pswd force ->
+  commands (fun user pswd force mbox_type ->
     let user_path = Regex.replace ~regx:"%user%.*$" ~tmpl:user srv_config.user_cert_path in
     let cert_path = Regex.replace ~regx:"%user%" ~tmpl:user srv_config.user_cert_path in
     let irmin_path = Regex.replace ~regx:"%user%" ~tmpl:user srv_config.irmin_path in
@@ -156,15 +177,22 @@ let () =
 	             reqcert key pem_path) >>
           dir_cmd (Filename.concat irmin_path ".git") 
           (fun () -> 
-            Lwt_process.pread ~stderr:`Dev_null ~stdin:`Dev_null ("git",[|"init";irmin_path|]) >>= fun _ -> 
-            let ac = UserAccount.create srv_config user in
-            UserAccount.create_account ac >>= fun _ ->
+            begin
+            if mbox_type = `Irmin then (
+              Lwt_process.pread ~stderr:`Dev_null ~stdin:`Dev_null ("git",[|"init";irmin_path|]) >>= fun _ -> 
+              let ac = UserAccount.create srv_config user in
+              UserAccount.create_account ac
+            ) else (
+              let ac = WorkdirUserAccount.create srv_config user in
+              WorkdirUserAccount.create_account ac
+            )
+            end >>= fun _ ->
             Ssl_.get_user_keys ~user ~pswd srv_config >>= fun keys ->
             let create_mailbox mailbox =
-              IrminStorage.create srv_config user mailbox keys >>= fun ist ->
-              IrminStorage.create_mailbox ist >>
-              IrminStorage.subscribe ist >>
-              IrminStorage.commit ist
+              factory mbox_type user mailbox keys >>= fun (module Mailbox) ->
+              Mailbox.MailboxStorage.create_mailbox Mailbox.this >>
+              Mailbox.MailboxStorage.subscribe Mailbox.this >>
+              Mailbox.MailboxStorage.commit Mailbox.this
             in
             create_mailbox "INBOX" >>
             create_mailbox "Drafts" >>

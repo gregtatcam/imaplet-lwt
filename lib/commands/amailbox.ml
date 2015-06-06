@@ -37,6 +37,9 @@ let factory (mailboxt:amailboxt) ?mailbox2 mailbox =
   | `Irmin -> 
     build_strg_inst (module IrminStorage) mailboxt.config (Utils.option_value_exn mailboxt.user)
     ?mailbox2 mailbox keys
+  | `GitWorkdir -> 
+    build_strg_inst (module GitWorkdirStorage) mailboxt.config (Utils.option_value_exn mailboxt.user)
+    ?mailbox2 mailbox keys
   | `Mailbox ->
     build_strg_inst (module MailboxStorage) mailboxt.config (Utils.option_value_exn mailboxt.user)
     ?mailbox2 mailbox keys
@@ -58,9 +61,8 @@ let create config user pswd =
   let open Server_config in
   let (inbox_path,mail_path) = 
   match config.data_store with
-  | `Irmin -> "",""
-  | `Mailbox -> config.inbox_path,Configuration.mailboxes config.mail_path user
-  | `Maildir -> config.inbox_path,Configuration.mailboxes config.mail_path user
+  | `Irmin|`GitWorkdir -> "",""
+  | `Mailbox|`Maildir -> config.inbox_path,Configuration.mailboxes config.mail_path user
   in
   {inbox_path;mail_path;user=Some user;selected=`None;config; keys=Some (Ssl_.get_user_keys ~user ?pswd config)}
 

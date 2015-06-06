@@ -64,7 +64,7 @@ let commands f =
 
 let log () =
   let store_to_string = function
-    |`Irmin->"irmin"|`Mailbox->"mbox"|`Maildir->"maildir" in
+    |`Irmin->"irmin"|`Mailbox->"mbox"|`Maildir->"maildir"|`GitWorkdir->"gitworkdir" in
   Log_.log `Info1 (Printf.sprintf "imaplet: creating imap server %s: on %s:%d:%b:%b:%s:%s:%s\n"
     (ImapTime.to_string (ImapTime.now()))
     srv_config.addr srv_config.port srv_config.ssl srv_config.starttls
