@@ -185,11 +185,13 @@ let lines_of_file file ~init ~f =
     f line acc 
   ) strm init
 
-let exists file tp = 
+let exists file ?alt tp = 
   let open Lwt in
   catch (fun () ->
   Lwt_unix.stat file >>= fun st ->
-  return (st.Unix.st_kind = tp)
+  match alt with
+  | None -> return (st.Unix.st_kind = tp)
+  | Some alt -> return (st.Unix.st_kind = tp || st.Unix.st_kind = alt)
   ) (fun _ -> return false)
 
 let lines str =
@@ -275,3 +277,18 @@ let fold_email_with_file file f init =
   Lwt_io.with_file ~mode:Lwt_io.Input file (fun ic ->
     get_message ic (Buffer.create 100) f init
   )
+
+let files_of_directory path f init =
+  let open Lwt in
+  exists path S_DIR >>= fun res ->
+  if res then (
+    let strm = Lwt_unix.files_of_directory path in
+    Lwt_stream.fold_s (fun file acc ->
+      if file <> "." && file <> ".." then (
+        f acc file
+      ) else
+        return acc
+    ) strm init >>= fun res ->
+    return (`Ok res)
+  ) else
+    return `NoDir

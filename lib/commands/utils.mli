@@ -44,7 +44,7 @@ val with_file : ?lock:bool -> string -> flags:Lwt_unix.open_flag list ->
   perms:Lwt_unix.file_perm -> mode:'a Lwt_io.mode -> 
   f:('a Lwt_io.channel -> 'b Lwt.t) -> 'b Lwt.t 
 
-val exists : string -> Lwt_unix.file_kind -> bool Lwt.t
+val exists : string -> ?alt:Lwt_unix.file_kind -> Lwt_unix.file_kind -> bool Lwt.t
 
 val lines : string -> int
 
@@ -59,3 +59,5 @@ val with_timeout : float -> (unit -> 'a Lwt.t) -> (exn -> 'a Lwt.t) -> 'a Lwt.t
 val get_interfaces : unit -> string list Lwt.t
 
 val fold_email_with_file : string -> ('a -> string -> 'a Lwt.t) -> 'a -> 'a Lwt.t
+
+val files_of_directory : string -> ('a -> string -> 'a Lwt.t) -> 'a -> [`Ok of 'a |`NoDir] Lwt.t 
