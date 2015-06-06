@@ -15,8 +15,9 @@
  *)
 open Storage
 open Irmin_core
+open Server_config
 
-type storage_ =
-  {user:string;mailbox:IrminMailbox.t;config:Server_config.imapConfig}
+type ('a) _storage = {user:string;mailbox:'a;config:imapConfig}
 
-module IrminStorage : Storage_intf with type t = storage_
+module IrminStorage : Storage_intf with type t = (GitMailbox.t) _storage
+module GitWorkdirStorage : Storage_intf with type t = (GitWorkdirMailbox.t) _storage
