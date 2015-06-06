@@ -71,6 +71,7 @@ let accept_cmn msgt sock =
   return (msgt,Some sock_c,(ic,oc))
 
 let rec accept_conn msgt sock cert = 
+  Log_.log `Debug "imaplet: accepting connections\n";
   catch (fun () ->
   match cert with
   | Some cert -> accept_ssl msgt sock cert
