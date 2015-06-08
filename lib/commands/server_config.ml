@@ -100,12 +100,15 @@ let validate_config config =
     Utils.exists path Unix.S_DIR >>= fun res ->
     err res "Invalid Irminsule path in"
   | `Mailbox ->
-    Utils.exists config.inbox_path Unix.S_REG >>= fun res ->
+    let path = Regex.replace ~regx:"%user%.*$" ~tmpl:"" config.inbox_path in
+    Utils.exists path Unix.S_REG >>= fun res ->
     err res "Invalid Inbox path in " >>
-    Utils.exists config.mail_path Unix.S_DIR >>= fun res ->
+    let path = Regex.replace ~regx:"%user%.*$" ~tmpl:"" config.mail_path in
+    Utils.exists path Unix.S_DIR >>= fun res ->
     err res "Invalid Mail path in "
   | `Maildir ->
-    Utils.exists config.mail_path Unix.S_DIR >>= fun res ->
+    let path = Regex.replace ~regx:"%user%.*$" ~tmpl:"" config.mail_path in
+    Utils.exists path Unix.S_DIR >>= fun res ->
     err res "Invalid Maildir path in "
   | `GitWorkdir ->
     let path = Regex.replace ~regx:"%user%.*$" ~tmpl:"" config.irmin_path in
