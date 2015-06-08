@@ -124,7 +124,7 @@ let email_content pub_key config attachment email transform =
     if config.encrypt && attachment then (
       let (_(*contid*),content) = conv_encrypt ~compress:config.compress content pub_key in
       return (content,size,lines)
-    ) else if config.compress then (
+    ) else if config.compress && attachment then ( (*content compressed separately *)
       return (do_compress content, size, lines)
     ) else (
       return (content,size,lines)
