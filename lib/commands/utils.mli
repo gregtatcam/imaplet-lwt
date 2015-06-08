@@ -61,3 +61,5 @@ val get_interfaces : unit -> string list Lwt.t
 val fold_email_with_file : string -> ('a -> string -> 'a Lwt.t) -> 'a -> 'a Lwt.t
 
 val files_of_directory : string -> ('a -> string -> 'a Lwt.t) -> 'a -> [`Ok of 'a |`NoDir] Lwt.t 
+
+val user_path : path:string -> user:string -> string

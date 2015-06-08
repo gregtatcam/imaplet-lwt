@@ -292,3 +292,6 @@ let files_of_directory path f init =
     return (`Ok res)
   ) else
     return `NoDir
+
+let user_path ~path ~user =
+  Regex.replace ~regx:"%user%" ~tmpl:user path
