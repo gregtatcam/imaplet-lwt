@@ -41,20 +41,30 @@ module Meta =
 
 exception InvalidCommand
 
-let rec args i script addr port ssl =
+let get_user str = 
+  try
+    let re = Re_posix.compile_pat ~opts:[`ICase] "^([^:]+):(.+)$" in
+    let subs = Re.exec re str in
+    let user = Re.get subs 1 in
+    let pswd = Re.get subs 2 in
+    Some (user,pswd)
+  with Not_found -> raise InvalidCommand
+
+let rec args i script addr port ssl user =
   if i >= Array.length Sys.argv then
-    script,addr,port,ssl
+    script,addr,port,ssl,user
   else
     match Sys.argv.(i) with 
-    | "-script" -> args (i+2) Sys.argv.(i+1) addr port ssl
-    | "-address" -> args (i+2) script Sys.argv.(i+1) port ssl
-    | "-port" -> args (i+2) script addr (int_of_string (Sys.argv.(i+1))) ssl
-    | "-ssl" -> args (i+1) script addr port true
+    | "-script" -> args (i+2) Sys.argv.(i+1) addr port ssl user
+    | "-address" -> args (i+2) script Sys.argv.(i+1) port ssl user
+    | "-port" -> args (i+2) script addr (int_of_string (Sys.argv.(i+1))) ssl user
+    | "-ssl" -> args (i+1) script addr port true user
+    | "-user" -> args (i+2) script addr port ssl (get_user Sys.argv.(i+1))
     | _ -> raise InvalidCommand
 
 let usage () =
   Printf.fprintf stderr "usage: client -script [path] -address [address] -port
-  [port] -ssl\n%!"
+  [port] -ssl [-user [user:pswd]]\n%!"
 
 let process_meta line = 
   let re = Re_posix.compile_pat ~opts:[`ICase] "^(timer_start|timer_stop|echo)[ \t]+(.*)$" in
@@ -83,8 +93,16 @@ let rec read_script strm =
     | `Ok -> read_script strm
     | `Done -> return (Some line)
 
-let get_script file =
+let get_script file user =
   let strm = Lwt_io.read_lines file in
+  let strm =
+    match user with
+    | None -> strm
+    | Some (user,pswd) ->
+      let strm1 = Lwt_stream.of_list 
+        ["a login " ^ user ^ " " ^ pswd;"^[^ ]+ (OK|BAD|NO)"] in
+        Lwt_stream.append strm1 strm
+  in
   let rec header strm =
     Lwt_stream.peek strm >>= function
     | None -> return ()
@@ -98,9 +116,9 @@ let get_script file =
 
 let commands f =
   try 
-    let script,addr,port,ssl = args 1 "" "127.0.0.1" 143 false in
+    let script,addr,port,ssl,user = args 1 "" "127.0.0.1" 143 false None in
       try 
-        f script addr port ssl
+        f script addr port ssl user
       with ex -> Printf.printf "%s\n%!" (Printexc.to_string ex)
   with _ -> usage ()
 
@@ -188,7 +206,7 @@ let output_meta () =
   ) !Meta.timers
 
 let () =
-  commands (fun script addr port ssl ->
+  commands (fun script addr port ssl user ->
     Lwt_main.run (catch(fun() ->
         let rec exec strm ic oc =
           exec_command strm ic oc >>= function
@@ -199,7 +217,7 @@ let () =
             | `Ok -> exec strm ic oc 
         in
         Lwt_io.with_file ~mode:Lwt_io.Input script (fun file ->
-          get_script file >>= fun strm ->
+          get_script file user >>= fun strm ->
           connect addr port ssl >>= fun (ic,oc) ->
           read_net_echo ic >>= fun _ -> 
           exec strm ic oc >>= fun () ->
