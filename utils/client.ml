@@ -116,7 +116,7 @@ let get_script file user =
 
 let commands f =
   try 
-    let script,addr,port,ssl,user = args 1 "" "127.0.0.1" 143 false None in
+    let script,addr,port,ssl,user = args 1 "" "127.0.0.1" 993 true None in
       try 
         f script addr port ssl user
       with ex -> Printf.printf "%s\n%!" (Printexc.to_string ex)
