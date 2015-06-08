@@ -32,6 +32,8 @@ let rec args i net port ssl tls store =
   let sval str = 
     if str = "irmin" then
       (`Irmin,"","")
+    else if str = "workdir" then
+      (`GitWorkdir,"","")
     else if Regex.match_regex ~regx:"^mbox:\\([^,]+\\),\\([.]+\\)$" str then
       (`Mailbox,(Str.matched_group 1 str),(Str.matched_group 2 str))
     else if Regex.match_regex ~regx:"^maildir:\\([^,]+\\)$" str then
@@ -52,7 +54,7 @@ let rec args i net port ssl tls store =
 
 let usage () =
   Log_.log `Error "usage: imaplet -net [interface] -port [port] -ssl [true|false]
-  -starttls [true|false] -store[irmin;mbox:inboxpath,mailboxpath;maildir:maildirpath\n"
+  -starttls [true|false] -store[irmin|workdir|mbox:inboxpath,mailboxpath|maildir:maildirpath\n"
 
 let commands f =
   try 
