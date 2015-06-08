@@ -20,18 +20,21 @@ open Server_config
 open Irmin_core
 open Irmin_storage
 open Sexplib.Conv
+open Storage
+open Mailbox_storage
+open Maildir_storage
 
 exception InvalidCommand
 exception SystemFailed of string
 exception AccountExists
 
 let get_mbox_type t =
-  if t = "irmin" then
-    `Irmin
-  else if t = "workdir" then
-    `GitWorkdir
-  else
-    raise InvalidCommand
+  match t with
+  | "irmin" -> `Irmin
+  | "workdir" -> `GitWorkdir
+  | "maildir" -> `Maildir
+  | "mbox" -> `Mailbox
+  | _ -> raise InvalidCommand
 
 let rec args i user force mbox_type =
   if i >= Array.length Sys.argv then
@@ -45,7 +48,7 @@ let rec args i user force mbox_type =
   )
 
 let usage () =
-  Printf.printf "usage: imaplet_create_account -u [user:pswd] [-f] -t [irmin|workdir]\n%!"
+  Printf.printf "usage: imaplet_create_account -u [user:pswd] [-f] -t [irmin|workdir|maildir|mbox]\n%!"
 
 let commands f =
   try 
@@ -102,7 +105,7 @@ let set_users user pswd =
   let new_user = 
     (Printf.sprintf "%s:{SHA256}%s::::%s" user
     (Imap_crypto.get_hash ~hash:`Sha256 pswd) 
-    (Regex.replace ~regx:"%user%" ~tmpl:user srv_config.irmin_path)) in
+    (Utils.user_path ~path:srv_config.irmin_path ~user)) in
   Utils.lines_of_file srv_config.users_path ~init:[] ~f:(fun line acc ->
     if Regex.match_regex ~case:false ~regx:("^" ^ user ^ ":") line then
       return acc
@@ -116,8 +119,8 @@ let log msg =
   Lwt_io.with_file ~flags:[O_WRONLY;O_APPEND;O_CREAT] ~mode:Lwt_io.output "/tmp/log/imaplet.log"
   (fun oc -> Lwt_io.write_line oc msg)
 
-let genrsa user pswd priv_path pub_path =
-  Lwt_process.pread ~stderr:`Dev_null ("openssl",[|"genrsa";"1024s"|]) >>= fun priv_key -> 
+let genrsa user pswd priv_path =
+  Lwt_process.pread ~stderr:`Dev_null ~stdin:`Close ("",[|"openssl";"genrsa";"1024s"|]) >>= fun priv_key -> 
   Lwt_io.with_file ~mode:Lwt_io.output priv_path (fun w -> 
     Lwt_io.write w 
     begin
@@ -132,8 +135,19 @@ let genrsa user pswd priv_path pub_path =
   return priv_key
 
 let reqcert priv pem =
-  Lwt_process.pwrite ("openssl", 
-    [|"req"; "-x509"; "-batch"; "-new"; "-key"; "/dev/stdin"; "-out"; pem|]) priv 
+  Utils.exists (Filename.dirname pem) S_DIR >>= fun res ->
+  let (r,w) = Lwt_unix.pipe () in
+  Lwt_process.pwrite ~stderr:`Dev_null ~stdout:(`FD_move (Lwt_unix.unix_file_descr w)) ("", 
+  [|"openssl"; "req"; "-x509"; "-batch"; "-new"; "-key"; "/dev/stdin"|]) priv >>
+  (* the pem file doesn't appear to be flushed/closed on return, so doing it
+   * this way instead of -out option to req *)
+  Lwt_io.flush_all () >>= fun () ->
+  let ic = Lwt_io.of_fd ~mode:Lwt_io.Input r in
+  Lwt_io.read ic >>= fun str ->
+  Lwt_io.close ic >>
+  Lwt_io.with_file pem ~mode:Lwt_io.Output (fun oc -> 
+    Lwt_io.write oc str
+  )
 
 let failed user_path msg =
   Printf.printf "%s\n%!" msg;
@@ -143,68 +157,80 @@ let failed user_path msg =
 
 let created = ref None
 
-let factory mbox_type user mailbox keys =
-  let open Server_config in
-  let open Storage in
-  let open Mailbox_storage in
-  let open Maildir_storage in
-  match mbox_type with
-  | `Irmin -> build_strg_inst (module IrminStorage) srv_config user mailbox keys
-  | `GitWorkdir -> build_strg_inst (module GitWorkdirStorage) srv_config user mailbox keys
-  | `Mailbox -> build_strg_inst (module MailboxStorage) srv_config user mailbox keys
-  | `Maildir -> build_strg_inst (module MaildirStorage) srv_config user mailbox keys
 
 let () =
   commands (fun user pswd force mbox_type ->
     let user_path = Regex.replace ~regx:"%user%.*$" ~tmpl:user srv_config.user_cert_path in
-    let cert_path = Regex.replace ~regx:"%user%" ~tmpl:user srv_config.user_cert_path in
-    let irmin_path = Regex.replace ~regx:"%user%" ~tmpl:user srv_config.irmin_path in
+    let cert_path = Utils.user_path ~path:srv_config.user_cert_path ~user in 
+    let irmin_path = Utils.user_path ~path:srv_config.irmin_path ~user in
+    let mail_path = Utils.user_path ~path:srv_config.mail_path ~user in
     let priv_path = Filename.concat cert_path srv_config.key_name in
     let pem_path = Filename.concat cert_path srv_config.pem_name in
-    let pub_path = Filename.concat cert_path srv_config.pub_name in
+    let git_init () =
+      Lwt_process.pread ~stderr:`Dev_null ~stdin:`Close ("",[|"git";"init";irmin_path|]) >>= fun _ -> 
+      return ()
+    in
+    let build m mailbox keys =
+      build_strg_inst m srv_config user mailbox keys
+    in
+    let get_factory () =
+      match mbox_type with
+      | `Irmin -> 
+        let f = build (module IrminStorage) in
+        (f,irmin_path, Filename.concat irmin_path ".git", fun () -> git_init ())
+      | `GitWorkdir -> 
+        let f = build (module GitWorkdirStorage) in
+        (f,irmin_path, Filename.concat irmin_path "imaplet", fun () -> return ())
+      | `Mailbox -> 
+        let f = build (module MailboxStorage) in
+        (f,mail_path,Filename.concat mail_path "mail", fun () -> return ())
+      | `Maildir -> 
+        let f = build (module MaildirStorage) in
+        (f,mail_path,Filename.concat mail_path "Maildir", fun () -> return ())
+    in
+    let check_force () =
+      if force then
+        system ("rm -rf " ^ user_path)
+      else
+        check_users user_path user pswd
+    in
     Lwt_main.run (
       catch (fun () ->
-        (if force then
-          system ("rm -rf " ^ user_path)
-        else
-          check_users user_path user pswd) >>= fun () ->
+        let (factory,repo_root,repo,repo_init) = get_factory () in
+        check_force () >>= fun () ->
         created := Some user_path;
         Lwt_unix.mkdir user_path 0o775 >>
-        Lwt_unix.mkdir irmin_path 0o775 >>
+        Lwt_unix.mkdir repo_root 0o775 >>
         Lwt_unix.mkdir cert_path 0o775 >>
-        file_cmd priv_path 
-          (fun () -> genrsa user pswd priv_path pub_path >>= fun key ->
-	             reqcert key pem_path) >>
-          dir_cmd (Filename.concat irmin_path ".git") 
-          (fun () -> 
-            begin
-            if mbox_type = `Irmin then (
-              Lwt_process.pread ~stderr:`Dev_null ~stdin:`Dev_null ("git",[|"init";irmin_path|]) >>= fun _ -> 
-              let ac = UserAccount.create srv_config user in
-              UserAccount.create_account ac
-            ) else (
-              let ac = WorkdirUserAccount.create srv_config user in
-              WorkdirUserAccount.create_account ac
-            )
-            end >>= fun _ ->
-            Ssl_.get_user_keys ~user ~pswd srv_config >>= fun keys ->
-            let create_mailbox mailbox =
-              factory mbox_type user mailbox keys >>= fun (module Mailbox) ->
-              Mailbox.MailboxStorage.create_mailbox Mailbox.this >>
-              Mailbox.MailboxStorage.subscribe Mailbox.this >>
-              Mailbox.MailboxStorage.commit Mailbox.this
-            in
-            create_mailbox "INBOX" >>
-            create_mailbox "Drafts" >>
-            create_mailbox "Deleted Messages" >>
-            create_mailbox "Sent Messages"
-          ) >>
-          set_users user pswd >>= fun () ->
-          Printf.printf "success\n%!";
-          return ()
+        file_cmd priv_path (fun () -> 
+          genrsa user pswd priv_path >>= fun key ->
+	  reqcert key pem_path
+        ) >>
+        dir_cmd repo (fun () -> 
+          repo_init () >>
+          Ssl_.get_user_keys ~user ~pswd srv_config >>= fun keys ->
+          factory "" keys >>= fun (module Mailbox) ->
+          Mailbox.MailboxStorage.create_account Mailbox.this >>= function
+          | `Exists -> raise AccountExists
+          | `Ok ->
+          let create_mailbox mailbox =
+            factory mailbox keys >>= fun (module Mailbox) ->
+            Mailbox.MailboxStorage.create_mailbox Mailbox.this >>
+            Mailbox.MailboxStorage.subscribe Mailbox.this >>
+            Mailbox.MailboxStorage.commit Mailbox.this
+          in
+          create_mailbox "INBOX" >>
+          create_mailbox "Drafts" >>
+          create_mailbox "Deleted Messages" >>
+          create_mailbox "Sent Messages"
+        ) >>= fun () ->
+        set_users user pswd >>= fun () ->
+        Printf.printf "success\n%!";
+        return ()
       ) (function
         | SystemFailed msg -> failed !created ("failed: " ^ msg)
         | AccountExists -> failed !created "failed: account exists"
-        | ex -> failed !created ("failed: " ^ (Printexc.to_string ex)))
+        | ex -> failed !created ("failed: " ^ (Printexc.to_string ex))
+      )
     )
   )
