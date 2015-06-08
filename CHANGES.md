@@ -48,3 +48,4 @@
 0.1.14
 * improve network read error handling
 * added new storage type - git working directory, mirrors git as is, all updates overwrite the content
+* allow compression/encryption in any combination
