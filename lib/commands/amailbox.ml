@@ -62,7 +62,9 @@ let create config user pswd =
   let (inbox_path,mail_path) = 
   match config.data_store with
   | `Irmin|`GitWorkdir -> "",""
-  | `Mailbox|`Maildir -> config.inbox_path,Configuration.mailboxes config.mail_path user
+  | `Mailbox|`Maildir -> 
+    (Utils.user_path ~path:config.inbox_path ~user,Configuration.mailboxes
+      (Utils.user_path ~path:config.mail_path ~user) user)
   in
   {inbox_path;mail_path;user=Some user;selected=`None;config; keys=Some (Ssl_.get_user_keys ~user ?pswd config)}
 
