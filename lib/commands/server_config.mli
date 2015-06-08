@@ -55,7 +55,8 @@ val default_config : imapConfig
 val validate_config : imapConfig -> [`Ok|`Error of string] Lwt.t
 
 val update_config : imapConfig -> string option -> int option -> bool option ->
-  bool option -> ([`Irmin|`Mailbox|`Maildir|`GitWorkdir] * string * string) option -> imapConfig
+  bool option -> ([`Irmin|`Mailbox|`Maildir|`GitWorkdir] * string * string)
+  option -> bool option -> bool option -> imapConfig
 
 val srv_config : imapConfig
 

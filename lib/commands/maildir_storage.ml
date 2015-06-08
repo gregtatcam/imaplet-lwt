@@ -551,18 +551,24 @@ struct
 
   let encrypt t message =
     let (pub_key,_) = t.keys in
-    if t.config.encrypt then
+    if t.config.encrypt then (
       Imap_crypto.encrypt ~compress:t.config.compress message pub_key
-    else
+    ) else if t.config.compress then (
+      Imap_crypto.do_compress message
+    ) else (
       message
+    )
 
   let decrypt t message =
     let (_,priv_key) = t.keys in
     let priv_key = Utils.option_value_exn ~ex:EmptyPrivateKey priv_key in
-    if t.config.encrypt then
+    if t.config.encrypt then (
       Imap_crypto.decrypt ~compressed:t.config.compress message priv_key
-    else
+    ) else if t.config.compress then (
+      Imap_crypto.do_uncompress message
+    ) else ( 
       message
+    )
 
   (* append message(s) to selected mailbox *)
   let append t message message_metadata =

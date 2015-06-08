@@ -121,19 +121,24 @@ let email_content pub_key config attachment email transform =
     in
     let size = Bytes.length content in
     let lines = Utils.lines content in
-    if config.encrypt = true && attachment then (
+    if config.encrypt && attachment then (
       let (_(*contid*),content) = conv_encrypt ~compress:config.compress content pub_key in
       return (content,size,lines)
+    ) else if config.compress then (
+      return (do_compress content, size, lines)
     ) else (
       return (content,size,lines)
     )
   | None -> return ("",0,0) 
 
 let do_encrypt pub_key config data =
-  if config.encrypt then
+  if config.encrypt then (
     return (encrypt ~compress:config.compress data pub_key)
-  else
+  ) else if config.compress then (
+    return (do_compress data)
+  ) else (
     return data
+  )
 
 let get_header_descr headers headers_buff transform =
   let headers_str = headers_str_of_list headers transform in
@@ -285,10 +290,13 @@ let rec printable buffer str =
 
 let get_decrypt_attachment priv_key config get_attachment contid =
   get_attachment contid >>= fun attachment ->
-  if config.encrypt then
+  if config.encrypt then (
     return (conv_decrypt ~compressed:config.compress attachment priv_key)
-  else
+  ) else if config.compress then (
+    return (do_uncompress attachment)
+  ) else (
     return attachment
+  )
 
 let header_of_sexp_str str =
   let sexp = Sexp.of_string str in
@@ -327,6 +335,8 @@ let reassemble_email priv_key config ~headers ~content ~map ~get_attachment =
 let do_decrypt priv_key config data =
   if config.encrypt then (
     return (decrypt ~compressed:config.compress data priv_key)
+  ) else if config.compress then (
+    return (do_uncompress data)
   ) else
     return data
 

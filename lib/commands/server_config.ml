@@ -121,10 +121,12 @@ let validate_config config =
       (config.ssl = true || config.starttls = true))
       "ssl/starttls have to be enabled when auth_required is enabled"
 
-let update_config config net port ssl tls store =
+let update_config config net port ssl tls store encrypt compress =
   let port = (match port with |None -> config.port|Some port->port) in
   let ssl = (match ssl with |None -> config.ssl|Some ssl->ssl) in
   let starttls = (config.ssl && (match tls with |None -> config.starttls|Some tls->tls)) in
+  let encrypt = (match encrypt with |None -> config.encrypt|Some encrypt->encrypt) in
+  let compress = (match compress with |None -> config.compress|Some compress->compress) in
   let addr = (match net with |None -> config.addr|Some net->net) in
   let (data_store,mail_path,inbox_path) =
   begin
@@ -133,7 +135,7 @@ let update_config config net port ssl tls store =
   | Some (store,inbox,mail) -> (store,mail,inbox)
   end
   in
-  {config with inbox_path;mail_path;addr;port;ssl;starttls;data_store}
+  {config with inbox_path;mail_path;addr;port;ssl;starttls;data_store;encrypt;compress}
 
 let exists file =
   let stat = Unix.stat file in
@@ -196,7 +198,7 @@ let config_of_lines lines =
           | "users_path" -> {acc with users_path = v}
           | "data_store" -> {acc with data_store = (stval n v)}
           | "encrypt" -> {acc with encrypt = (bval n v true)}
-          | "compress" -> {acc with encrypt = (bval n v true)}
+          | "compress" -> {acc with compress = (bval n v true)}
           | "auth_required" -> {acc with auth_required = (bval n v true)}
           | "user_cert_path" -> {acc with user_cert_path = v}
           | "idle_interval" -> {acc with idle_interval = fval n v 120.}

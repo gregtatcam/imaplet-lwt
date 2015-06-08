@@ -30,3 +30,7 @@ val get_hash : ?hash:[`Sha1|`Sha256] -> string -> string
 val aes_encrypt_pswd : pswd:string -> string -> string
 
 val aes_decrypt_pswd : pswd:string -> string -> string
+
+val do_compress : string -> string
+
+val do_uncompress : string -> string
