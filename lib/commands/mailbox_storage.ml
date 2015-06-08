@@ -104,4 +104,10 @@ struct
 
   let uid_to_seq t uid =
     return None
+
+  let create_account t =
+    return `Ok
+
+  let delete_account t =
+    return ()
 end

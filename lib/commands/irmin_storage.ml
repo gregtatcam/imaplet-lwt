@@ -109,6 +109,12 @@ struct
 
   let uid_to_seq t uid =
     GM.uid_to_seq t.mailbox uid
+
+  let create_account t =
+    GM.create_account t.mailbox
+
+  let delete_account t =
+    GM.delete_account t.mailbox
 end
 
 module IrminStorage = GitStorageMake(GitMailbox)

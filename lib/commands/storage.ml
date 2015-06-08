@@ -95,6 +95,12 @@ sig
 
   (* get sequence # for the given uid *)
   val uid_to_seq : t -> int -> int option Lwt.t
+
+  (* create user account *)
+  val create_account : t -> [`Ok|`Exists] Lwt.t
+
+  (* delete user account *)
+  val delete_account : t -> unit Lwt.t
 end
 
 module type Storage_inst =

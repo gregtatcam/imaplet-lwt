@@ -31,6 +31,9 @@ module MapFlag = Map.Make(
     let compare f1 f2 = Pervasives.compare f1 f2
   end)
 
+let _mail_path config user =
+  Utils.user_path ~path:config.Server_config.mail_path ~user
+
 let _raw_content t =
   match Email.raw_content t with
   | Some os -> Octet_stream.to_string os
@@ -184,7 +187,7 @@ end = struct
       else
         unix_path_to_maildir mailbox
     in
-    {root=Configuration.mailboxes config.mail_path user;mailbox;config}
+    {root=Configuration.mailboxes (_mail_path config user) user;mailbox;config}
 
   (* return full mailbox path formated for use by OS *)
   let to_maildir t =
@@ -382,7 +385,7 @@ let append_uidlist path uid file =
   ) 
 
 let subscribe_path mail_path user =
-  Filename.concat (Configuration.mailboxes mail_path user) "imaplet.subscribe"
+  Filename.concat (Configuration.mailboxes (Utils.user_path ~path:mail_path ~user) user) "imaplet.subscribe"
   
 (* read subscribe *)
 let read_subscribe path =
@@ -449,7 +452,13 @@ struct
 
   (* create mailbox *)
   let create_mailbox t =
-    Lwt_unix.mkdir (MaildirPath.to_maildir t.mailbox) 0o777 >>
+    (* inbox doesn't have it's own folder, so don't need to create *)
+    begin
+    if MaildirPath.basename t.mailbox <> "" then
+      Lwt_unix.mkdir (MaildirPath.to_maildir t.mailbox) 0o777
+    else
+      return ()
+    end >>
     create_file (MaildirPath.file_path t.mailbox `Metadata ) >>
     create_file (MaildirPath.file_path t.mailbox `Uidlist ) >>
     Lwt_unix.mkdir (MaildirPath.file_path t.mailbox (`Cur "") ) 0o777 >>
@@ -470,6 +479,7 @@ struct
   (* subscribe mailbox *)
   let subscribe t =
     let mailbox = MaildirPath.basename t.mailbox in
+    let mailbox = if mailbox = "" then "inbox" else mailbox in
     read_subscribe (subscribe_path t.config.mail_path t.user) >>= fun l ->
     try 
       let _ = List.find (fun m -> m = mailbox) l in return ()
@@ -479,6 +489,7 @@ struct
   (* unsubscribe mailbox *)
   let unsubscribe t =
     let mailbox = MaildirPath.basename t.mailbox in
+    let mailbox = if mailbox = "" then "inbox" else mailbox in
     read_subscribe (subscribe_path t.config.mail_path t.user) >>= fun l ->
     write_subscribe (subscribe_path t.config.mail_path t.user) (List.filter (fun m -> m <> mailbox) l)
 
@@ -685,4 +696,21 @@ struct
     get_file t (`UID uid) uids >>= function
     | `Ok (seq,_,_,_) -> return (Some seq)
     | _ -> return None
+    
+  let create_account t =
+    let path = subscribe_path t.config.mail_path t.user in
+    Utils.exists path S_REG >>= fun res ->
+    if res then
+      return `Exists
+    else (
+      Lwt_unix.openfile path [O_WRONLY;O_CREAT] 0o664 >>= fun fd ->
+      Lwt_unix.close fd >>
+      write_subscribe path [] >>
+      return `Ok
+    )
+    
+  let delete_account t =
+    let path = subscribe_path t.config.mail_path t.user in
+    Lwt_unix.system ("rm -rf " ^ path) >>= fun _ ->
+    return ()
 end

@@ -661,6 +661,8 @@ module type GitMailboxIntf =
     val uid_to_seq : t -> int -> int option Lwt.t
     val subscribe : t -> unit Lwt.t
     val unsubscribe : t -> unit Lwt.t
+    val create_account : t -> [`Ok|`Exists] Lwt.t
+    val delete_account : t -> unit Lwt.t
   end
 
 module GitMailboxMake 
@@ -1042,31 +1044,9 @@ module GitMailboxMake
       List.iter (fun i -> Printf.printf "%s %!" i) subscr; Printf.printf "\n%!";
       return ()
 
-  end
-
-module GitMailbox = GitMailboxMake(IrminIntf)(IrminIntf_tr)
-
-module GitWorkdirMailbox = GitMailboxMake(GitWorkdirIntf)(GitWorkdirIntf_tr)
-
-module UserAccountMake (GI:GitIntf)(GI_tr:GitIntf_tr) :
-  sig
-    type t
-
-    val create : imapConfig -> string -> t
-    val create_account : t -> [`Exists|`Ok] Lwt.t
-    val delete_account : t -> unit Lwt.t
-  end = 
-  struct
-    type t = string * imapConfig * Key_.t
-
-    (* create type *)
-    let create config user = 
-      (user,config,Key_.create_account user)
-
-    (* create new account *)
-    let create_account key =
-      let (user,config,key) = key in
-      GI_tr.begin_transaction ~user config key >>= fun view ->
+    let create_account mbox =
+      let key = Key_.create_account mbox.user in
+      GI_tr.begin_transaction ~user:mbox.user mbox.config key >>= fun view ->
       GI_tr.mem view (Key_.t_of_path "subscriptions") >>= fun res ->
       if res then
         return `Exists
@@ -1076,14 +1056,13 @@ module UserAccountMake (GI:GitIntf)(GI_tr:GitIntf_tr) :
         return `Ok
       )
 
-    (* remove account *)
-    let delete_account key =
-      let (user,config,key) = key in
-      GI.create ~user config >>= fun store ->
+    let delete_account mbox =
+      let key = Key_.create_account mbox.user in
+      GI.create ~user:mbox.user mbox.config >>= fun store ->
       GI.remove store key
 
   end
 
-module UserAccount = UserAccountMake (IrminIntf) (IrminIntf_tr)
+module GitMailbox = GitMailboxMake(IrminIntf)(IrminIntf_tr)
 
-module WorkdirUserAccount = UserAccountMake (GitWorkdirIntf)(GitWorkdirIntf_tr)
+module GitWorkdirMailbox = GitMailboxMake(GitWorkdirIntf)(GitWorkdirIntf_tr)

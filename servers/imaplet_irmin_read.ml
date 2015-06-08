@@ -208,14 +208,19 @@ let main () =
     prompt ((get_user user) ^ ": ") >>= function 
     | "help" -> Printf.printf "help\nselect mbox\ncrtmailbox mailbox\nlist\ntree\ndelete\ncreate\nuser\nquit\n%!"; request user
     | "user" -> prompt "user? " >>= fun user -> request user
-    | "delete" -> let ac = UserAccount.create srv_config (get_user user) in
-      UserAccount.delete_account ac >> request user
+    | "delete" -> 
+      get_keys srv_config user >>= fun keys ->
+      IrminStorage.create srv_config (get_user user) "" keys >>= fun str ->
+      IrminStorage.delete_account str
     | "crtmailbox" -> let mailbox = arg 1 in
       get_keys srv_config user >>= fun keys ->
       IrminStorage.create srv_config (get_user user) mailbox keys >>= fun str ->
       IrminStorage.create_mailbox str >>= fun () -> request user
-    | "create" -> let ac = UserAccount.create srv_config (get_user user) in
-      UserAccount.create_account ac >> request user
+    | "create" -> 
+      get_keys srv_config user >>= fun keys ->
+      IrminStorage.create srv_config (get_user user) "" keys >>= fun str ->
+      IrminStorage.create_account str >>= fun _ ->
+      return ()
     | "tree" -> 
       let key = Key_.create_account (get_user user) in
       tree user key "" >> request user
