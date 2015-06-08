@@ -387,7 +387,7 @@ module GitWorkdirIntf : GitIntf with type store = string
       let base = Regex.replace ~regx:" " ~tmpl:"\\ " (Filename.dirname path) in
       Lwt_unix.system ("mkdir -p " ^ base) >>= fun _ ->
       Lwt_unix.system ("chmod 777 " ^ base) >>= fun _ ->
-      with_file ~lock:true path ~flags:[O_CREAT;O_WRONLY] ~perms:0o666
+      with_file ~lock:true path ~flags:[O_CREAT;O_TRUNC;O_WRONLY] ~perms:0o666
       ~mode:Lwt_io.Output ~f:(fun ch ->
         Lwt_io.write ch data
       )
