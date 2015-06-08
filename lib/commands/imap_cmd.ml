@@ -90,8 +90,14 @@ let handle_idle context =
 let unset_recent context =
   match Amailbox.selected_mbox context.!mailbox with
   | Some mailbox -> 
-    Amailbox.store context.!mailbox (fun () -> return ()) (fun _ -> return ())
-    (Interpreter.get_sequence "1:*") Store_MinusFlagsSilent [Flags_Recent] None false >>= fun _ -> return ()
+    begin
+    (* should cache uid's to recent messages for efficiency TBD *)
+    Amailbox.examine context.!mailbox mailbox >>= function
+    | `Ok (_, header) when header.recent > 0 ->
+      Amailbox.store context.!mailbox (fun () -> return ()) (fun _ -> return ())
+      (Interpreter.get_sequence "1:*") Store_MinusFlagsSilent [Flags_Recent] None false >>= fun _ -> return ()
+    | _ -> return ()
+    end
   | None -> return ()
 
 let get_client_ids l =
@@ -238,6 +244,7 @@ let handle_list context reference mailbox lsub =
 
 (** review - where the flags are coming from TBD **)
 let handle_select context mailbox condstore rw =
+  unset_recent context >>= fun () ->
   (if rw then
     Amailbox.select context.!mailbox mailbox
   else
@@ -254,7 +261,6 @@ let handle_select context mailbox condstore rw =
       (* might be tricky, it is probably shared by all clients which select this
        * mailbox
        *)
-      unset_recent context >>= fun () ->
       context.highestmodseq := `Sessionstart;
       context.noop_modseq := header.modseq;
       let (flags,prmnt_flags) = Configuration.get_mbox_flags in
