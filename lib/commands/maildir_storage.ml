@@ -251,12 +251,13 @@ end
 
 (* initial file name secs.rand.host *)
 let init_message_file_name internal_date =
-  let t = Int64.of_float ((Unix.gettimeofday())*.100.) in
-  let internal_date = Pervasives.int_of_float (Dates.ImapTime.to_float internal_date) in
+  let t = Int64.of_float ((Unix.gettimeofday())*.1000.) in
+  let internal_date = 
+    Int64.of_float (Dates.ImapTime.to_float internal_date) in
   let host = Unix.gethostname() in
   Random.init (Int64.to_int t);
   let r = Int64.to_string (Random.int64 t) in
-  Printf.sprintf "%d.%0Lx.%s.%s" internal_date t r host
+  Printf.sprintf "%Ld.%0Lx.%s.%s" internal_date t r host
 
 let mail_flags : (string*mailboxFlags) list =
   [ "a", Flags_Keyword "$NotJunk";
@@ -405,7 +406,7 @@ let write_subscribe path l =
 
 (* maildir storage type *)
 type storage_ = {user: string; mailbox:
-  MaildirPath.t;config:Server_config.imapConfig;keys:Ssl_.keys;}
+  MaildirPath.t;config:Server_config.imapConfig;keys:Ssl_.keys;uidlist:(int*int*string) list option ref}
 
 module MaildirStorage : Storage_intf with type t = storage_ =
 struct
@@ -413,7 +414,8 @@ struct
 
   (* user *)
   let create config user mailbox keys =
-    return {user;mailbox = MaildirPath.create config user mailbox;config;keys}
+    return {user;mailbox = MaildirPath.create config user
+    mailbox;config;keys;uidlist=ref None}
 
   (* mailbox supports both folders and messages *)
   let exists t = 
@@ -433,9 +435,15 @@ struct
     write_mailbox_metadata (MaildirPath.file_path t.mailbox `Metadata)
 
   let fetch_uidlist t =
-    read_uidlist (MaildirPath.file_path t.mailbox `Uidlist)
+    match t.!uidlist with
+    | None -> 
+      read_uidlist (MaildirPath.file_path t.mailbox `Uidlist) >>= fun uidlist ->
+      t.uidlist := Some uidlist;
+      return uidlist
+    | Some uidlist -> return uidlist
 
   let update_uidlist t l =
+    t.uidlist := Some l;
     write_uidlist (MaildirPath.file_path t.mailbox `Uidlist) l
 
   (* status *)
@@ -580,7 +588,8 @@ struct
     ) >>= fun () ->
     let cur_file = current t file in
     Lwt_unix.link tmp_file cur_file >>
-    Lwt_unix.unlink tmp_file >>
+    Lwt_unix.unlink tmp_file >>= fun () ->
+    t.uidlist := None;
     append_uidlist (MaildirPath.file_path t.mailbox `Uidlist) message_metadata.uid file 
 
   (* return sequence,uid,file size,file name  *)

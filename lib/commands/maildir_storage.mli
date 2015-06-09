@@ -50,6 +50,6 @@ val make_message_file_name : string -> Storage_meta.mailbox_message_metadata -> 
 val create_file : ?overwrite:bool -> ?perms:int -> string -> unit Lwt.t
 
 type storage_ = {user: string; mailbox: MaildirPath.t; config:
-  Server_config.imapConfig; keys: Ssl_.keys}
+  Server_config.imapConfig; keys: Ssl_.keys; uidlist: (int*int*string) list option ref}
 
 module MaildirStorage : Storage_intf with type t = storage_
