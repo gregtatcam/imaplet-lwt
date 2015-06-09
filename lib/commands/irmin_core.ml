@@ -364,7 +364,7 @@ module GitWorkdirIntf : GitIntf with type store = string
 
     let read_exn store key =
       let path = get_path store key in
-      with_file ~lock:true path ~flags:[O_RDONLY] ~perms:0o666
+      with_file ~lock:true path ~flags:[O_RDONLY] ~perms:0o664
       ~mode:Lwt_io.Input ~f:(fun ch ->
         Lwt_io.read ch
       )
@@ -385,9 +385,17 @@ module GitWorkdirIntf : GitIntf with type store = string
     let update store key data =
       let path = get_path store key in
       let base = Regex.replace ~regx:" " ~tmpl:"\\ " (Filename.dirname path) in
-      Lwt_unix.system ("mkdir -p " ^ base) >>= fun _ ->
-      Lwt_unix.system ("chmod 777 " ^ base) >>= fun _ ->
-      with_file ~lock:true path ~flags:[O_CREAT;O_TRUNC;O_WRONLY] ~perms:0o666
+      exists base S_DIR >>= fun res ->
+      begin
+      if res = false then (
+        Lwt_unix.system ("mkdir -p " ^ base) >>= fun _ ->
+        Lwt_unix.system ("chmod 775 " ^ base) >>= fun _ ->
+        return ()
+      ) else (
+        return ()
+      )
+      end >>
+      with_file ~lock:true path ~flags:[O_CREAT;O_TRUNC;O_WRONLY] ~perms:0o664
       ~mode:Lwt_io.Output ~f:(fun ch ->
         Lwt_io.write ch data
       )
