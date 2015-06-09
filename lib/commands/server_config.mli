@@ -36,7 +36,7 @@ type imapConfig = {
   key_name : string; (* private key file name, default server.key *)
   pub_name : string; (* public key file name, default server.pub *)
   users_path : string; (* users file path, default datadir/imaplet *)
-  data_store : [`Irmin|`Mailbox|`Maildir|`GitWorkdir]; (* type of storage, irmin,maildir,gitworkdir supported *)
+  data_store : [`Irmin|`Mailbox|`Maildir|`Workdir]; (* type of storage, irmin,maildir,workdir supported *)
   encrypt : bool; (* encrypt messages, default true *)
   compress : bool; (* compress messages, but not attachments, default true *)
   user_cert_path : string; (* user's certificate/key location *)
@@ -55,7 +55,7 @@ val default_config : imapConfig
 val validate_config : imapConfig -> [`Ok|`Error of string] Lwt.t
 
 val update_config : imapConfig -> string option -> int option -> bool option ->
-  bool option -> ([`Irmin|`Mailbox|`Maildir|`GitWorkdir] * string * string)
+  bool option -> ([`Irmin|`Mailbox|`Maildir|`Workdir] * string * string)
   option -> bool option -> bool option -> imapConfig
 
 val srv_config : imapConfig

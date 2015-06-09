@@ -33,11 +33,14 @@ let rec args i net port ssl tls store encrypt compress =
     if str = "irmin" then
       (`Irmin,"","")
     else if str = "workdir" then
-      (`GitWorkdir,"","")
-    else if Regex.match_regex ~regx:"^mbox:\\([^,]+\\),\\([.]+\\)$" str then
-      (`Mailbox,(Str.matched_group 1 str),(Str.matched_group 2 str))
-    else if Regex.match_regex ~regx:"^maildir:\\([^,]+\\)$" str then
-      (`Maildir,"",(Str.matched_group 1 str))
+      (`Workdir,"","")
+    else if Regex.match_regex ~regx:"^mbox\\(:\\([^,]+\\),\\(.+\\)\\)?$" str then (
+      let inbox = try Str.matched_group 2 str with Not_found -> srv_config.inbox_path in
+      let mail = try Str.matched_group 3 str with Not_found -> srv_config.mail_path in
+      (`Mailbox,inbox,mail)
+    ) else if Regex.match_regex ~regx:"^maildir\\(:\\(.+\\)\\)?$" str then
+      let mail = try Str.matched_group 2 str with Not_found -> srv_config.mail_path in
+      (`Maildir,"",mail)
     else
       raise InvalidCommand
   in
@@ -76,7 +79,7 @@ let log config =
       config.addr config.port config.ssl config.starttls config.encrypt config.compress);
   match config.data_store with
   | `Irmin -> Log_.log `Info1 (Printf.sprintf "storage: irmin:%s\n" config.irmin_path)
-  | `GitWorkdir -> Log_.log `Info1 (Printf.sprintf "storage: workdir:%s\n" config.irmin_path)
+  | `Workdir -> Log_.log `Info1 (Printf.sprintf "storage: workdir:%s\n" config.irmin_path)
   | `Maildir -> Log_.log `Info1 (Printf.sprintf "storage: maildir:%s\n" config.mail_path)
   | `Mailbox -> Log_.log `Info1 (Printf.sprintf "storage: mailbox:%s:%s\n" config.inbox_path config.mail_path)
 

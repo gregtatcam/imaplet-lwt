@@ -74,7 +74,7 @@ pub_name server.pub
 # users path default datadir/imaplet
 #users_path ""
  
-# type of data storage like mailbox,mbox,irmin,gitworkdir
+# type of data storage like mailbox,mbox,irmin,workdir
 data_store irmin
 
 # encrypt message

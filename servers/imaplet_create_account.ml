@@ -31,7 +31,7 @@ exception AccountExists
 let get_mbox_type t =
   match t with
   | "irmin" -> `Irmin
-  | "workdir" -> `GitWorkdir
+  | "workdir" -> `Workdir
   | "maildir" -> `Maildir
   | "mbox" -> `Mailbox
   | _ -> raise InvalidCommand
@@ -178,7 +178,7 @@ let () =
       | `Irmin -> 
         let f = build (module IrminStorage) in
         (f,irmin_path, Filename.concat irmin_path ".git", fun () -> git_init ())
-      | `GitWorkdir -> 
+      | `Workdir -> 
         let f = build (module GitWorkdirStorage) in
         (f,irmin_path, Filename.concat irmin_path "imaplet", fun () -> return ())
       | `Mailbox -> 

@@ -36,7 +36,7 @@ type imapConfig = {
   key_name : string; (* private key file name, default server.key *)
   pub_name : string; (* public key file name, default server.pub *)
   users_path : string; (* users file path, default datadir/imaplet *)
-  data_store : [`Irmin|`GitWorkdir|`Mailbox|`Maildir]; (* type of storage, only irmin supported so far *)
+  data_store : [`Irmin|`Workdir|`Mailbox|`Maildir]; (* type of storage, irmin/maildir/workdir supported *)
   encrypt : bool; (* encrypt messages, default true *)
   compress : bool; (* compress messages, but not attachments, default true *)
   user_cert_path : string; (* user's certificate/key location *)
@@ -110,7 +110,7 @@ let validate_config config =
     let path = Regex.replace ~regx:"%user%.*$" ~tmpl:"" config.mail_path in
     Utils.exists path Unix.S_DIR >>= fun res ->
     err res "Invalid Maildir path in "
-  | `GitWorkdir ->
+  | `Workdir ->
     let path = Regex.replace ~regx:"%user%.*$" ~tmpl:"" config.irmin_path in
     Utils.exists path Unix.S_DIR >>= fun res ->
     err res "Invalid Irminsule path in"
@@ -169,7 +169,7 @@ let config_of_lines lines =
           let bval n v default = try bool_of_string v with _ -> log n v; default in
           let fval n v default = try float_of_string v with _ -> log n v; default in
           let stval n = function
-            |"irmin"->`Irmin|"mbox"->`Mailbox|"maildir"->`Maildir|"gitworkdir"->`GitWorkdir|_->log n v; `Irmin in
+            |"irmin"->`Irmin|"mbox"->`Mailbox|"maildir"->`Maildir|"workdir"->`Workdir|_->log n v; `Irmin in
           match n with 
           | "imap_name" -> {acc with imap_name = v }
           | "rebuild_irmin" -> {acc with rebuild_irmin = bval n v false}
@@ -242,5 +242,5 @@ let srv_config =
   let config = config_of_lines lines in
   assert ((config.data_store = `Mailbox && config.inbox_path <> "" ||
   config.data_store = `Maildir) && config.mail_path <> "" ||
-  config.data_store = `Irmin || config.data_store = `GitWorkdir);
+  config.data_store = `Irmin || config.data_store = `Workdir);
   config
