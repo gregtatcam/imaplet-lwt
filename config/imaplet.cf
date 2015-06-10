@@ -88,3 +88,8 @@ stun_header false
 
 # domain, by default host name
 # domain
+
+# maildir parse, parse the message into MIME parts and save all of them along with the
+# map of parsed parts in one blob. this is similar to irmin and workdir but they save each 
+# part into separate blob
+maildir_parse true

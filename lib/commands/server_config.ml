@@ -48,6 +48,7 @@ type imapConfig = {
   stun_header: bool; (* include STUN mapped address in the header - can be used
   for direct communication with a peer, default false *)
   domain: string; (* email domain, by default host name *)
+  maildir_parse: bool; (* parse message into MIME parts when in maildir storage format, default true *)
 }
 
 let default_config = {
@@ -82,6 +83,7 @@ let default_config = {
   auth_required = true;
   stun_header = false;
   domain = Unix.gethostname ();
+  maildir_parse = true;
 }
 
 let validate_config config =
@@ -215,6 +217,7 @@ let config_of_lines lines =
             | "none" -> `None
             | _ -> log n v;`Error}
           | "domain" -> {acc with domain = v}
+          | "maildir_parse" -> {acc with maildir_parse = (bval n v true)}
           | _ -> Printf.fprintf stderr "unknown configuration %s\n%!" n; acc
         ) else 
           acc

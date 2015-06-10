@@ -50,3 +50,4 @@
 * added new storage type - git working directory, mirrors git as is, all updates overwrite the content
 * allow compression/encryption in any combination
 * cache uidlist in maildir
+* add message MIME parts parsing in maildir storage
