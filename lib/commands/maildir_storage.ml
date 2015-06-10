@@ -578,38 +578,6 @@ struct
       message
     )
 
-  let parse_message t message =
-    let add buffer content (offset,acc) =
-      Buffer.add_string buffer content;
-      let len = String.length content in
-      (offset+len,(offset,len) :: acc)
-    in
-    let (pub_key,_) = t.keys in
-    let strm_attach,push_attach = Lwt_stream.create () in
-    let buffer = Buffer.create 100 in
-    let buffer_out = Buffer.create 100 in
-    Email_parse.parse pub_key t.config message ~save_message:(fun msg_hash postmark headers content attachments ->
-      push_attach None;
-      let acc = add buffer postmark (0,[]) in
-      let acc = add buffer headers acc in
-      let acc = add buffer content acc in
-      Lwt_stream.fold (fun attach acc ->
-        add buffer content acc
-      ) strm_attach acc >>= fun (_,acc) ->
-      let acc = List.rev acc in
-      let open Sexplib.Conv in
-      let header = Sexplib.Sexp.to_string (sexp_of_list (fun a -> sexp_of_pair sexp_of_int sexp_of_int a) acc) in
-      Buffer.add_string buffer_out (Printf.sprintf "%06d" (String.length header));
-      Buffer.add_string buffer_out header;
-      Buffer.add_buffer buffer_out buffer;
-      return ()
-    ) 
-    ~save_attachment:(fun msg_hash contid attachment ->
-      push_attach (Some attachment);
-      return ()
-    ) >>
-    return (Buffer.contents buffer_out)
-
   (* append message(s) to selected mailbox *)
   let append t message message_metadata =
     let file = make_message_file_name (MaildirPath.to_maildir t.mailbox) message_metadata in
@@ -618,7 +586,7 @@ struct
     ~f:(fun oc ->
       begin
         if t.config.maildir_parse then
-          parse_message t message
+          Email_parse.message_to_blob t.config t.keys message
         else
           return (encrypt t (Mailbox.Message.to_string message))
       end >>= fun message ->
@@ -676,49 +644,22 @@ struct
       Lwt_unix.unlink (current t file)
     | _ -> return ()
 
-  let assemble_message t uid lazy_read metadata =
-    let open Irmin_core in
-    let open Sexplib in
-    let open Sexplib.Conv in
+  let assemble_message t lazy_read metadata =
     let (_,priv) = t.keys in
     let priv = Utils.option_value_exn ~ex:EmptyPrivateKey priv in
-    let lazy_header = Lazy.from_fun (fun () -> 
-      (* if reading headers then makes sense to read the whole message, no
-       * benefit to do random access *)
-      Lazy.force lazy_read >>= fun message ->
-      let len = int_of_string (String.sub message 0 6) in
-      let chunk = String.sub message 6 len in
-      let header = list_of_sexp (fun s -> pair_of_sexp int_of_sexp int_of_sexp s)
-        (Sexp.of_string chunk) in
-      return (6+len,header,message)
-    ) in
-    let get_chunk n =
-      Lazy.force lazy_header >>= fun (base,header,message) ->
-      let (offset,len) = List.nth header n in
-      return (String.sub message (base + offset) len)
-    in
-    let get_chunk_str str =
-      get_chunk (int_of_string str)
-    in
-    return (`Ok (
-      build_lazy_message_inst
-        (module LazyIrminMessage)
-        ((fun () ->
-          get_chunk 0 >>= fun postmark ->
-          Email_parse.do_decrypt priv t.config postmark 
-        ),
-        (fun () ->
-          get_chunk 1 >>= fun headers ->
-          Email_parse.do_decrypt_headers priv t.config headers 
-        ),
-        (fun () ->
-          get_chunk 2 >>= fun content ->
-          Email_parse.do_decrypt_content priv t.config content 
-        ),
-        (Email_parse.get_decrypt_attachment priv t.config get_chunk_str),
-        (fun () ->
-          return metadata
-        ))
+    Email_parse.message_from_blob t.config t.keys lazy_read 
+    (fun postmark headers content attachment ->
+      return (`Ok (
+        build_lazy_message_inst
+          (module Irmin_core.LazyIrminMessage)
+          ((fun () -> postmark ()),
+          (fun () -> headers ()),
+          (fun () -> content ()),
+          (Email_parse.get_decrypt_attachment priv t.config attachment),
+          (fun () ->
+            return metadata
+          ))
+        )
       )
     )
 
@@ -731,7 +672,7 @@ struct
         Utils.with_file (current t file) ~flags:[Unix.O_RDONLY] ~perms:0o660 ~mode:Lwt_io.Input
         ~f:(fun ci -> Lwt_io.read ci)) in
       if t.config.maildir_parse then (
-          assemble_message t uid lazy_read metadata
+          assemble_message t lazy_read metadata
       ) else (
         Lazy.force lazy_read >>= fun buffer ->
         let seq = Mailbox.With_seq.of_string (decrypt t buffer) in

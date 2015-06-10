@@ -22,6 +22,8 @@ open Parsemail
 open Sexplib
 open Sexplib.Conv
 
+exception EmptyPrivateKey
+
 let crlf = "\n"
 
 (* keep two blocks of data in the storage: 
@@ -363,3 +365,78 @@ let restore priv_key config ~get_message ~get_attachment  =
       Mailbox.Message.email=email
     }
   ) (fun ex -> Printf.printf "restore exception %s\n%!" (Printexc.to_string ex); raise ex)
+
+let message_to_blob config keys message =
+  let add buffer content (offset,acc) =
+    Buffer.add_string buffer content;
+    let len = String.length content in
+    (offset+len,(offset,len) :: acc)
+  in
+  let (pub_key,_) = keys in
+  let strm_attach,push_attach = Lwt_stream.create () in
+  let buffer = Buffer.create 100 in
+  let buffer_out = Buffer.create 100 in
+  parse pub_key config message ~save_message:(fun msg_hash postmark headers content attachments ->
+    push_attach None;
+    let acc = add buffer postmark (0,[]) in
+    let acc = add buffer headers acc in
+    let acc = add buffer content acc in
+    Lwt_stream.fold (fun attach acc ->
+      add buffer content acc
+    ) strm_attach acc >>= fun (_,acc) ->
+    let acc = List.rev acc in
+    let open Sexplib.Conv in
+    let header = Sexplib.Sexp.to_string (sexp_of_list (fun a -> sexp_of_pair sexp_of_int sexp_of_int a) acc) in
+    Buffer.add_string buffer_out (Printf.sprintf "%06d" (String.length header));
+    Buffer.add_string buffer_out header;
+    Buffer.add_buffer buffer_out buffer;
+    return ()
+  ) 
+  ~save_attachment:(fun msg_hash contid attachment ->
+    push_attach (Some attachment);
+    return ()
+  ) >>
+  return (Buffer.contents buffer_out)
+
+(* lazy_read_message lazily reads the message from the storage
+ * lazy_read_metadata - same for metadata
+ *)
+let message_from_blob config keys lazy_read_message f =
+  let open Sexplib in
+  let open Sexplib.Conv in
+  let (_,priv) = keys in
+  let priv = Utils.option_value_exn ~ex:EmptyPrivateKey priv in
+  let lazy_header = Lazy.from_fun (fun () -> 
+    (* if reading headers then makes sense to read the whole message, no
+     * benefit to do random access *)
+    Lazy.force lazy_read_message >>= fun message ->
+    let len = int_of_string (String.sub message 0 6) in
+    let chunk = String.sub message 6 len in
+    let header = list_of_sexp (fun s -> pair_of_sexp int_of_sexp int_of_sexp s)
+      (Sexp.of_string chunk) in
+    return (6+len,header,message)
+  ) in
+  let get_chunk n =
+    Lazy.force lazy_header >>= fun (base,header,message) ->
+    let (offset,len) = List.nth header n in
+    return (String.sub message (base + offset) len)
+  in
+  let get_chunk_str str =
+    get_chunk (int_of_string str)
+  in
+  let postmark () =
+    get_chunk 0 >>= fun _postmark ->
+    do_decrypt priv config _postmark 
+  in
+  let headers () =
+    get_chunk 1 >>= fun _headers ->
+    do_decrypt_headers priv config _headers 
+  in
+  let content () =
+    get_chunk 2 >>= fun _content ->
+    do_decrypt_content priv config _content 
+  in
+  let attachment n =
+    get_chunk_str n
+  in
+  f postmark headers content attachment
