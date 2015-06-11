@@ -655,7 +655,7 @@ struct
           ((fun () -> postmark ()),
           (fun () -> headers ()),
           (fun () -> content ()),
-          (Email_parse.get_decrypt_attachment priv t.config attachment),
+          (attachment),
           (fun () ->
             return metadata
           ))

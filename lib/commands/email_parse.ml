@@ -436,7 +436,7 @@ let message_from_blob config keys lazy_read_message f =
     get_chunk 2 >>= fun _content ->
     do_decrypt_content priv config _content 
   in
-  let attachment n =
-    get_chunk_str n
+  let attachment =
+    get_decrypt_attachment priv config get_chunk_str
   in
   f postmark headers content attachment

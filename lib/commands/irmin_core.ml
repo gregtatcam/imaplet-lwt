@@ -803,28 +803,32 @@ module GitMailboxMake
         (Sexp.to_string (sexp_of_hashes h)) >>
       return h
 
-    let append_message_raw mbox ~parse message_metadata =
-      let update msg_hash contid data =
-        let key = get_key mbox.mbox_key (`Storage (mbox.user,msg_hash,contid)) in
-        GI_tr.update mbox.trans key data
-      in
+    let append_message mbox message message_metadata =
       let uid = message_metadata.uid in
       GI_tr.update mbox.trans (get_key mbox.mbox_key (`Metamessage uid)) 
           (Sexp.to_string (sexp_of_mailbox_message_metadata message_metadata)) >>
-      parse ~save_message:(fun msg_hash postmark headers content attachments ->
-        update_hashes mbox uid msg_hash postmark headers content attachments >>= fun h ->
-        update h.message h.postmark postmark >>
-        update h.message h.content content >>
-        update h.message h.headers headers
-      ) 
-      ~save_attachment:(fun msg_hash contid attachment ->
-        update msg_hash contid attachment
-      ) >>
+      begin
+      if mbox.config.single_store then (
+        let update msg_hash contid data =
+          let key = get_key mbox.mbox_key (`Storage (mbox.user,msg_hash,contid)) in
+          GI_tr.update mbox.trans key data
+        in
+        let (pub,_) = mbox.pubpriv in
+        Email_parse.parse pub mbox.config message ~save_message:(fun msg_hash postmark headers content attachments ->
+          update_hashes mbox uid msg_hash postmark headers content attachments >>= fun h ->
+          update h.message h.postmark postmark >>
+          update h.message h.content content >>
+          update h.message h.headers headers
+        ) 
+        ~save_attachment:(fun msg_hash contid attachment ->
+          update msg_hash contid attachment
+        )
+      ) else (
+        Email_parse.message_to_blob mbox.config mbox.pubpriv message >>= fun message ->
+        GI_tr.update mbox.trans (get_key mbox.mbox_key (`Uid uid)) message
+      )
+      end >>
       update_index_uid mbox uid
-
-    let append_message mbox message message_metadata =
-      let (pub,_) = mbox.pubpriv in
-      append_message_raw mbox ~parse:(Email_parse.parse pub mbox.config message) message_metadata
 
     let get_uid mbox position = 
       read_index_uid mbox >>= fun uids ->
@@ -867,12 +871,27 @@ module GitMailboxMake
       Lazy.force lazy_hashes >>= fun h ->
       read_storage mbox h.message contid
 
-    let read_message mbox ?filter position =
-      get_uid mbox position >>= function
-      | `Eof -> return `Eof
-      | `NotFound -> return `NotFound
-      | `Ok (seq,uid) -> 
-        let (_,priv) = mbox.pubpriv in
+    let read_from_blob mbox uid =
+      let lazy_read = Lazy.from_fun (fun () -> 
+        GI_tr.read_exn mbox.trans (get_key mbox.mbox_key (`Uid uid))) in
+      Email_parse.message_from_blob mbox.config mbox.pubpriv lazy_read 
+      (fun postmark headers content attachment ->
+        return (`Ok (
+          build_lazy_message_inst
+            (module LazyIrminMessage)
+            ((fun () -> postmark ()),
+            (fun () -> headers ()),
+            (fun () -> content ()),
+            (attachment),
+            (fun () ->
+              get_message_metadata mbox uid
+            ))
+          )
+        )
+      )
+
+    let read_from_single_store mbox uid =
+      let (_,priv) = mbox.pubpriv in
         let priv = Utils.option_value_exn ~ex:EmptyPrivateKey priv in
         let lazy_hashes = Lazy.from_fun (fun () -> get_hashes mbox uid) in
         return (`Ok (
@@ -881,17 +900,17 @@ module GitMailboxMake
             ((fun () ->
               Lazy.force lazy_hashes >>= fun h ->
               read_storage mbox h.message h.postmark >>= fun postmark ->
-              Email_parse.do_decrypt priv mbox.config postmark 
+              Email_parse.do_decrypt priv mbox.config postmark
             ),
             (fun () ->
               Lazy.force lazy_hashes >>= fun h ->
               read_storage mbox h.message h.headers >>= fun headers ->
-              Email_parse.do_decrypt_headers priv mbox.config headers 
+              Email_parse.do_decrypt_headers priv mbox.config headers
             ),
             (fun () ->
               Lazy.force lazy_hashes >>= fun h ->
               read_storage mbox h.message h.content >>= fun content ->
-              Email_parse.do_decrypt_content priv mbox.config content 
+              Email_parse.do_decrypt_content priv mbox.config content
             ),
             (Email_parse.get_decrypt_attachment priv mbox.config (read_lazy_storage mbox lazy_hashes)),
             (fun () ->
@@ -899,6 +918,16 @@ module GitMailboxMake
             ))
           )
         )
+
+    let read_message mbox ?filter position =
+      get_uid mbox position >>= function
+      | `Eof -> return `Eof
+      | `NotFound -> return `NotFound
+      | `Ok (seq,uid) -> 
+        if mbox.config.single_store then
+          read_from_single_store mbox uid
+        else
+          read_from_blob mbox uid
 
     let read_message_metadata mbox position =
       get_uid mbox position >>= function
@@ -913,9 +942,16 @@ module GitMailboxMake
       | `Eof -> return ()
       | `NotFound -> return ()
       | `Ok (seq,uid) ->
-        get_hashes mbox1 uid >>= fun h ->
-        GI_tr.update mbox2.trans (get_key mbox2.mbox_key (`Hashes message_metadata.uid)) 
-          (Sexp.to_string (sexp_of_hashes h)) >>
+        begin
+        if mbox1.config.single_store then (
+          get_hashes mbox1 uid >>= fun h ->
+          GI_tr.update mbox2.trans (get_key mbox2.mbox_key (`Hashes message_metadata.uid)) 
+            (Sexp.to_string (sexp_of_hashes h))
+        ) else (
+          GI_tr.read_exn mbox1.trans (get_key mbox1.mbox_key (`Uid uid)) >>= fun message ->
+          GI_tr.update mbox2.trans (get_key mbox2.mbox_key (`Uid message_metadata.uid)) message
+        )
+        end >>
         GI_tr.update mbox2.trans (get_key mbox2.mbox_key (`Metamessage message_metadata.uid)) 
           (Sexp.to_string (sexp_of_mailbox_message_metadata message_metadata)) >>
         update_index_uid mbox2 message_metadata.uid
@@ -927,21 +963,27 @@ module GitMailboxMake
     let delete_message mbox position =
       get_uid mbox position >>= function
       | `Ok (_,uid) -> 
-        get_hashes mbox uid >>= fun h ->
-        GI_tr.remove mbox.trans (get_key mbox.mbox_key (`Hashes uid)) >>
-        remove_storage mbox h.message h.postmark >>
-        remove_storage mbox h.message h.headers >>
-        remove_storage mbox h.message h.content >>
+        begin
+        if mbox.config.single_store then (
+          get_hashes mbox uid >>= fun h ->
+          GI_tr.remove mbox.trans (get_key mbox.mbox_key (`Hashes uid)) >>
+          remove_storage mbox h.message h.postmark >>
+          remove_storage mbox h.message h.headers >>
+          remove_storage mbox h.message h.content >>
+          let rec delattach i =
+            if i < h.attachments then
+              remove_storage mbox h.message (string_of_int (3 + i)) >>
+              delattach (i + 1)
+            else
+              return ()
+          in
+          delattach 0
+        ) else (
+          return ()
+        )
+        end >>
         GI_tr.remove mbox.trans (get_key mbox.mbox_key (`Metamessage uid)) >>
         GI_tr.remove mbox.trans (get_key mbox.mbox_key (`Uid uid)) >>
-        let rec delattach i =
-          if i < h.attachments then
-            remove_storage mbox h.message (string_of_int (3 + i)) >>
-            delattach (i + 1)
-          else
-            return ()
-        in
-        delattach 0 >>
         read_index_uid mbox >>= fun uids ->
         let uids = List.fold_right (fun u uids ->
           if u = uid then

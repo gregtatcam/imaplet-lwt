@@ -49,6 +49,7 @@ type imapConfig = {
   for direct communication with a peer, default false *)
   domain: string; (* email domain, by default host name *)
   maildir_parse: bool; (* parse message into MIME parts when in maildir storage format *)
+  single_store: bool; (* single-store attachments in irmin and workdir format, default true *)
 }
 
 val default_config : imapConfig

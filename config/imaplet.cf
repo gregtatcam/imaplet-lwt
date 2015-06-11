@@ -93,3 +93,6 @@ stun_header false
 # map of parsed parts in one blob. this is similar to irmin and workdir but they save each 
 # part into separate blob
 maildir_parse true
+
+# irmin and workdir single store, store MIME parets as individual blobs, this will deduplicate attachments
+sing_store true
