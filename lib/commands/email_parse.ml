@@ -124,9 +124,9 @@ let email_content pub_key config attachment email transform =
     let size = Bytes.length content in
     let lines = Utils.lines content in
     if config.encrypt && attachment then (
-      let (_(*contid*),content) = conv_encrypt ~compress:config.compress content pub_key in
+      let (_(*contid*),content) = conv_encrypt ~compress:config.compress_attach content pub_key in
       return (content,size,lines)
-    ) else if config.compress && attachment then ( (*content compressed separately *)
+    ) else if config.compress_attach && attachment then ( (*content compressed separately *)
       return (do_compress content, size, lines)
     ) else (
       return (content,size,lines)
@@ -293,8 +293,8 @@ let rec printable buffer str =
 let get_decrypt_attachment priv_key config get_attachment contid =
   get_attachment contid >>= fun attachment ->
   if config.encrypt then (
-    return (conv_decrypt ~compressed:config.compress attachment priv_key)
-  ) else if config.compress then (
+    return (conv_decrypt ~compressed:config.compress_attach attachment priv_key)
+  ) else if config.compress_attach then (
     return (do_uncompress attachment)
   ) else (
     return attachment

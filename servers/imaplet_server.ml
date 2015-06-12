@@ -23,7 +23,7 @@ exception InvalidCommand
 
 let _ = Log_.set_log "imaplet.log"
 
-let rec args i net port ssl tls store encrypt compress =
+let rec args i net port ssl tls store encrypt compress compress_attach =
   let bval = function
   | "true" -> true
   | "false" -> false
@@ -45,28 +45,30 @@ let rec args i net port ssl tls store encrypt compress =
       raise InvalidCommand
   in
   if i >= Array.length Sys.argv then
-    net,port,ssl,tls,store,encrypt,compress
+    net,port,ssl,tls,store,encrypt,compress,compress_attach
   else
     match Sys.argv.(i) with 
-    | "-net" -> args (i+2) (Some Sys.argv.(i+1)) port ssl tls store encrypt compress
-    | "-port" -> args (i+2) net (Some (int_of_string Sys.argv.(i+1))) ssl tls store encrypt compress
-    | "-ssl" -> args (i+2) net port (Some (bval Sys.argv.(i+1))) tls store encrypt compress
-    | "-starttls" -> args (i+2) net port ssl (Some (bval Sys.argv.(i+1))) store encrypt compress
-    | "-store" -> args (i+2) net port ssl tls (Some (sval Sys.argv.(i+1))) encrypt compress
-    | "-encrypt" -> args (i+2) net port ssl tls store (Some (bval Sys.argv.(i+1))) compress
-    | "-compress" -> args (i+2) net port ssl tls store encrypt (Some (bval Sys.argv.(i+1))) 
+    | "-net" -> args (i+2) (Some Sys.argv.(i+1)) port ssl tls store encrypt compress compress_attach
+    | "-port" -> args (i+2) net (Some (int_of_string Sys.argv.(i+1))) ssl tls store encrypt compress compress_attach
+    | "-ssl" -> args (i+2) net port (Some (bval Sys.argv.(i+1))) tls store encrypt compress compress_attach
+    | "-starttls" -> args (i+2) net port ssl (Some (bval Sys.argv.(i+1))) store encrypt compress compress_attach
+    | "-store" -> args (i+2) net port ssl tls (Some (sval Sys.argv.(i+1))) encrypt compress compress_attach
+    | "-encrypt" -> args (i+2) net port ssl tls store (Some (bval Sys.argv.(i+1))) compress compress_attach
+    | "-compress" -> args (i+2) net port ssl tls store encrypt (Some (bval Sys.argv.(i+1))) compress_attach
+    | "-compress-attach" -> args (i+2) net port ssl tls store encrypt compress (Some (bval Sys.argv.(i+1))) 
     | _ -> raise InvalidCommand
 
 let usage () =
   Log_.log `Error "usage: imaplet -net [interface] -port [port] -ssl [true|false]
   -starttls [true|false] -store[irmin|workdir|mbox:inboxpath,mailboxpath|maildir:maildirpath
-  -encrypt [true|false] -compress [true|store]\n"
+  -encrypt [true|false] -compress [true|store] -compress-attach [true|false]\n"
 
 let commands f =
   try 
-    let net,port,ssl,tls,store,encrypt,compress = args 1 None None None None None None None in
+    let net,port,ssl,tls,store,encrypt,compress,compress_attach = 
+        args 1 None None None None None None None None in
       try 
-        f net port ssl tls store encrypt compress
+        f net port ssl tls store encrypt compress compress_attach
       with ex -> Log_.log `Error (Printf.sprintf "%s\n" (Printexc.to_string ex))
   with _ -> usage ()
 
@@ -74,9 +76,10 @@ let log config =
   Log_.log `Info1 
     (Printf.sprintf 
       "imaplet: creating imap server %s: on addr/port %s:%d ssl/starttls %b:%b 
-      encrypt/compress %b:%b\n"
+      encrypt/compress %b:%b:%b\n"
       (ImapTime.to_string (ImapTime.now()))
-      config.addr config.port config.ssl config.starttls config.encrypt config.compress);
+      config.addr config.port config.ssl config.starttls config.encrypt
+      config.compress config.compress_attach);
   match config.data_store with
   | `Irmin -> Log_.log `Info1 (Printf.sprintf "storage: irmin:%s\n" config.irmin_path)
   | `Workdir -> Log_.log `Info1 (Printf.sprintf "storage: workdir:%s\n" config.irmin_path)
@@ -89,9 +92,9 @@ let log config =
 let () = 
   try
     commands 
-      (fun net port ssl tls store encrypt compress ->
+      (fun net port ssl tls store encrypt compress compress_attach ->
         Lwt_main.run (catch(fun() ->
-            let config = update_config srv_config net port ssl tls store encrypt compress in
+            let config = update_config srv_config net port ssl tls store encrypt compress compress_attach in
             log config;
             Server.create config >>= function
             | `Ok -> return ()

@@ -39,6 +39,7 @@ type imapConfig = {
   data_store : [`Irmin|`Workdir|`Mailbox|`Maildir]; (* type of storage, irmin/maildir/workdir supported *)
   encrypt : bool; (* encrypt messages, default true *)
   compress : bool; (* compress messages, but not attachments, default true *)
+  compress_attach : bool; (* compress attachments, default false *)
   user_cert_path : string; (* user's certificate/key location *)
   log : string; (* log location, default /var/log *)
   log_level:[`Error|`Info1|`Info2|`Info3|`Debug|`None]; (* log level, default error *)
@@ -76,6 +77,7 @@ let default_config = {
   data_store = `Irmin;
   encrypt = true;
   compress = true;
+  compress_attach = false;
   user_cert_path = "/var/mail/accounts/%user%/cert";
   log = "/var/log";
   log_level = `Error;
@@ -125,12 +127,14 @@ let validate_config config =
       (config.ssl = true || config.starttls = true))
       "ssl/starttls have to be enabled when auth_required is enabled"
 
-let update_config config net port ssl tls store encrypt compress =
+let update_config config net port ssl tls store encrypt compress compress_attach =
   let port = (match port with |None -> config.port|Some port->port) in
   let ssl = (match ssl with |None -> config.ssl|Some ssl->ssl) in
   let starttls = (config.ssl && (match tls with |None -> config.starttls|Some tls->tls)) in
   let encrypt = (match encrypt with |None -> config.encrypt|Some encrypt->encrypt) in
   let compress = (match compress with |None -> config.compress|Some compress->compress) in
+  let compress_attach = (match compress_attach with |None ->
+    config.compress_attach|Some compress_attach->compress_attach) in
   let addr = (match net with |None -> config.addr|Some net->net) in
   let (data_store,mail_path,inbox_path) =
   begin
@@ -139,7 +143,8 @@ let update_config config net port ssl tls store encrypt compress =
   | Some (store,inbox,mail) -> (store,mail,inbox)
   end
   in
-  {config with inbox_path;mail_path;addr;port;ssl;starttls;data_store;encrypt;compress}
+  {config with
+  inbox_path;mail_path;addr;port;ssl;starttls;data_store;encrypt;compress;compress_attach}
 
 let exists file =
   let stat = Unix.stat file in
@@ -203,6 +208,7 @@ let config_of_lines lines =
           | "data_store" -> {acc with data_store = (stval n v)}
           | "encrypt" -> {acc with encrypt = (bval n v true)}
           | "compress" -> {acc with compress = (bval n v true)}
+          | "compress_attach" -> {acc with compress_attach = (bval n v true)}
           | "auth_required" -> {acc with auth_required = (bval n v true)}
           | "user_cert_path" -> {acc with user_cert_path = v}
           | "idle_interval" -> {acc with idle_interval = fval n v 120.}

@@ -39,6 +39,7 @@ type imapConfig = {
   data_store : [`Irmin|`Mailbox|`Maildir|`Workdir]; (* type of storage, irmin,maildir,workdir supported *)
   encrypt : bool; (* encrypt messages, default true *)
   compress : bool; (* compress messages, but not attachments, default true *)
+  compress_attach : bool; (* compress attachments, default false *)
   user_cert_path : string; (* user's certificate/key location *)
   log : string; (* log location, default /var/log *)
   log_level:[`Error|`Info1|`Info2|`Info3|`Debug|`None]; (* log level, default error *)
@@ -58,7 +59,7 @@ val validate_config : imapConfig -> [`Ok|`Error of string] Lwt.t
 
 val update_config : imapConfig -> string option -> int option -> bool option ->
   bool option -> ([`Irmin|`Mailbox|`Maildir|`Workdir] * string * string)
-  option -> bool option -> bool option -> imapConfig
+  option -> bool option -> bool option -> bool option -> imapConfig
 
 val srv_config : imapConfig
 

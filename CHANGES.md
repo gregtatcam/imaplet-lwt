@@ -51,4 +51,5 @@
 * allow compression/encryption in any combination
 * cache uidlist in maildir
 * add message MIME parts parsing in maildir storage
+* add attachments compression option
 * add option to store irmin/workdir MIME parts as single store for dedup or in one blob for fast access
