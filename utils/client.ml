@@ -134,7 +134,7 @@ let socket addr port =
   return (ic,oc)
 
 let ssl_socket addr port =
-  Tls_lwt.rng_init () >>
+  Nocrypto_entropy_lwt.initialize () >>
   X509_lwt.authenticator `No_authentication_I'M_STUPID >>= fun auth ->
   Tls_lwt.connect auth (addr,port)
 
