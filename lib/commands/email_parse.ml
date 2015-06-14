@@ -382,7 +382,7 @@ let message_to_blob config keys message =
     let acc = add buffer headers acc in
     let acc = add buffer content acc in
     Lwt_stream.fold (fun attach acc ->
-      add buffer content acc
+      add buffer attach acc
     ) strm_attach acc >>= fun (_,acc) ->
     let acc = List.rev acc in
     let open Sexplib.Conv in
