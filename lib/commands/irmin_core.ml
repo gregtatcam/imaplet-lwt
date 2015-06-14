@@ -689,7 +689,7 @@ module GitMailboxMake
     | `Storage (user,msg_hash,contid) -> Key_.t_of_path ("storage/" ^ msg_hash ^ "/" ^ contid) 
     | `Hashes uid -> Key_.add_path mbox_key ("messages/" ^ (string_of_int uid) ^ "/hashes")
     | `Metamessage uid -> Key_.add_path mbox_key ("messages/" ^ (string_of_int uid) ^ "/meta")
-    | `Uid uid -> Key_.add_path mbox_key ("messages/" ^ (string_of_int uid))
+    | `Uid uid -> Key_.add_path mbox_key ("messages/" ^ (string_of_int uid) ^ "/message")
     | `Subscriptions -> Key_.t_of_path "subscriptions"
 
     (* commit should be called explicitly on each created mailbox to have the
