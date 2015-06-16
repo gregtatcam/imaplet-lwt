@@ -690,6 +690,7 @@ module GitMailboxMake
     | `Hashes uid -> Key_.add_path mbox_key ("messages/" ^ (string_of_int uid) ^ "/hashes")
     | `Metamessage uid -> Key_.add_path mbox_key ("messages/" ^ (string_of_int uid) ^ "/meta")
     | `Uid uid -> Key_.add_path mbox_key ("messages/" ^ (string_of_int uid) ^ "/message")
+    | `UidRoot uid -> Key_.add_path mbox_key ("messages/" ^ (string_of_int uid))
     | `Subscriptions -> Key_.t_of_path "subscriptions"
 
     (* commit should be called explicitly on each created mailbox to have the
@@ -803,15 +804,54 @@ module GitMailboxMake
         (Sexp.to_string (sexp_of_hashes h)) >>
       return h
 
+    let workdir_update mbox key data =
+      GitWorkdirIntf_tr.begin_transaction ~user:mbox.user mbox.config
+        (Key_.create_account mbox.user) >>= fun trans ->
+      GitWorkdirIntf_tr.update trans key data >>
+      GitWorkdirIntf_tr.end_transaction trans
+      
+    let workdir_read mbox key =
+      GitWorkdirIntf_tr.begin_transaction ~user:mbox.user mbox.config
+        (Key_.create_account mbox.user) >>= fun trans ->
+      GitWorkdirIntf_tr.read_exn trans key
+      
+    let workdir_remove mbox key =
+      GitWorkdirIntf_tr.begin_transaction ~user:mbox.user mbox.config
+        (Key_.create_account mbox.user) >>= fun trans ->
+      GitWorkdirIntf_tr.remove trans key
+
+    let _update mbox key data =
+      (* irmin/hybrid store - the message MIME parts are written into workdir, not git *)
+      if mbox.config.data_store = `Irmin && mbox.config.hybrid then 
+        workdir_update mbox key data
+      else
+        GI_tr.update mbox.trans key data
+
+    let _read mbox key =
+      if mbox.config.data_store = `Irmin && mbox.config.hybrid then 
+        workdir_read mbox key 
+      else
+        GI_tr.read_exn mbox.trans key
+
+    let _remove mbox key =
+      if mbox.config.data_store = `Irmin && mbox.config.hybrid then 
+        workdir_remove mbox key 
+      else
+        GI_tr.remove mbox.trans key
+
     let append_message mbox message message_metadata =
       let uid = message_metadata.uid in
       GI_tr.update mbox.trans (get_key mbox.mbox_key (`Metamessage uid)) 
           (Sexp.to_string (sexp_of_mailbox_message_metadata message_metadata)) >>
       begin
+      (* single store - the message is broken into postmark, headers, content,
+       * attachments with a map referencing MIME parts. since git is
+       * content-addressed storage, identical attachments are deduplicated
+       *)
       if mbox.config.single_store then (
         let update msg_hash contid data =
           let key = get_key mbox.mbox_key (`Storage (mbox.user,msg_hash,contid)) in
-          GI_tr.update mbox.trans key data
+          _update mbox key data
         in
         let (pub,_) = mbox.pubpriv in
         Email_parse.parse pub mbox.config message ~save_message:(fun msg_hash postmark headers content attachments ->
@@ -823,9 +863,14 @@ module GitMailboxMake
         ~save_attachment:(fun msg_hash contid attachment ->
           update msg_hash contid attachment
         )
+      (* same as above but all parts are stored in one file, so there is no
+       * deduplication for attachments. this in a way is similar to maildir
+       * storage 
+       *)
       ) else (
         Email_parse.message_to_blob mbox.config mbox.pubpriv message >>= fun message ->
-        GI_tr.update mbox.trans (get_key mbox.mbox_key (`Uid uid)) message
+        let key = get_key mbox.mbox_key (`Uid uid) in
+        _update mbox key message
       )
       end >>
       update_index_uid mbox uid
@@ -861,7 +906,7 @@ module GitMailboxMake
 
     let read_storage mbox msg_hash contid =
       let key = get_key mbox.mbox_key (`Storage (mbox.user,msg_hash,contid)) in
-      GI_tr.read_exn mbox.trans key
+      _read mbox key
 
     let get_message_metadata mbox uid =
       GI_tr.read_exn mbox.trans (get_key mbox.mbox_key (`Metamessage uid)) >>= fun sexp_str ->
@@ -873,7 +918,7 @@ module GitMailboxMake
 
     let read_from_blob mbox uid =
       let lazy_read = Lazy.from_fun (fun () -> 
-        GI_tr.read_exn mbox.trans (get_key mbox.mbox_key (`Uid uid))) in
+        _read mbox (get_key mbox.mbox_key (`Uid uid))) in
       Email_parse.message_from_blob mbox.config mbox.pubpriv lazy_read 
       (fun postmark headers content attachment ->
         return (`Ok (
@@ -948,8 +993,8 @@ module GitMailboxMake
           GI_tr.update mbox2.trans (get_key mbox2.mbox_key (`Hashes message_metadata.uid)) 
             (Sexp.to_string (sexp_of_hashes h))
         ) else (
-          GI_tr.read_exn mbox1.trans (get_key mbox1.mbox_key (`Uid uid)) >>= fun message ->
-          GI_tr.update mbox2.trans (get_key mbox2.mbox_key (`Uid message_metadata.uid)) message
+          _read mbox1 (get_key mbox1.mbox_key (`Uid uid)) >>= fun message ->
+          _update mbox2 (get_key mbox2.mbox_key (`Uid message_metadata.uid)) message
         )
         end >>
         GI_tr.update mbox2.trans (get_key mbox2.mbox_key (`Metamessage message_metadata.uid)) 
@@ -958,7 +1003,7 @@ module GitMailboxMake
 
     let remove_storage mbox msg_hash contid =
       let key = get_key mbox.mbox_key (`Storage (mbox.user,msg_hash,contid)) in
-      GI_tr.remove mbox.trans key
+      _remove mbox key
 
     let delete_message mbox position =
       get_uid mbox position >>= function
@@ -979,11 +1024,11 @@ module GitMailboxMake
           in
           delattach 0
         ) else (
-          return ()
+          _remove mbox (get_key mbox.mbox_key (`Uid uid))
         )
         end >>
         GI_tr.remove mbox.trans (get_key mbox.mbox_key (`Metamessage uid)) >>
-        GI_tr.remove mbox.trans (get_key mbox.mbox_key (`Uid uid)) >>
+        GI_tr.remove mbox.trans (get_key mbox.mbox_key (`UidRoot uid)) >>
         read_index_uid mbox >>= fun uids ->
         let uids = List.fold_right (fun u uids ->
           if u = uid then

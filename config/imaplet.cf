@@ -95,4 +95,8 @@ stun_header false
 maildir_parse true
 
 # irmin and workdir single store, store MIME parets as individual blobs, this will deduplicate attachments
-sing_store true
+single_store true
+
+# irmin hybrid, if true and store is Irmin then messages are stored in files on FS, metadata is stored in Git 
+hybrid false
+

@@ -51,6 +51,7 @@ type imapConfig = {
   domain: string; (* email domain, by default host name *)
   maildir_parse: bool; (* parse message into MIME parts when in maildir storage format, default true *)
   single_store: bool; (* single-store attachments in irmin and workdir format, default true *)
+  hybrid: bool; (* hybrid of irmin and workdir store (store should be set to irmin, default false *)
 }
 
 let default_config = {
@@ -88,6 +89,7 @@ let default_config = {
   domain = Unix.gethostname ();
   maildir_parse = true;
   single_store = true;
+  hybrid = false;
 }
 
 let validate_config config =
@@ -227,6 +229,7 @@ let config_of_lines lines =
           | "domain" -> {acc with domain = v}
           | "maildir_parse" -> {acc with maildir_parse = (bval n v true)}
           | "single_store" -> {acc with single_store = (bval n v true)}
+          | "hybrid" -> {acc with hybrid = (bval n v true)}
           | _ -> Printf.fprintf stderr "unknown configuration %s\n%!" n; acc
         ) else 
           acc
