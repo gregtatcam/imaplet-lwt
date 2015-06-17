@@ -86,7 +86,7 @@ compress true
 # include mapped address in the Received email header
 stun_header false
 
-# domain, by default host name
+# ';' separated domains(no spaces), the main domain by default is the host name
 # domain
 
 # maildir parse, parse the message into MIME parts and save all of them along with the

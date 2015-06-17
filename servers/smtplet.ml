@@ -224,7 +224,9 @@ let in_my_domain context domain =
     domain interface mydomain) ;
   Utils.get_interfaces () >>= fun my_ips ->
   begin
-  if context.config.domain = domain then (
+  let dexists domains domain = 
+    List.exists (fun d -> d = domain) (Str.split (Str.regexp ";") domains) in
+  if dexists context.config.domain domain then (
     return my_ips (* it's my domain *)
   ) else if (try let _ = Unix.inet_addr_of_string domain in true with _ -> false) then (
     return [domain] (* already ip *)
