@@ -281,11 +281,11 @@ let unsubscribe mailboxt mailbox =
     Mailbox.MailboxStorage.commit Mailbox.this >>
     return `Ok
 
-let get_message_from_client reader writer literal =
+let get_message_from_client reader writer compression literal =
   (** request the message from the client **)
   begin
     match literal with
-    | Literal n -> Response.write_resp Int64.zero writer (Resp_Cont("")) >> return n
+    | Literal n -> Response.write_resp compression Int64.zero writer (Resp_Cont("")) >> return n
     | LiteralPlus n -> return n
   end >>= fun size ->
   let message = String.create size in
@@ -298,13 +298,13 @@ let find_fl flags fl =
   Utils.list_find flags (fun f -> f = fl)
 
 (* append message to mailbox *)
-let append mailboxt mailbox reader writer flags date literal =
+let append mailboxt mailbox reader writer compression flags date literal =
   factory mailboxt mailbox >>= fun (module Mailbox) ->
   Mailbox.MailboxStorage.exists Mailbox.this >>= function
     | `No -> return (`NotExists)
     | `Folder -> return (`NotSelectable)
     | `Mailbox -> 
-      get_message_from_client reader writer literal >>= fun (message,size) ->
+      get_message_from_client reader writer compression literal >>= fun (message,size) ->
       let flags = 
       match flags with
       | None -> [Flags_Recent]

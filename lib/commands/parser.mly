@@ -35,11 +35,13 @@
 %token CHARSET
 %token CHECK
 %token CLOSE
+%token COMPRESS
 %token COPY
 %token CONDSTORE
 %token CREATE
 %token CRLF
 %token <string>DATE
+%token DEFLATE
 %token DELETE
 %token DELETED
 %token DONE
@@ -172,6 +174,7 @@ command_any:
   | LOGOUT { Cmd_Logout }
   | NOOP { Cmd_Noop }
   | ENABLE; SP; e = astring { Cmd_Enable e }
+  | COMPRESS; SP; DEFLATE { Cmd_Compress Compr_Deflate }
   | i = id { i }
 
 id:

@@ -87,10 +87,15 @@ end = struct
     to_str str
 end
 
-let write_resp id w ?(tag="*") resp =
+let write_resp compress id w ?(tag="*") resp =
   let send_wcrlf w str = 
     Log_.log `Info3 (Printf.sprintf "<-- %s: %s\n" (Int64.to_string id) str);
-    Lwt_io.write w (str ^ Regex.crlf) >> Lwt_io.flush w
+    let buff = 
+    match compress with
+    | None -> str ^ Regex.crlf
+    | Some _ -> Imap_crypto.do_compress (str ^ Regex.crlf)
+    in
+    Lwt_io.write w buff >> Lwt_io.flush w
   in
   match resp with
   | Resp_Ok (code, s) -> send_wcrlf w (StatusResponse.ok ~tag ~code s)
@@ -102,5 +107,5 @@ let write_resp id w ?(tag="*") resp =
   | Resp_Untagged (text) -> send_wcrlf w (StatusResponse.untagged text)
   | Resp_Any (text) -> send_wcrlf w (StatusResponse.any text)
 
-let write_resp_untagged id writer text =
-  write_resp id writer (Resp_Untagged text)
+let write_resp_untagged compress id writer text =
+  write_resp compress id writer (Resp_Untagged text)

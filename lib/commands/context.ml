@@ -29,4 +29,5 @@ type context = {
   config: Server_config.imapConfig;
   client_last_active: float ref;
   client_timed_out: Lwt_mutex.t;
+  compression: Imaplet_types.compressionAlgrthm option ref;
 }

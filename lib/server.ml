@@ -155,7 +155,8 @@ let create config =
                 starttls=starttls config sock_c;highestmodseq=ref `None;
                 noop_modseq = ref Int64.zero; capability=ref [];config;
                 client_last_active = ref (Unix.gettimeofday());
-                client_timed_out = Lwt_mutex.create ()} in
+                client_timed_out = Lwt_mutex.create ();
+                compression = ref None} in
             Lwt_mutex.lock ctx.client_timed_out >>= fun () ->
             add_id ctx;
             Imap_cmd.client_requests msgt ctx >>= fun _ ->

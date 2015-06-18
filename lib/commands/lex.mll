@@ -84,9 +84,11 @@ let keyword_table =
    "CHARSET"		,CHARSET;
    "CHECK"		,CHECK;
    "CLOSE"		,CLOSE;
+   "COMPRESS"		,COMPRESS;
    "CONDSTORE"		,CONDSTORE;
    "COPY"		,COPY;
    "CREATE"		,CREATE;
+   "DEFLATE"		,DEFLATE;
    "DELETE"		,DELETE;
    "DELETED"		,DELETED;
    "DRAFT"		,DRAFT;

@@ -64,8 +64,8 @@ val subscribe : t -> string -> [`Error of string|`Ok] Lwt.t
 val unsubscribe : t -> string -> [`Error of string|`Ok] Lwt.t
 
 (** append message to the mailbox **)
-val append : t -> string -> Lwt_io.input_channel -> Lwt_io.output_channel -> 
-  mailboxFlags list option -> Dates.ImapTime.t option ->
+val append : t -> string -> Lwt_io.input_channel -> Lwt_io.output_channel ->
+  compressionAlgrthm option -> mailboxFlags list option -> Dates.ImapTime.t option ->
   literal -> ([`NotExists|`NotSelectable|`Eof of int|`Error of string|`Ok] Lwt.t)
 
 (** sarch messages for the matching criteria **)

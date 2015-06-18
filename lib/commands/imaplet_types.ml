@@ -179,6 +179,9 @@ type storeFlags =
   | Store_PlusFlagsSilent
   | Store_MinusFlags
   | Store_MinusFlagsSilent
+
+type compressionAlgrthm =
+  | Compr_Deflate
   
 type anyCmd = 
   | Cmd_Enable of string
@@ -186,6 +189,7 @@ type anyCmd =
   | Cmd_Capability
   | Cmd_Noop
   | Cmd_Logout (** close connection **)
+  | Cmd_Compress of compressionAlgrthm 
   
 type notAuthenticatedCmd =  
   | Cmd_Starttls (** start tls negotiation **)
@@ -225,7 +229,12 @@ type fromClient =
   | Done
 
 type clientRequest =
-  {tag:string; command:fromClient}
+  {tag:string; command:fromClient} 
+
+let is_compress command =
+  match command.command with
+  | Any cmd -> (match cmd with |Cmd_Compress c -> Some c |_-> None)
+  | _ -> None
 
 let is_idle command =
   match command.command with

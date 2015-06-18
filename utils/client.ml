@@ -41,6 +41,8 @@ module Meta =
 
 exception InvalidCommand
 
+let compression = ref false
+
 let get_user str = 
   try
     let re = Re_posix.compile_pat ~opts:[`ICase] "^([^:]+):(.+)$" in
@@ -144,10 +146,23 @@ let connect addr port ssl =
   else
     socket addr port
 
+let zip_read ic =
+  if !compression = false then (
+    Lwt_io.read_line_opt ic 
+  ) else (
+    let buff = String.create 2048 in
+    Lwt_io.read_into ic buff 0 2048 >>= function
+    | 0 -> return None
+    | size -> 
+      let line = Imap_crypto.do_uncompress (String.sub buff 0 size) in
+      let line = Regex.replace ~regx:"[\r\n]*$" ~tmpl:"" line in
+      return (Some line)
+  )
+
 let read_net_echo ic =
-  Lwt_io.read_line_opt ic >>= function
+  zip_read ic >>= function
   | None -> return None
-  | Some line -> 
+  | Some line ->
     if !Meta.echo then
       Printf.printf "%s\n%!" line;
     return (Some line)
@@ -156,6 +171,7 @@ let write_echo oc command =
   let command = command ^ "\r\n" in
   if !Meta.echo then
     Printf.printf "%s%!" command;
+  let command = if !compression then Imap_crypto.do_compress command else command in
   Lwt_io.write oc command >> Lwt_io.flush oc
 
 (* send append to the server *)
@@ -170,6 +186,12 @@ let handle_append ic oc mailbox msgfile =
   ) 0 >>= fun _ ->
   return ()
 
+let is_compression command =
+  if Regex.match_regex ~regx:"compress deflate" command then
+    true
+  else
+    !compression
+
 let exec_command strm ic oc =
   read_script strm >>= function
   | None -> return `Done
@@ -178,7 +200,7 @@ let exec_command strm ic oc =
       handle_append ic oc (Str.matched_group 1 command) (Str.matched_group 2 command) >>
       return `OkAppend
     ) else (
-      write_echo oc command >> return `Ok
+      write_echo oc command >> return (`Ok (is_compression command))
     )
 
 let read_response strm ic =
@@ -212,9 +234,12 @@ let () =
           exec_command strm ic oc >>= function
           | `Done -> return ()
           | `OkAppend -> exec strm ic oc
-          | `Ok -> read_response strm ic >>= function
+          | `Ok compr -> 
+            read_response strm ic >>= function
             | `Done -> return ()
-            | `Ok -> exec strm ic oc 
+            | `Ok -> 
+              compression := compr;
+              exec strm ic oc 
         in
         Lwt_io.with_file ~mode:Lwt_io.Input script (fun file ->
           get_script file user >>= fun strm ->
