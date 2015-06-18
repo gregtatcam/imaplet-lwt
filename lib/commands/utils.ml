@@ -293,5 +293,17 @@ let files_of_directory path f init =
   ) else
     return `NoDir
 
-let user_path ~path ~user =
-  Regex.replace ~regx:"%user%" ~tmpl:user path
+let parse_user user =
+  if Regex.match_regex ~regx:"^\\([^@]+\\)@\\(.+\\)$" user then
+    (Str.matched_group 1 user),Some (Str.matched_group 2 user)
+  else
+    user,None
+
+let user_to_path user =
+  let user,domain = parse_user user in
+  match domain with
+  | None -> user
+  | Some domain -> domain ^ "/" ^ user
+
+let user_path ?(regx="%user%") ~path ~user () =
+  Regex.replace ~regx ~tmpl:(user_to_path user) path

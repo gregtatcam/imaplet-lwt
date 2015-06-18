@@ -32,7 +32,7 @@ module MapFlag = Map.Make(
   end)
 
 let _mail_path config user =
-  Utils.user_path ~path:config.Server_config.mail_path ~user
+  Utils.user_path ~path:config.Server_config.mail_path ~user ()
 
 let _raw_content t =
   match Email.raw_content t with
@@ -386,7 +386,7 @@ let append_uidlist path uid file =
   ) 
 
 let subscribe_path mail_path user =
-  Filename.concat (Configuration.mailboxes (Utils.user_path ~path:mail_path ~user) user) "imaplet.subscribe"
+  Filename.concat (Configuration.mailboxes (Utils.user_path ~path:mail_path ~user ()) user) "imaplet.subscribe"
   
 (* read subscribe *)
 let read_subscribe path =

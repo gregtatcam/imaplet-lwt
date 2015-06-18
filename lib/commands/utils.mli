@@ -62,4 +62,12 @@ val fold_email_with_file : string -> ('a -> string -> 'a Lwt.t) -> 'a -> 'a Lwt.
 
 val files_of_directory : string -> ('a -> string -> 'a Lwt.t) -> 'a -> [`Ok of 'a |`NoDir] Lwt.t 
 
-val user_path : path:string -> user:string -> string
+(* replace %user% template (or regx) in path with the user, user@domain is
+ * handled as domain/user *)
+val user_path : ?regx:string -> path:string -> user:string -> unit -> string
+
+(* user@domain -> user * domain *)
+val parse_user : string -> string * (string option)
+
+(* user@domain -> domain/user *)
+val user_to_path : string -> string

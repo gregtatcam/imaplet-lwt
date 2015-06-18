@@ -25,7 +25,7 @@ type selection = [`Select of string | `Examine of string | `None]
 
 type amailboxt = 
   {inbox_path:string;mail_path:string;user:string
-  option;selected:selection;config:Server_config.imapConfig;
+  option;user_with_domain:string;selected:selection;config:Server_config.imapConfig;
   keys:(Ssl_.keys Lwt.t) option}
 
 val create : Server_config.imapConfig -> string -> string option -> t
@@ -84,5 +84,7 @@ val copy : t -> string -> sequence -> bool ->
 val expunge : t -> (string->unit Lwt.t) -> [`NotExists|`NotSelectable|`Error of string|`Ok] Lwt.t 
 
 val user : t -> string option
+
+val user_with_domain : t -> string
 
 val selected_mbox : t -> string option

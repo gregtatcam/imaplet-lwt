@@ -27,6 +27,7 @@ open Maildir_storage
 exception InvalidCommand
 exception SystemFailed of string
 exception AccountExists
+exception InvalidDomain
 
 let get_mbox_type t =
   match t with
@@ -89,6 +90,16 @@ let dir_cmd f cmd =
   else
     cmd ()
 
+let check_domain user =
+  let user,domain = Utils.parse_user user in
+  match domain with
+  | None -> ()
+  | Some domain ->
+    if List.exists (fun d -> d = domain) (Str.split (Str.regexp ";") srv_config.domain) then
+      ()
+    else
+      raise InvalidDomain
+
 (*
 imaplet:{PLAIN}imaplet:501:::/Users/imaplet
 *)
@@ -105,7 +116,7 @@ let set_users user pswd =
   let new_user = 
     (Printf.sprintf "%s:{SHA256}%s::::%s" user
     (Imap_crypto.get_hash ~hash:`Sha256 pswd) 
-    (Utils.user_path ~path:srv_config.irmin_path ~user)) in
+    (Utils.user_path ~path:srv_config.irmin_path ~user ())) in
   Utils.lines_of_file srv_config.users_path ~init:[] ~f:(fun line acc ->
     if Regex.match_regex ~case:false ~regx:("^" ^ user ^ ":") line then
       return acc
@@ -160,18 +171,21 @@ let created = ref None
 
 let () =
   commands (fun user pswd force mbox_type ->
-    let user_path = Regex.replace ~regx:"%user%.*$" ~tmpl:user srv_config.user_cert_path in
-    let cert_path = Utils.user_path ~path:srv_config.user_cert_path ~user in 
-    let irmin_path = Utils.user_path ~path:srv_config.irmin_path ~user in
-    let mail_path = Utils.user_path ~path:srv_config.mail_path ~user in
-    let priv_path = Filename.concat cert_path srv_config.key_name in
-    let pem_path = Filename.concat cert_path srv_config.pem_name in
+    let user_path = Utils.user_path ~regx:"%user%.*$" ~path:srv_config.user_cert_path ~user () in
+    let user_cert_path = Utils.user_path ~path:srv_config.user_cert_path ~user () in 
+    let irmin_path = Utils.user_path ~path:srv_config.irmin_path ~user () in
+    let mail_path = Utils.user_path ~path:srv_config.mail_path ~user () in
+    let inbox_path = Utils.user_path ~path:srv_config.inbox_path ~user () in
+    let priv_path = Filename.concat user_cert_path srv_config.key_name in
+    let pem_path = Filename.concat user_cert_path srv_config.pem_name in
     let git_init () =
       Lwt_process.pread ~stderr:`Dev_null ~stdin:`Close ("",[|"git";"init";irmin_path|]) >>= fun _ -> 
       return ()
     in
     let build m mailbox keys =
-      build_strg_inst m srv_config user mailbox keys
+      let config = {srv_config with inbox_path;mail_path;irmin_path;user_cert_path} in
+      let user = Regex.replace ~regx:"@.+$" ~tmpl:"" user in
+      build_strg_inst m config user mailbox keys
     in
     let get_factory () =
       match mbox_type with
@@ -189,6 +203,7 @@ let () =
         (f,mail_path,Filename.concat mail_path "Maildir", fun () -> return ())
     in
     let check_force () =
+      check_domain user;
       if force then
         system ("rm -rf " ^ user_path)
       else
@@ -199,9 +214,12 @@ let () =
         let (factory,repo_root,repo,repo_init) = get_factory () in
         check_force () >>= fun () ->
         created := Some user_path;
+        catch (fun () ->
+          Lwt_unix.mkdir (Filename.dirname user_path) 0o775
+        ) (fun _ -> return ()) >>
         Lwt_unix.mkdir user_path 0o775 >>
         Lwt_unix.mkdir repo_root 0o775 >>
-        Lwt_unix.mkdir cert_path 0o775 >>
+        Lwt_unix.mkdir user_cert_path 0o775 >>
         file_cmd priv_path (fun () -> 
           genrsa user pswd priv_path >>= fun key ->
 	  reqcert key pem_path
@@ -230,6 +248,7 @@ let () =
       ) (function
         | SystemFailed msg -> failed !created ("failed: " ^ msg)
         | AccountExists -> failed !created "failed: account exists"
+        | InvalidDomain -> failed !created "failed: invalid domain"
         | ex -> failed !created ("failed: " ^ (Printexc.to_string ex))
       )
     )

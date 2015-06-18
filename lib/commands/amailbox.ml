@@ -24,7 +24,7 @@ type selection = [`Select of string | `Examine of string | `None]
 
 type amailboxt = 
   {inbox_path:string;mail_path:string;user:string
-  option;selected:selection;config:Server_config.imapConfig;
+  option;user_with_domain:string;selected:selection;config:Server_config.imapConfig;
   keys:(Ssl_.keys Lwt.t) option}
 
 let factory (mailboxt:amailboxt) ?mailbox2 mailbox =
@@ -59,22 +59,30 @@ let selected_mbox mailboxt =
 (* create the mailbox type *)
 let create config user pswd =
   let open Server_config in
+  let inbox_path = Utils.user_path ~path:config.inbox_path ~user () in
+  let mail_path = Utils.user_path ~path:config.mail_path ~user () in
+  let irmin_path = Utils.user_path ~path:config.irmin_path ~user () in
+  let user_cert_path = Utils.user_path ~path:config.user_cert_path ~user () in
+  let config = {config with inbox_path;mail_path;irmin_path;user_cert_path} in
+  let user_with_domain  = user in
+  let user = Regex.replace ~regx:"@.+$" ~tmpl:"" user in
   let (inbox_path,mail_path) = 
   match config.data_store with
   | `Irmin|`Workdir -> "",""
-  | `Mailbox|`Maildir -> 
-    (Utils.user_path ~path:config.inbox_path ~user,Configuration.mailboxes
-      (Utils.user_path ~path:config.mail_path ~user) user)
+  | `Mailbox|`Maildir -> (inbox_path, Configuration.mailboxes mail_path user)
   in
-  {inbox_path;mail_path;user=Some user;selected=`None;config; keys=Some (Ssl_.get_user_keys ~user ?pswd config)}
+  {inbox_path;mail_path;user=Some user;user_with_domain;selected=`None;config; keys=Some (Ssl_.get_user_keys ~user ?pswd config)}
 
 (* empty type *)
 let empty () =
-  {inbox_path="";mail_path="";user=None;selected=`None;config=Server_config.default_config;keys=None}
+  {inbox_path="";mail_path="";user=None;user_with_domain="";selected=`None;config=Server_config.default_config;keys=None}
 
 (* get authenticated user *)
 let user mailboxt =
   mailboxt.user
+
+let user_with_domain mailboxt =
+  mailboxt.user_with_domain
 
 (** make directory item **)
 let dir_item path cnt =

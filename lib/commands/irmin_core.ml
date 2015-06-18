@@ -321,7 +321,7 @@ module Key_ :
 let get_irmin_path user config =
   match user with
   | None -> config.irmin_path
-  | Some user -> Regex.replace ~regx:"%user%" ~tmpl:user config.irmin_path
+  | Some user -> Utils.user_path ~user ~path:config.irmin_path ()
 
 module type GitIntf =
   sig

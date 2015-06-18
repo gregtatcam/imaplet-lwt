@@ -75,12 +75,13 @@ let selected_mailbox_exn mbox =
   option_value_exn (Amailbox.selected_mbox mbox)
 
 let get_selected context =
+  let user_with_domain = Amailbox.user_with_domain context.!mailbox in
   match Amailbox.user context.!mailbox with
   | Some user -> 
       begin
         match Amailbox.selected_mbox context.!mailbox with
-        | Some mailbox -> Some (user,mailbox)
-        | None -> Some (user,"")
+        | Some mailbox -> Some (user,user_with_domain,mailbox)
+        | None -> Some (user,user_with_domain,"")
       end
   | None -> None
 
@@ -353,15 +354,15 @@ let handle_status context mailbox optlist =
 let idle_clients mailbox context =
   let open Storage_meta in
   match get_selected context with
-  | Some (user,_) ->
+  | Some (_,user_with_domain,_) ->
     begin
     Amailbox.examine context.!mailbox mailbox >>= function
     |`Ok(_,status) -> 
       Connections.fold (fun acc (ctx:context) ->
         acc >>= fun () ->
         match get_selected ctx with
-        | Some (ctx_user, ctx_mailbox) (* if not self and another client for same user/selected mbox *)
-            when context.id <> ctx.id && ctx_user = user && mailbox = ctx_mailbox ->
+        | Some (_,ctx_user_with_domain,ctx_mailbox) (* if not self and another client for same user/selected mbox *)
+            when context.id <> ctx.id && ctx_user_with_domain = user_with_domain && mailbox = ctx_mailbox ->
           if Stack.is_empty ctx.!commands = false && is_idle (Stack.top ctx.!commands) then ( (* idle command is in progress for another client *)
             unsolicited_response ctx status >>
             write_resp_untagged context.id ctx.!netw ("Ok still here")

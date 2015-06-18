@@ -63,14 +63,14 @@ let key_encrypted key =
  * get the public key from the certificate file
  *)
 let get_user_keys ~user ?pswd config =
-  let path name =
-    let p = Filename.concat config.user_cert_path name in
-    Regex.replace ~regx:"%user%" ~tmpl:user p 
+  let _path name =
+    let path = Filename.concat config.user_cert_path name in
+    Utils.user_path ~user ~path () 
   in
   let of_pem key =
     (PK.of_pem_cstruct1 (Cstruct.of_string key))
   in
-  Lwt_io.with_file ~mode:Lwt_io.input (path config.key_name) (fun r ->
+  Lwt_io.with_file ~mode:Lwt_io.input (_path config.key_name) (fun r ->
     Lwt_io.read r
   ) >>= fun key ->
   let priv =
@@ -84,7 +84,7 @@ let get_user_keys ~user ?pswd config =
     Some (of_pem key)
   )
   in
-  Lwt_io.with_file ~mode:Lwt_io.input (path config.pem_name) (fun r ->
+  Lwt_io.with_file ~mode:Lwt_io.input (_path config.pem_name) (fun r ->
     Lwt_io.read r
   ) >>= fun cert ->
   return (pub_of_cert_string cert, priv)
