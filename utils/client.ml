@@ -146,17 +146,65 @@ let connect addr port ssl =
   else
     socket addr port
 
+let inbuffer = ref (Buffer.create 100)
+let outbuffer = ref (Buffer.create 100)
+
+let buff_size = 1024
+
+let inflate strm inbuff =
+  let outbuff = String.create buff_size in
+  let rec _inflate inbuff offset len =
+    let (fi, orig, size) = Zlib.inflate strm inbuff offset len 
+      outbuff 0 buff_size Zlib.Z_SYNC_FLUSH in
+    Buffer.add_string !outbuffer (String.sub outbuff 0 size);
+    let offset = offset + orig in
+    let len = len - orig in
+    if fi then (
+      Buffer.clear !inbuffer;
+      if len <> 0 then (
+        Buffer.add_string !inbuffer (String.sub inbuff offset len)
+      );
+      Zlib.inflate_end strm;
+      true
+    ) else if len = 0 then (
+      false
+    ) else (
+      _inflate inbuff offset len
+    )
+  in
+  _inflate inbuff 0 (String.length inbuff)
+
+let read_cache ic =
+  if Buffer.length !inbuffer > 0 then (
+    let contents = Buffer.contents !inbuffer in
+    Buffer.clear !inbuffer;
+    return (Some contents)
+  ) else (
+    let buff = String.create buff_size in
+    Lwt_io.read_into ic buff 0 buff_size >>= function
+    | 0 -> return None
+    | size -> return (Some (String.sub buff 0 size))
+  )
+
 let zip_read ic =
   if !compression = false then (
     Lwt_io.read_line_opt ic 
   ) else (
-    let buff = String.create 2048 in
-    Lwt_io.read_into ic buff 0 2048 >>= function
-    | 0 -> return None
-    | size -> 
-      let line = Imap_crypto.do_uncompress (String.sub buff 0 size) in
-      let line = Regex.replace ~regx:"[\r\n]*$" ~tmpl:"" line in
-      return (Some line)
+    let strm = Zlib.inflate_init true in
+    let rec read () =
+      read_cache ic >>= function
+      | None -> return None
+      | Some buff -> 
+        if inflate strm buff then (
+          let output = Buffer.contents !outbuffer in
+          Buffer.clear !outbuffer;
+          return (Some output) (*(Regex.replace ~regx:"[\r\n]*$" ~tmpl:""
+          output))*)
+        ) else (
+          read ()
+        )
+    in
+    read ()
   )
 
 let read_net_echo ic =

@@ -93,7 +93,7 @@ let write_resp compress id w ?(tag="*") resp =
     let buff = 
     match compress with
     | None -> str ^ Regex.crlf
-    | Some _ -> Imap_crypto.do_compress (str ^ Regex.crlf)
+    | Some _ -> Imap_crypto.do_compress ~header:true (str ^ Regex.crlf)
     in
     Lwt_io.write w buff >> Lwt_io.flush w
   in

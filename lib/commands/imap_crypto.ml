@@ -47,14 +47,14 @@ let refill input =
 let flush output buf len =
   Buffer.add_substring output buf 0 len
 
-let do_compress input =
+let do_compress ?(header=false) input =
   let output = Buffer.create (String.length input) in
-  Zlib.compress ~level:6 (refill input) (flush output);
+  Zlib.compress ~level:6 ~header (refill input) (flush output);
   Buffer.contents output
 
-let do_uncompress input =
+let do_uncompress ?(header=false) input =
   let output = Buffer.create (String.length input) in
-  Zlib.uncompress (refill input) (flush output);
+  Zlib.uncompress ~header (refill input) (flush output);
   Buffer.contents output
 
 let aes_encrypt_pswd ~pswd data =
