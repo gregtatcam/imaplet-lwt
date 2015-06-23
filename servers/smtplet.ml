@@ -183,7 +183,7 @@ let syntx_vrfy next_state ~msg str context =
   if List.exists (fun s -> s = `Vrfy) next_state = false then (
     write context msg >>
     return `NextOutOfSeq
-  ) else if Regex.match_regex ~regx:"^[ \t]+<?\\([^ @<>\t]+\\)$" str then (
+  ) else if Regex.match_regex ~regx:"^[ \t]+<?\\([^ <>\t]+\\)>?$" str then (
     let user = Str.matched_group 1 str in
     authenticate_user user () >>= fun (_,_,auth) ->
     if auth then (
