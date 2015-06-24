@@ -217,9 +217,7 @@ let handle_authenticate context auth_type text =
     Lwt.pick [
       Lwt_mutex.lock context.client_timed_out >> raise ClientTimedOut;
       zip_read_exn context
-    ] >>= fun text ->
-    Log_.log `Info3 (Printf.sprintf "----> %s: %s\n" (Int64.to_string context.id) text);
-    return text
+    ]
   end >>= fun text ->
   Account.authenticate auth_type text >>= function
     | `Ok (m,u,p) -> response context (Some State_Authenticated) m (Some
