@@ -220,8 +220,9 @@ let in_my_domain context domain =
   let interface = context.config.smtp_addr in
   let mydomain = context.config.domain in
   Log_.log `Info2 
-    (Printf.sprintf "### detecting send to domain %s on interface %s, my domain %s\n" 
-    domain interface mydomain) ;
+    (Printf.sprintf "### detecting send to domain %s on interface %s, my domain
+    %s, configured domains %s\n" 
+    domain interface mydomain context.config.domain) ;
   Utils.get_interfaces () >>= fun my_ips ->
   begin
   let dexists domains domain = 
@@ -252,6 +253,18 @@ let in_my_domain context domain =
     else
       return `NoInterface
 
+let authenticate_user_domain user = function
+  | None -> authenticate_user user ()
+  | Some domain ->
+    let fqn = user ^ "@" ^ domain in
+    authenticate_user fqn () >>= fun (_,p,auth) ->
+    if auth then 
+      return (fqn,p,auth)
+    else (
+      authenticate_user user () >>= fun (_,p,auth) ->
+      return (user,p,auth)
+    )
+
 let syntx_rcpt next_state ~msg cmd context =
   if List.exists (fun s -> s = `RcptTo) next_state = false then (
     write context msg >>
@@ -264,10 +277,10 @@ let syntx_rcpt next_state ~msg cmd context =
       write context "550 5.1.2 : Not accepting on this network interface" >>
       return `Next
     ) else if res = `Yes then (
-      authenticate_user user () >>= fun (_,_,auth) ->
+      authenticate_user_domain user (Some domain) >>= fun (fqn,_,auth) ->
       if auth then (
         write context "250 OK" >>
-        return (`RcptTo (user,domain,`None))
+        return (`RcptTo (fqn,domain,`None))
       ) else (
         write context "550 5.7.8 : Recipient address rejected: User unknown in local recipient table" >>
         return `Next
@@ -281,6 +294,7 @@ let syntx_rcpt next_state ~msg cmd context =
       let valid_from context =
         let (user,domain) = context.from in
         authenticate_user user () >>= fun (_,_,auth) ->
+        authenticate_user_domain user domain >>= fun (_,_,auth) ->
         if auth then (
           if domain = None then
             return true
