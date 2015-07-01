@@ -100,3 +100,7 @@ single_store true
 # irmin hybrid, if true and store is Irmin then messages are stored in files on FS, metadata is stored in Git 
 hybrid false
 
+# resolve - name servers;domains: ns:server[:port][,server:port]*;[domain][,domain]*|file:path
+# resolve ns:1.1.1.1,2.2.2.2:67,3.3.3.3;foo.org,foo.com
+# resolve ns:1.1.1.1
+# resolve file:/etc/resolv.conf

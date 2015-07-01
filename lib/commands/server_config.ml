@@ -52,6 +52,7 @@ type imapConfig = {
   maildir_parse: bool; (* parse message into MIME parts when in maildir storage format, default true *)
   single_store: bool; (* single-store attachments in irmin and workdir format, default true *)
   hybrid: bool; (* hybrid of irmin and workdir store (store should be set to irmin, default false *)
+  resolve: [`File of string|`NS of ((string*string) list) * (string list)] option;
 }
 
 let default_config = {
@@ -90,6 +91,7 @@ let default_config = {
   maildir_parse = true;
   single_store = true;
   hybrid = false;
+  resolve = None;
 }
 
 let validate_config config =
@@ -161,6 +163,27 @@ let config () =
   else
     "./imaplet.cf"
 
+let resolve_of_string log v =
+  let regxns = 
+    "^ns:\\([^,;:]+\\(:[0-9]+\\)?\\(,[^,;:]+\\(:[0-9]+\\)?\\)*\\)\\(;\\([^,;]+\\(,[^,;]+\\)*\\)\\)?$" in
+  let regxfile = "^file:\\(.+\\)$" in
+  if Regex.match_regex ~regx:regxns v then (
+    let iplist = Str.split (Str.regexp ",") (Str.matched_group 1 v) in
+    let iplist = List.map (fun s -> 
+      if Regex.match_regex ~regx:"^\\([^:]+\\):\\(.+\\)$" s then 
+        Str.matched_group 1 s, Str.matched_group 2 s
+      else
+        s,"53"
+    ) iplist in
+    let domainlist = try Str.split (Str.regexp ",") (Str.matched_group 6 v) with _ -> [] in
+    Some (`NS (iplist,domainlist))
+  ) else if Regex.match_regex ~regx:regxfile v then(
+    Some (`File (Str.matched_group 1 v))
+  ) else (
+    log v;
+    None
+  )
+
 let config_of_lines lines =
   let rec proc lines acc =
     match lines with 
@@ -230,6 +253,7 @@ let config_of_lines lines =
           | "maildir_parse" -> {acc with maildir_parse = (bval n v true)}
           | "single_store" -> {acc with single_store = (bval n v true)}
           | "hybrid" -> {acc with hybrid = (bval n v true)}
+          | "resolve" -> {acc with resolve = resolve_of_string (log n) v}
           | _ -> Printf.fprintf stderr "unknown configuration %s\n%!" n; acc
         ) else 
           acc

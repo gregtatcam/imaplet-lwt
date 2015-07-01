@@ -15,11 +15,13 @@
  *)
 open Lwt
 
+type configt = [`File of string|`NS of ((string*string) list) * (string list)]
+
 (* domain name -> list of ip's *)
-val gethostbyname : string -> string list Lwt.t
+val gethostbyname : ?config:configt -> string -> string list Lwt.t
 
 (* ip -> list of ip's *)
-val gethostbyaddr : string -> string list Lwt.t
+val gethostbyaddr : ?config:configt -> string -> string list Lwt.t
 
 (* resolve mx : domain name -> (priority * ip list) list *)
-val resolve : string -> (int * string list) list Lwt.t
+val resolve : ?config:configt -> string -> (int * string list) list Lwt.t

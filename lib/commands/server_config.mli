@@ -52,6 +52,7 @@ type imapConfig = {
   maildir_parse: bool; (* parse message into MIME parts when in maildir storage format *)
   single_store: bool; (* single-store attachments in irmin and workdir format, default true *)
   hybrid: bool; (* hybrid of irmin and workdir store (store should be set to irmin, default false *)
+  resolve: [`File of string|`NS of ((string*string) list) * (string list)] option;
 }
 
 val default_config : imapConfig

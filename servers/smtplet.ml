@@ -232,7 +232,7 @@ let in_my_domain context domain =
   ) else if (try let _ = Unix.inet_addr_of_string domain in true with _ -> false) then (
     return [domain] (* already ip *)
   ) else (
-    Imaplet_dns.gethostbyname domain
+    Imaplet_dns.gethostbyname ?config:(context.config.resolve) domain
   )
   end >>= fun domain_ips ->
   let ip = (List.fold_left (fun acc ip -> 
@@ -310,7 +310,7 @@ let syntx_rcpt next_state ~msg cmd context =
       valid_from context >>= fun valid ->
       if valid then (
         Log_.log `Info1 (Printf.sprintf "### scheduling to relay to domain %s\n" domain);
-        Imaplet_dns.resolve domain >>= fun mx_rr ->
+        Imaplet_dns.resolve ?config:(context.config.resolve) domain >>= fun mx_rr ->
         (* might be relaying directly to another device in the same network,
          * need a way to figure it out?
          *)

@@ -17,6 +17,34 @@ open Lwt
 open Dns
 open Packet
 
+type configt = [`File of string|`NS of ((string*string) list) * (string list)]
+
+let cache_config = ref None
+
+let get_config config =
+  match !cache_config with
+  | Some config -> Some config
+  | None ->
+    match config with
+    | None -> None
+    | Some config ->
+    let config =
+    match config with 
+    | `File file -> Some (`Resolv_conf file)
+    | `NS (ips,domains) ->
+      let ips = List.map (fun (ip,port) ->
+        (Utils.option_value_exn (Ipaddr.of_string ip)),(int_of_string port)
+      ) ips in
+      Some (`Static (ips,domains))
+    in
+    cache_config := config;
+    config
+
+let get_resolver config =
+  match (get_config config) with
+  | None -> Dns_resolver_unix.create ()
+  | Some config -> Dns_resolver_unix.create ~config ()
+
 let _gethostbyname resolver domain =
   let domain =
   match domain with
@@ -29,17 +57,17 @@ let _gethostbyname resolver domain =
     (Ipaddr.to_string ip) :: acc
   ) [] ip_list)
 
-let gethostbyname name =
-  Dns_resolver_unix.create () >>= fun resolver ->
+let gethostbyname ?config name =
+  get_resolver config >>= fun resolver ->
   _gethostbyname resolver (`Name name)
 
-let gethostbyaddr addr =
-  Dns_resolver_unix.create () >>= fun resolver ->
+let gethostbyaddr ?config addr =
+  get_resolver config >>= fun resolver ->
   Dns_resolver_unix.gethostbyaddr resolver (Ipaddr.V4.of_string_exn addr) 
 
-let resolve domain =
+let resolve ?config domain =
   let domain = Name.string_to_domain_name domain in
-  Dns_resolver_unix.create () >>= fun resolver ->
+  get_resolver config >>= fun resolver ->
   Utils.with_timeout 30. (fun () -> 
     Dns_resolver_unix.resolve resolver Q_IN Q_MX domain >>= fun result ->
     return (Some result)

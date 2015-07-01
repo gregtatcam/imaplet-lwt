@@ -57,3 +57,4 @@
 * add hybrid irmin/workdir storage - messages are stored in workdir on FS, metadata is stored in Git
 * add multiple domain support (virtual user account folder for user@domain is domain/user)
 * add COMPRESS=DEFLATE capability (rfc 4978)
+* add name server(s)/domain(s) configuration for dns resolution
