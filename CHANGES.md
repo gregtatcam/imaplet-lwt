@@ -58,3 +58,4 @@
 * add multiple domain support (virtual user account folder for user@domain is domain/user)
 * add COMPRESS=DEFLATE capability (rfc 4978)
 * add name server(s)/domain(s) configuration for dns resolution
+* supoort for tls 0.6.0

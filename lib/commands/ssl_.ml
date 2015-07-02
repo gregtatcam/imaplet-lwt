@@ -29,15 +29,10 @@ let get_pub_key priv =
 
 (* get public key from certificate string *)
 let pub_of_cert_string cert =
-  let cert = Cert.of_pem_cstruct1 (Cstruct.of_string cert) in
-  match (X509.cert_pubkey cert) with
-  | Some key ->
-    begin
-    match key with
-    | `RSA pub_key -> pub_key
-    | _ -> raise FailedPubKey
-    end
-  | None -> raise FailedPubKey
+  let cert = Certificate.of_pem_cstruct1 (Cstruct.of_string cert) in
+  match (X509.public_key cert) with
+  | `RSA pub_key -> pub_key
+  | _ -> raise FailedPubKey
 
 let sexp_of_pub pub =
   Nocrypto.Rsa.sexp_of_pub pub
@@ -68,7 +63,8 @@ let get_user_keys ~user ?pswd config =
     Utils.user_path ~user ~path () 
   in
   let of_pem key =
-    (PK.of_pem_cstruct1 (Cstruct.of_string key))
+    match (Private_key.of_pem_cstruct1 (Cstruct.of_string key)) with
+    | `RSA priv_key -> priv_key
   in
   Lwt_io.with_file ~mode:Lwt_io.input (_path config.key_name) (fun r ->
     Lwt_io.read r

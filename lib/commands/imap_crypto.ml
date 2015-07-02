@@ -59,19 +59,19 @@ let do_uncompress ?(header=false) input =
 
 let aes_encrypt_pswd ~pswd data =
   let open Nocrypto.Cipher_block in
-  let key = Cstruct.of_string pswd in
-  let iv = key in
+  let key = (Cstruct.of_string pswd) in
+  let iv = Hash.MD5.digest (Cstruct.of_string pswd) in
   let key = AES.CBC.of_secret key in
   let encr = AES.CBC.encrypt ~key ~iv (Cstruct.of_string (add_pad data)) in
-  Cstruct.to_string encr.message
+  Cstruct.to_string encr
 
 let aes_decrypt_pswd ~pswd data =
   let open Nocrypto.Cipher_block in
-  let key = Cstruct.of_string pswd in
-  let iv = key in
+  let key = (Cstruct.of_string pswd) in
+  let iv = Hash.MD5.digest (Cstruct.of_string pswd) in
   let key = AES.CBC.of_secret key in
   let decr = AES.CBC.decrypt ~key ~iv (Cstruct.of_string data) in
-  remove_pad (Cstruct.to_string decr.message)
+  remove_pad (Cstruct.to_string decr)
 
 let aes_encrypt ?(compress=false) data pub secrets =
   let open Nocrypto.Cipher_block in
@@ -80,25 +80,25 @@ let aes_encrypt ?(compress=false) data pub secrets =
   let key = AES.CBC.of_secret secret in
   let (pad_size,c_data) = pad (Cstruct.of_string data) secret in
   let encr = AES.CBC.encrypt ~key ~iv c_data in
-  let encrypted = Cstruct.to_string encr.message in
+  let encrypted = Cstruct.to_string encr in
   let header = Printf.sprintf "%02d%s%s" pad_size (Cstruct.to_string secret) (Cstruct.to_string iv) in
   let header1 = Cstruct.to_string (Rsa.encrypt ~key:pub (Cstruct.of_string header)) in
   (secret,iv,Printf.sprintf "%04d%s%s" (Bytes.length header1) header1 encrypted)
 
 let aes_decrypt ?(compressed=false) data priv =
   let open Nocrypto.Cipher_block in
-  Rng.reseed (Cstruct.of_string "abc");
   let header_size = int_of_string (Bytes.sub data 0 4) in
   let header = Bytes.sub data 4 header_size in
   let encrypted = Bytes.sub data (4 + header_size) ((Bytes.length data) - 4 - header_size) in
   let header_decr = Rsa.decrypt ~key:priv (Cstruct.of_string header) in
-  let header1 = Bytes.sub (Cstruct.to_string header_decr) ((Cstruct.len header_decr) - 66) 66 in
+  let size = 2 + 32 + 16 in
+  let header1 = Bytes.sub (Cstruct.to_string header_decr) ((Cstruct.len header_decr) - size) size in
   let pad_size = int_of_string (Bytes.sub header1 0 2 ) in
   let hash = Cstruct.of_string (Bytes.sub header1 2 32) in
-  let iv = Cstruct.of_string (Bytes.sub header1 34 32) in
+  let iv = Cstruct.of_string (Bytes.sub header1 34 16) in
   let key = AES.CBC.of_secret hash in
   let decr = AES.CBC.decrypt ~key ~iv (Cstruct.of_string encrypted) in
-  let decrypted = Cstruct.to_string decr.message in
+  let decrypted = Cstruct.to_string decr in
   let data = Bytes.sub decrypted 0 ((Bytes.length decrypted) - pad_size) in
   if compressed then do_uncompress data else data
 
@@ -106,7 +106,7 @@ let aes_decrypt ?(compressed=false) data priv =
 let encrypt ?(compress=false) data pub =
   let (_,_,e) = 
     aes_encrypt ~compress data pub (fun _ -> 
-      Rng.reseed (Cstruct.of_string "abc"); (Rng.generate 32, Rng.generate 32)) in
+      (Rng.generate 32, Rng.generate 16)) in
   e
 
 let decrypt ?(compressed=false) data priv =
@@ -129,7 +129,8 @@ let contentid hash =
 
 let conv_encrypt ?(compress=false) data pub =
   let (hash,_,e) = aes_encrypt ~compress data pub (fun data -> 
-    let hash = Hash.SHA256.digest (Cstruct.of_string data) in (hash,hash)
+    let iv = Hash.MD5.digest (Cstruct.of_string data) in
+    let hash = Hash.SHA256.digest (Cstruct.of_string data) in (hash,iv)
   ) in
   (contentid hash,e)
 

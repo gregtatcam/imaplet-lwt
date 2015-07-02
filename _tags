@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: c03ae3edb1c21dbb478cc363b4d0b21d)
+# DO NOT EDIT (digest: 8d02262902ed2e9103910a44b43a9abc)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -422,6 +422,7 @@ true: annot, bin_annot
 "utils/client.native": pkg_lwt.unix
 "utils/client.native": pkg_re
 "utils/client.native": pkg_re.posix
+"utils/client.native": pkg_str
 "utils/client.native": pkg_threads
 "utils/client.native": pkg_tls.lwt
 "utils/client.native": pkg_zip
