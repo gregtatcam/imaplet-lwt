@@ -51,8 +51,11 @@ let _gethostbyname resolver domain =
   | `Name name -> name
   | `Domain domain -> Name.to_string domain 
   in
-  Utils.with_timeout 10. (fun () -> Dns_resolver_unix.gethostbyname resolver domain)
-  (fun _ -> return []) >>= fun ip_list ->
+  Utils.with_timeout 30. (fun () -> Dns_resolver_unix.gethostbyname resolver domain)
+  (fun ex -> 
+    Log_.log `Error (Printf.sprintf "### Failed to resolve domain: %s, exception: %s\n" 
+      domain (Printexc.to_string ex));
+    return []) >>= fun ip_list ->
   return (List.fold_left (fun acc ip ->
     (Ipaddr.to_string ip) :: acc
   ) [] ip_list)
