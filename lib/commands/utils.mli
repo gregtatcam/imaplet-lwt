@@ -52,7 +52,7 @@ val list_of_str_sexp : string -> string list
 
 val str_sexp_of_list : string list -> string
 
-val lines_of_file : string -> init:'a -> f:(string -> 'a -> 'a Lwt.t) -> 'a Lwt.t
+val lines_of_file : ?g:(exn -> 'a Lwt.t) -> string -> init:'a -> f:(string -> 'a -> 'a Lwt.t) -> 'a Lwt.t
 
 val with_timeout : float -> (unit -> 'a Lwt.t) -> (exn -> 'a Lwt.t) -> 'a Lwt.t
 

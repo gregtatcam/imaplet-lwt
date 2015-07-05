@@ -179,11 +179,13 @@ let with_file ?(lock=false) path ~flags ~perms ~mode ~f =
     Lwt_io.close ch >> Lwt_unix.close fd
   )
 
-let lines_of_file file ~init ~f =
-  let strm = Lwt_io.lines_of_file file in
-  Lwt_stream.fold_s (fun line acc ->
-    f line acc 
-  ) strm init
+let lines_of_file ?(g=(fun ex -> raise ex)) file ~init ~f =
+  Lwt.catch (fun () ->
+    let strm = Lwt_io.lines_of_file file in
+    Lwt_stream.fold_s (fun line acc ->
+      f line acc 
+    ) strm init
+  ) g
 
 let exists file ?alt tp = 
   let open Lwt in
