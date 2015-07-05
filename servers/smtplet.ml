@@ -23,6 +23,7 @@ open Dates
 open Smtplet_context
 
 exception InvalidCmd
+exception Valid
 
 let _ = Log_.set_log "smtplet.log"
 
@@ -130,7 +131,7 @@ let auth_required context =
     false
   else if context.grttype = `Ehlo then
     (* need to figure out when to make auth
-     * required if at all, since the relay would not have
+     * required if at all, since the relayed message does not have
      * the password *)
     (*context.auth = None *) false
   else
@@ -265,6 +266,57 @@ let authenticate_user_domain user = function
       return (user,p,auth)
     )
 
+let restrict_relay context =
+  let (user,domain) = context.from in
+  match context.config.relayfrom with
+  | Some users ->
+    Utils.lines_of_file ~g:(function Valid -> return true|ex -> raise ex) users ~init:false ~f:(fun line res ->
+      (* match user?@domain *)
+      if Regex.match_regex ~regx:"^\\([^@]+\\)?@\\(.+\\)$" line then (
+        let ruser = try Str.matched_group 1 line with Not_found -> "" in
+        let rdomain = Str.matched_group 2 line in
+        let res = 
+          match domain with
+          | None -> false (* from user doesn't have domain *)
+          | Some domain -> 
+            (* if no user restriction then match domain, otherwise domain and user *)
+            domain = rdomain && (ruser = "" || ruser = user) 
+        in
+        if res then
+          raise Valid
+        else
+          return res
+      ) else (
+        if user = line then
+          raise Valid
+        else
+          return false
+      )
+    ) 
+  | None -> return true
+
+(* from user must have the account *)
+let valid_from context =
+  let (user,domain) = context.from in
+  begin
+  authenticate_user_domain user domain >>= fun (_,_,auth) ->
+  if auth then (
+    if domain = None then
+      return true
+    else (
+      in_my_domain context (Utils.option_value_exn domain) >>= function
+      | `Yes -> return true
+      | _ -> return false
+    )
+  ) else (
+    return false
+  )
+  end >>= fun res ->
+  if res then
+    restrict_relay context 
+  else
+    return res
+
 let syntx_rcpt next_state ~msg cmd context =
   if List.exists (fun s -> s = `RcptTo) next_state = false then (
     write context msg >>
@@ -286,28 +338,16 @@ let syntx_rcpt next_state ~msg cmd context =
         return `Next
       )
     (* have to relay, only allow authenticated users to relay *)
-    (* ) else if context.auth = None then (
+    ) else if context.config.relay_authreq && context.auth = None then (
       write context "550 5.7.1 : Authentication required" >>
-      return `Next *)
+      return `Next
     ) else (
-      (* from user must have the account *)
-      let valid_from context =
-        let (user,domain) = context.from in
-        authenticate_user user () >>= fun (_,_,auth) ->
-        authenticate_user_domain user domain >>= fun (_,_,auth) ->
-        if auth then (
-          if domain = None then
-            return true
-          else (
-            in_my_domain context (Utils.option_value_exn domain) >>= function
-            | `Yes -> return true
-            | _ -> return false
-          )
-        ) else (
-          return false
-        )
-      in
-      valid_from context >>= fun valid ->
+      begin
+      if context.auth <> None then
+        restrict_relay context
+      else
+        valid_from context
+      end >>= fun valid ->
       if valid then (
         Log_.log `Info1 (Printf.sprintf "### scheduling to relay to domain %s\n" domain);
         Imaplet_dns.resolve ?config:(context.config.resolve) domain >>= fun mx_rr ->

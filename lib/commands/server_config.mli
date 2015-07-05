@@ -53,6 +53,8 @@ type imapConfig = {
   single_store: bool; (* single-store attachments in irmin and workdir format, default true *)
   hybrid: bool; (* hybrid of irmin and workdir store (store should be set to irmin, default false *)
   resolve: [`File of string|`NS of ((string*string) list) * (string list)] option;
+  relayfrom: string option; (* file defining 'from' users allowed to relay *)
+  relay_authreq: bool; (* require authenticated user to relay, default false *)
 }
 
 val default_config : imapConfig

@@ -59,3 +59,5 @@
 * add COMPRESS=DEFLATE capability (rfc 4978)
 * add name server(s)/domain(s) configuration for dns resolution
 * supoort for tls 0.6.0
+0.1.15
+* add relay restrictions - required authenticaiton and list of users/domains

@@ -1,6 +1,6 @@
 # configuration file
 
-# authentication required
+# authentication required, require user authentication, priv key encrypted with password
 auth_required true
 
 # log file location
@@ -104,3 +104,13 @@ hybrid false
 # resolve ns:1.1.1.1,2.2.2.2:67,3.3.3.3;foo.org,foo.com
 # resolve ns:1.1.1.1
 # resolve file:/etc/resolv.conf
+
+# relayfrom - file with single line user definition
+# limit relays from users: 
+# user - specific user
+# user@domain - specific domain user
+# @domain - any user from domain
+# relayfrom /usr/local/share/imaplet/fromusers
+
+# relay_authreq, require authentication for relay
+relay_authreq false

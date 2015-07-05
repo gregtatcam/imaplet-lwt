@@ -52,7 +52,10 @@ type imapConfig = {
   maildir_parse: bool; (* parse message into MIME parts when in maildir storage format, default true *)
   single_store: bool; (* single-store attachments in irmin and workdir format, default true *)
   hybrid: bool; (* hybrid of irmin and workdir store (store should be set to irmin, default false *)
+  (* list of name servers/domains for DNS resolution, default None *)
   resolve: [`File of string|`NS of ((string*string) list) * (string list)] option;
+  relayfrom: string option; (* file defining 'from' users allowed to relay, default None *)
+  relay_authreq: bool; (* require authenticated user to relay, default false *)
 }
 
 let default_config = {
@@ -92,6 +95,8 @@ let default_config = {
   single_store = true;
   hybrid = false;
   resolve = None;
+  relayfrom = None;
+  relay_authreq = false;
 }
 
 let validate_config config =
@@ -254,6 +259,8 @@ let config_of_lines lines =
           | "single_store" -> {acc with single_store = (bval n v true)}
           | "hybrid" -> {acc with hybrid = (bval n v true)}
           | "resolve" -> {acc with resolve = resolve_of_string (log n) v}
+          | "relayfrom" -> {acc with relayfrom = Some v}
+          | "relay_authreq" -> {acc with relay_authreq = bval n v false}
           | _ -> Printf.fprintf stderr "unknown configuration %s\n%!" n; acc
         ) else 
           acc
