@@ -61,3 +61,4 @@
 * supoort for tls 0.6.0
 0.1.15
 * add relay restrictions - required authenticaiton and list of users/domains
+* fix opam lint errors
