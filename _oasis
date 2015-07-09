@@ -15,6 +15,10 @@ Flag utils
   Description: build utilities
   Default: false
 
+Flag test
+  Description: build test
+  Default: false
+
 Library imaplet
   Path		  : lib/
   Pack            : true
@@ -131,12 +135,21 @@ Library commands
                     imaplet.parsemail
 
 Executable parse_restore
-  Build		  : true
+  Build$:           flag(test)
   Install	  : false
   Path		  : test
   CompiledObject  : native
   MainIs	  : parse_restore.ml
   BuildDepends	  : lwt,lwt.unix,lwt.syntax,tls.lwt,sexplib.syntax,threads,str,cstruct.unix,irmin.unix,imaplet,imaplet.parsemail,nocrypto,imaplet.commands
+
+Executable dedup
+  Build$:           flag(test)
+  Install	  : false
+  Path		  : test
+  CompiledObject  : native
+  MainIs	  : dedup.ml
+  BuildDepends	  : lwt,lwt.unix,lwt.syntax,tls.lwt,sexplib.syntax,threads,str,cstruct.unix,irmin.unix,imaplet,imaplet.parsemail,nocrypto,imaplet.commands
+
 
 Executable imaplet_configure
   Build		  : true

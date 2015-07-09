@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: 8d02262902ed2e9103910a44b43a9abc)
+# DO NOT EDIT (digest: 34b3ae57eea67e128ea22ddaf7f4c401)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -140,6 +140,26 @@ true: annot, bin_annot
 "test/parse_restore.native": use_commands
 "test/parse_restore.native": use_imaplet
 "test/parse_restore.native": use_parsemail
+# Executable dedup
+"test/dedup.native": pkg_cstruct.unix
+"test/dedup.native": pkg_dns
+"test/dedup.native": pkg_dns.lwt
+"test/dedup.native": pkg_fieldslib.syntax
+"test/dedup.native": pkg_ipaddr
+"test/dedup.native": pkg_irmin.unix
+"test/dedup.native": pkg_lwt
+"test/dedup.native": pkg_lwt.syntax
+"test/dedup.native": pkg_lwt.unix
+"test/dedup.native": pkg_nocrypto
+"test/dedup.native": pkg_re
+"test/dedup.native": pkg_re.posix
+"test/dedup.native": pkg_sexplib.syntax
+"test/dedup.native": pkg_str
+"test/dedup.native": pkg_threads
+"test/dedup.native": pkg_tls.lwt
+"test/dedup.native": use_commands
+"test/dedup.native": use_imaplet
+"test/dedup.native": use_parsemail
 <test/*.ml{,i,y}>: pkg_cstruct.unix
 <test/*.ml{,i,y}>: pkg_dns
 <test/*.ml{,i,y}>: pkg_dns.lwt
