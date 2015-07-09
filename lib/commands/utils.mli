@@ -60,6 +60,8 @@ val get_interfaces : unit -> string list Lwt.t
 
 val fold_email_with_file : string -> ('a -> string -> 'a Lwt.t) -> 'a -> 'a Lwt.t
 
+val fold_email_with_file1 : string -> ('a -> Mailbox.Message.t -> 'a Lwt.t) -> 'a -> 'a Lwt.t
+
 val files_of_directory : string -> ('a -> string -> 'a Lwt.t) -> 'a -> [`Ok of 'a |`NoDir] Lwt.t 
 
 (* replace %user% template (or regx) in path with the user, user@domain is

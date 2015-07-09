@@ -280,6 +280,16 @@ let fold_email_with_file file f init =
     get_message ic (Buffer.create 100) f init
   )
 
+let fold_email_with_file1 file f init =
+  let open Parsemail in
+  Lwt_io.with_file ~mode:Lwt_io.Input file (fun ic ->
+    get_message ic (Buffer.create 100) (fun acc message ->
+      let seq = Mailbox.With_seq.of_string message in
+      let message = Mailbox.With_seq.fold_message seq ~f:(fun _ message -> Some message) ~init:None in
+      f acc (option_value_exn message)
+    ) init
+  )
+
 let files_of_directory path f init =
   let open Lwt in
   exists path S_DIR >>= fun res ->
