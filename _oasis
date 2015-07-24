@@ -1,6 +1,6 @@
 OASISFormat: 0.4
 Name:        imaplet
-Version:     0.1.10
+Version:     0.1.15
 Synopsis:    IMAP server
 Authors:     Gregory Tsipenyuk
 License:     GPL
@@ -111,6 +111,7 @@ Library commands
                     Maildir_storage,
                     Parser,
                     Regex,
+                    Replica_maint,
                     Response,
                     Seq_iterator,
                     Server_config,
