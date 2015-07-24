@@ -29,17 +29,18 @@ let create local =
   let config = Irmin_git.config ~root:local ~bare:true () in
   Irmin.create store config task
 
-let pull_exn ?depth upstream t =
+let pull_exn ?depth ?(pull_type=`Merge) upstream t =
   let msg = "Synching with upstream store" in
-  Irmin.pull_exn (t msg) ?depth upstream `Update
+  Irmin.pull_exn (t msg) ?depth upstream pull_type
 
 let push_exn ?depth upstream t =
   let msg = "Pushing to upstream store" in
-  Irmin.pull_exn (t msg) ?depth upstream `Update
+  Irmin.push_exn (t msg) ?depth upstream
 
 (* how is depth controlled ??? TBD *)
 let sync user mlogout config =
   let open Server_config in
+  let open Irmin_storage in
   match config.master with
   | Some master 
     when master <> "localhost" && master <> "127.0.0.1" && config.data_store = `Irmin ->
@@ -53,12 +54,12 @@ let sync user mlogout config =
   let remote = Printf.sprintf "git://%s%s" master path in
   let upstream = Irmin.remote_uri remote in
   Log_.log `Info3 (Printf.sprintf "### synching local %s with remote %s\n" local remote);
-  let rec _maintenance () =
+  let rec _maintenance ?(pull_type=`Merge) () =
     catch (fun () ->
       (* need to synchronize??? with the client access or the versioning takes
        * care of this? *)
       create local >>= fun t ->
-      pull_exn upstream t >>
+      pull_exn ~pull_type upstream t >>
       push_exn upstream t >>
       Lwt.pick [
         Lwt_mutex.lock mlogout >> return `Done;
@@ -72,6 +73,10 @@ let sync user mlogout config =
       return ()
     ) >> _maintenance () 
   in
-  _maintenance ()
+  Ssl_.get_user_keys ~user Server_config.srv_config >>= fun keys ->
+  IrminStorage.create Server_config.srv_config user "INBOX" keys >>= fun store ->
+  IrminStorage.exists store >>= function
+  | `No -> _maintenance ~pull_type:`Update ()
+  | _ -> _maintenance ()
   );
   | _ -> ()
