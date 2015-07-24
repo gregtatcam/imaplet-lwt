@@ -145,6 +145,7 @@ let create config =
       let id = next_id () in
       f (
         fun () ->
+        let user_logout = Lwt_mutex.create () in
         catch(
           fun () ->
             init_connection msgt netw >>= fun() ->
@@ -156,15 +157,19 @@ let create config =
                 noop_modseq = ref Int64.zero; capability=ref [];config;
                 client_last_active = ref (Unix.gettimeofday());
                 client_timed_out = Lwt_mutex.create ();
+                user_logout;
                 compression = ref None} in
             Lwt_mutex.lock ctx.client_timed_out >>= fun () ->
+            Lwt_mutex.lock ctx.user_logout >>= fun () ->
             add_id ctx;
             Imap_cmd.client_requests msgt ctx >>= fun _ ->
+            Lwt_mutex.unlock user_logout;
             Log_.log `Info1 (Printf.sprintf "### closed client connection %s\n" (Int64.to_string id));
             rem_id id;
             try_close ctx.!netr >> try_close ctx.!netw >> try_close_sock sock_c 
         )
         (fun ex -> 
+          Lwt_mutex.unlock user_logout;
           Log_.log `Info1 (Printf.sprintf "### closed client connection %s: %s\n" (Int64.to_string id)
             (Printexc.to_string ex));
           rem_id id; try_close netr >> try_close netw >> try_close_sock sock_c) >>= fun () ->
