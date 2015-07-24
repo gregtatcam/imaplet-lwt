@@ -220,14 +220,18 @@ let handle_authenticate context auth_type text =
     ]
   end >>= fun text ->
   Account.authenticate auth_type text >>= function
-    | `Ok (m,u,p) -> response context (Some State_Authenticated) m (Some
-    (Amailbox.create context.config u (Some p)))
+    | `Ok (m,u,p) -> 
+      Replica_maint.sync u context.user_logout Server_config.srv_config;
+      response context (Some State_Authenticated) m (Some
+        (Amailbox.create context.config u (Some p)))
     | `Error e -> response context None e None
 
 let handle_login context user password =
   Account.login user password >>= function
-    | `Ok (m,u,p) -> response context (Some State_Authenticated) m (Some
-    (Amailbox.create context.config u (Some p)))
+    | `Ok (m,u,p) -> 
+      Replica_maint.sync u context.user_logout Server_config.srv_config;
+      response context (Some State_Authenticated) m (Some
+        (Amailbox.create context.config u (Some p)))
     | `Error e -> response context None e None
 
 let handle_starttls context =
