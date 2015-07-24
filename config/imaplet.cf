@@ -114,3 +114,13 @@ hybrid false
 
 # relay_authreq, require authentication for relay
 relay_authreq false
+
+# master address used for replication
+#master
+
+# master repository location
+# master_repo, default is the same as irmin_path
+#master_repo
+
+# replicate_interval, frequency of replication in sec, master must be set
+#replicate_interval 30
