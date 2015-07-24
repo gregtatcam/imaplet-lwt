@@ -37,23 +37,24 @@ let get_mbox_type t =
   | "mbox" -> `Mailbox
   | _ -> raise InvalidCommand
 
-let rec args i user force mbox_type =
+let rec args i user force mbox_type ignore =
   if i >= Array.length Sys.argv then
-    user,force,mbox_type
+    user,force,mbox_type,ignore
   else (
     match Sys.argv.(i) with 
-    | "-u" -> args (i+2) (Some Sys.argv.(i+1)) force mbox_type
-    | "-f" -> args (i+1) user true mbox_type
-    | "-t" -> args (i+2) user force (get_mbox_type Sys.argv.(i+1))
+    | "-u" -> args (i+2) (Some Sys.argv.(i+1)) force mbox_type ignore
+    | "-f" -> args (i+1) user true mbox_type ignore
+    | "-t" -> args (i+2) user force (get_mbox_type Sys.argv.(i+1)) ignore
+    | "-i" -> args (i+1) user force mbox_type true
     | _ -> raise InvalidCommand
   )
 
 let usage () =
-  Printf.printf "usage: imaplet_create_account -u [user:pswd] [-f] -t [irmin|workdir|maildir|mbox]\n%!"
+  Printf.printf "usage: imaplet_create_account -u [user:pswd] [-f] -t [irmin|workdir|maildir|mbox] [-i]\n%!"
 
 let commands f =
   try 
-    let (user,force,mbox_type) = args 1 None false `Irmin in
+    let (user,force,mbox_type,ignore) = args 1 None false `Irmin false in
     if user = None || 
       Regex.match_regex ~regx:("^\\([^:]+\\):\\([^:]+\\)$")
       (Utils.option_value_exn user) = false then
@@ -62,6 +63,7 @@ let commands f =
       try 
         f (Str.matched_group 1 (Utils.option_value_exn user)) 
           (Str.matched_group 2 (Utils.option_value_exn user)) force mbox_type
+          ignore
       with ex -> Printf.printf "%s\n%!" (Printexc.to_string ex)
   with _ -> usage ()
 
@@ -168,9 +170,8 @@ let failed user_path msg =
 
 let created = ref None
 
-
 let () =
-  commands (fun user pswd force mbox_type ->
+  commands (fun user pswd force mbox_type ignore ->
     let user_path = Utils.user_path ~regx:"%user%.*$" ~path:srv_config.user_cert_path ~user () in
     let user_cert_path = Utils.user_path ~path:srv_config.user_cert_path ~user () in 
     let irmin_path = Utils.user_path ~path:srv_config.irmin_path ~user () in
@@ -179,7 +180,8 @@ let () =
     let priv_path = Filename.concat user_cert_path srv_config.key_name in
     let pem_path = Filename.concat user_cert_path srv_config.pem_name in
     let git_init () =
-      Lwt_process.pread ~stderr:`Dev_null ~stdin:`Close ("",[|"git";"init";"--bare";irmin_path|]) >>= fun _ -> 
+      Lwt_process.pread ~stderr:`Dev_null ~stdin:`Close 
+        ("",[|"git";"init";"--bare";Filename.concat irmin_path ".git"|]) >>= fun _ -> 
       return ()
     in
     let build m mailbox keys =
@@ -226,21 +228,25 @@ let () =
         ) >>
         dir_cmd repo (fun () -> 
           repo_init () >>
-          Ssl_.get_user_keys ~user ~pswd srv_config >>= fun keys ->
-          factory "" keys >>= fun (module Mailbox) ->
-          Mailbox.MailboxStorage.create_account Mailbox.this >>= function
-          | `Exists -> raise AccountExists
-          | `Ok ->
-          let create_mailbox mailbox =
-            factory mailbox keys >>= fun (module Mailbox) ->
-            Mailbox.MailboxStorage.create_mailbox Mailbox.this >>
-            Mailbox.MailboxStorage.subscribe Mailbox.this >>
-            Mailbox.MailboxStorage.commit Mailbox.this
-          in
-          create_mailbox "INBOX" >>
-          create_mailbox "Drafts" >>
-          create_mailbox "Deleted Messages" >>
-          create_mailbox "Sent Messages"
+          if ignore then
+            return ()
+          else (
+            Ssl_.get_user_keys ~user ~pswd srv_config >>= fun keys ->
+            factory "" keys >>= fun (module Mailbox) ->
+            Mailbox.MailboxStorage.create_account Mailbox.this >>= function
+            | `Exists -> raise AccountExists
+            | `Ok ->
+            let create_mailbox mailbox =
+              factory mailbox keys >>= fun (module Mailbox) ->
+              Mailbox.MailboxStorage.create_mailbox Mailbox.this >>
+              Mailbox.MailboxStorage.subscribe Mailbox.this >>
+              Mailbox.MailboxStorage.commit Mailbox.this
+            in
+            create_mailbox "INBOX" >>
+            create_mailbox "Drafts" >>
+            create_mailbox "Deleted Messages" >>
+            create_mailbox "Sent Messages"
+          )
         ) >>= fun () ->
         set_users user pswd >>= fun () ->
         Printf.printf "success\n%!";
