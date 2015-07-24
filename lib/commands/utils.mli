@@ -73,3 +73,8 @@ val parse_user : string -> string * (string option)
 
 (* user@domain -> domain/user *)
 val user_to_path : string -> string
+
+(* unique string *)
+val unique : unit -> string
+
+val gethostbyname : string -> string list Lwt.t

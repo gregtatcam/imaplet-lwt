@@ -319,3 +319,17 @@ let user_to_path user =
 
 let user_path ?(regx="%user%") ~path ~user () =
   Regex.replace ~regx ~tmpl:(user_to_path user) path
+
+let unique () =
+  Printf.sprintf "%0.6f.%0.16f" (Unix.gettimeofday()) (Random.float 1000.)
+
+let gethostbyname host =
+  let open Lwt in
+  Lwt_unix.gethostbyname host >>= fun res ->
+  return (Array.fold_left (fun acc addr -> 
+    let addr = Unix.string_of_inet_addr addr in
+    if addr <> "127.0.0.1" && addr <> "0.0.0.0" then
+      (addr :: acc)
+    else
+      acc
+  ) [] res.h_addr_list)
