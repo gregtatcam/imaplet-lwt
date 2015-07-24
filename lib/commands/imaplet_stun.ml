@@ -118,19 +118,25 @@ let get_attributes resp =
   in get_attr resp 20 
 
 let stun_request ?interface addr port =
-  client_send_dgram ?interface (`Inet (addr,port)) (fun _  rdr wr ->
-    let (transid,msg) = request() in
-    wr msg >>= fun s ->
-    let buff = String.create 2048 in
-    Utils.with_timeout 5. (fun () ->
-      rdr buff >>= fun (size,_,_) -> return (Some size)
-    ) (fun _ -> return None) >>= function
-    | None -> return None
-    | Some size ->
-    let resp = (String.sub buff 0 size) in
-    let rsp_type = field resp 0 2 in validate rsp_type [0x01;0x01] "failed type";
-    let rsp_length =  field resp 2 2 in 
-    let rsp_cookie = field resp 4 4 in validate rsp_cookie magic_cookie "invalid cookie";
-    let rsp_transid = field resp 8 12 in validate rsp_transid transid "invalid transid";
-    return (get_attributes resp)
-  ) None
+  catch (fun () ->
+    client_send_dgram ?interface (`Inet (addr,port)) (fun _  rdr wr ->
+      let (transid,msg) = request() in
+      wr msg >>= fun s ->
+      let buff = String.create 2048 in
+      Utils.with_timeout 5. (fun () ->
+        rdr buff >>= fun (size,_,_) -> return (Some size)
+      ) (fun _ -> return None) >>= function
+      | None -> return None
+      | Some size ->
+      let resp = (String.sub buff 0 size) in
+      let rsp_type = field resp 0 2 in validate rsp_type [0x01;0x01] "failed type";
+      let rsp_length =  field resp 2 2 in 
+      let rsp_cookie = field resp 4 4 in validate rsp_cookie magic_cookie "invalid cookie";
+      let rsp_transid = field resp 8 12 in validate rsp_transid transid "invalid transid";
+      return (get_attributes resp)
+    ) None
+  ) 
+  (fun ex ->
+    Log_.log `Error (Printf.sprintf "### stun_request exception %s\n" (Printexc.to_string ex));
+    return None
+  )
