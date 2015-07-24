@@ -28,7 +28,7 @@ type netio = Lwt_io.input_channel * Lwt_io.output_channel*
  * if Some then the message must be relayed
  * user * doman * relay_records
  *)
-type relayRecord = [`None|`DirectRelay of string*int|`MXRelay of (int*string list) list]
+type relayRecord = [`None|`DirectRelay of string*(int list)|`MXRelay of (int*string list) list]
 
 type cmd_context = { 
   (* server configuration *) 
