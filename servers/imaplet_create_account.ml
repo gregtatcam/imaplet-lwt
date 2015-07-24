@@ -179,7 +179,7 @@ let () =
     let priv_path = Filename.concat user_cert_path srv_config.key_name in
     let pem_path = Filename.concat user_cert_path srv_config.pem_name in
     let git_init () =
-      Lwt_process.pread ~stderr:`Dev_null ~stdin:`Close ("",[|"git";"init";irmin_path|]) >>= fun _ -> 
+      Lwt_process.pread ~stderr:`Dev_null ~stdin:`Close ("",[|"git";"init";"--bare";irmin_path|]) >>= fun _ -> 
       return ()
     in
     let build m mailbox keys =
