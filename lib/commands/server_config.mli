@@ -55,6 +55,10 @@ type imapConfig = {
   resolve: [`File of string|`NS of ((string*string) list) * (string list)] option;
   relayfrom: string option; (* file defining 'from' users allowed to relay *)
   relay_authreq: bool; (* require authenticated user to relay, default false *)
+  master: string option; (* master address, used for replication, default None *)
+  master_repo: string option; (* master repo location, default None - same as irmin_path *)
+  replicate_interval: float; (* frequency of replication polling in sec, default
+  30sec, master must be set *)
 }
 
 val default_config : imapConfig

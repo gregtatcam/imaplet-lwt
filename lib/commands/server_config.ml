@@ -56,6 +56,10 @@ type imapConfig = {
   resolve: [`File of string|`NS of ((string*string) list) * (string list)] option;
   relayfrom: string option; (* file defining 'from' users allowed to relay, default None *)
   relay_authreq: bool; (* require authenticated user to relay, default false *)
+  master: string option; (* master address, used for replication, default None *)
+  master_repo: string option; (* master repo location, default None - same as irmin_path *)
+  replicate_interval: float; (* frequency of replication polling in sec, default
+  30sec, master must be set *)
 }
 
 let default_config = {
@@ -97,6 +101,9 @@ let default_config = {
   resolve = None;
   relayfrom = None;
   relay_authreq = false;
+  master = None;
+  master_repo = None;
+  replicate_interval = 30.;
 }
 
 let validate_config config =
@@ -214,7 +221,8 @@ let config_of_lines lines =
           | "rebuild_irmin" -> {acc with rebuild_irmin = bval n v false}
           | "inbox_path" -> {acc with inbox_path = v}
           | "mail_path" -> {acc with mail_path = v}
-          | "irmin_path" -> {acc with irmin_path = v}
+          | "irmin_path" -> {acc with irmin_path = v;master_repo=if
+            acc.master_repo <> None then acc.master_repo else Some v}
           | "irmin_expand" -> {acc with irmin_expand = bval n v false}
           | "max_msg_size" -> {acc with max_msg_size = ival n v 10_000_000}
           | "smtp_addr" -> {acc with smtp_addr = v}
@@ -261,6 +269,9 @@ let config_of_lines lines =
           | "resolve" -> {acc with resolve = resolve_of_string (log n) v}
           | "relayfrom" -> {acc with relayfrom = Some v}
           | "relay_authreq" -> {acc with relay_authreq = bval n v false}
+          | "master" -> {acc with master = Some v}
+          | "master_repo" -> {acc with master_repo = Some v}
+          | "replicate_interval" -> {acc with replicate_interval = fval n v 30.}
           | _ -> Printf.fprintf stderr "unknown configuration %s\n%!" n; acc
         ) else 
           acc
