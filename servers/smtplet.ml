@@ -217,25 +217,40 @@ let syntx_from next_state ~msg cmd context =
     return `Next
   )
 
+(* is this the master domain 
+ *)
+let is_master_domain domain context =
+  match context.config.master with
+  | Some master 
+    when master <> "localhost" && master <> "127.0.0.1" && master = domain -> true
+  | _ -> false
+
+(* is the domain in the server's domain
+ *)
 let in_my_domain context domain =
-  let interface = context.config.smtp_addr in
-  let mydomain = context.config.domain in
+  let interface = context.config.smtp_addr in (* interface listening on *)
+  let mydomain = context.config.domain in (* server's domain *)
   Log_.log `Info2 
     (Printf.sprintf "### detecting send to domain %s on interface %s, my domain
     %s, configured domains %s\n" 
     domain interface mydomain context.config.domain) ;
-  Utils.get_interfaces () >>= fun my_ips ->
+  Utils.get_interfaces () >>= fun my_ips -> (* interfaces on this server *)
   begin
   let dexists domains domain = 
     List.exists (fun d -> d = domain) (Str.split (Str.regexp ";") domains) in
-  if dexists context.config.domain domain then (
+  if dexists context.config.domain domain || is_master_domain domain context then (
     return my_ips (* it's my domain *)
   ) else if (try let _ = Unix.inet_addr_of_string domain in true with _ -> false) then (
     return [domain] (* already ip *)
   ) else (
-    Imaplet_dns.gethostbyname ?config:(context.config.resolve) domain
+    Imaplet_dns.gethostbyname ?config:(context.config.resolve) domain >>= fun ips ->
+    if List.length ips = 0 then
+      Utils.gethostbyname domain (* could be local host *)
+    else
+      return ips
   )
   end >>= fun domain_ips ->
+  (* find intersection of domain ip's with this server ip's *)
   let ip = (List.fold_left (fun acc ip -> 
      if List.exists (fun i -> i = ip) my_ips then (
        (Some ip)
@@ -249,11 +264,13 @@ let in_my_domain context domain =
     return `No
   | Some ip ->
     Log_.log `Info2 (Printf.sprintf "### found overlaping ip %s\n" ip);
+    (* listening on any interface or specific interface *)
     if interface = "0.0.0.0" || interface = ip then
       return `Yes
-    else
+    else (* server is not listening on this interface *)
       return `NoInterface
 
+(* authenticate user in the domain *)
 let authenticate_user_domain user = function
   | None -> authenticate_user user ()
   | Some domain ->
@@ -266,6 +283,7 @@ let authenticate_user_domain user = function
       return (user,p,auth)
     )
 
+(* restrict relay to domain/users specified in the restriction file *)
 let restrict_relay context =
   let (user,domain) = context.from in
   match context.config.relayfrom with
@@ -349,28 +367,46 @@ let syntx_rcpt next_state ~msg cmd context =
         valid_from context
       end >>= fun valid ->
       if valid then (
-        Log_.log `Info1 (Printf.sprintf "### scheduling to relay to domain %s\n" domain);
-        Imaplet_dns.resolve ?config:(context.config.resolve) domain >>= fun mx_rr ->
+        (* route optimization should go in here -
+         * if the destination is public then should send directly to it, etc TBD *)
+        (* if have master then relay via the master *)
+        let relay_domain =
+          match context.config.master with
+          | Some master when master <> "localhost" && master <> "127.0.0.1" -> 
+            Log_.log `Info1 
+              (Printf.sprintf "### scheduling to relay to domain %s via master %s\n" domain master);
+            master
+          | _ -> 
+            Log_.log `Info1 (Printf.sprintf "### scheduling to relay to domain %s\n" domain);
+            domain
+        in
+        Imaplet_dns.resolve ?config:(context.config.resolve) relay_domain >>= fun mx_rr ->
         (* might be relaying directly to another device in the same network,
          * need a way to figure it out?
          *)
         if List.length mx_rr > 0 then (
           write context "250 OK" >>
           return (`RcptTo (user,domain,`MXRelay mx_rr))
-        ) else if (try let _ = Unix.inet_addr_of_string domain in true with _ -> false) then (
+        ) else if (try let _ = Unix.inet_addr_of_string relay_domain in true with _ -> false) then (
           (* temp work around for direct send - if the address is ip then use
            * it, need to make a more general case, look at the headers, check if
            * STUN mapped address in the header (additional header X-?) matches
            * this STUN mapped address *)
           write context "250 OK" >>
-          return (`RcptTo (user,domain, `DirectRelay (domain,2587)))
+          return (`RcptTo (user,domain, `DirectRelay (relay_domain,[25;587;2587])))
         ) else (
-          write context "550 5.1.2 : Invalid domain" >>
-          return `Next
+          (* local hostname *)
+          Utils.gethostbyname relay_domain >>= fun hosts ->
+          if List.length hosts > 0 then (
+            return (`RcptTo (user,domain, `DirectRelay (List.hd hosts,[25;587;2587])))
+          ) else (
+            write context "550 5.1.2 : Invalid domain" >>
+            return `Next
+          )
         )
       ) else (
-        write context "550 5.7.8 : From address rejected: User unknown in local
- recipient table or invalid domain" >>
+        write context 
+          "550 5.7.8 : From address rejected: User unknown in local recipient table or invalid domain" >>
         return `Next
       )
     )
@@ -484,10 +520,19 @@ let all state context = function
   | `Next -> return (`State (state,context))
   | _ -> return (`State (state,context))
 
+let spoof_master content context =
+  match context.config.master with
+  | Some master when master <> "localhost" && master <> "127.0.0.1" && 
+      Str.string_match (Str.regexp_case_fold "^from:") content 0 ->
+    Log_.log `Debug "### spoofing master\n";
+    Str.replace_first (Str.regexp "[^@]+>") (master ^ ">") content
+  | _ -> content
+
 let rec datastream context =
   Log_.log `Debug "smtp: starting datastream\n";
   next ~isdata:true ~cur_state:`DataStream ~next_state:[`DataStream] context >>= function
   | `DataStream str ->
+    let str = spoof_master str context in
     if buffer_ends context.buff "\r\n" && str = "." then (
       let (_,_,relay_rec) = List.hd context.rcpt in
       if relay_rec = `None then (
@@ -542,6 +587,7 @@ let rec authplain context =
   Log_.log `Debug "smtp: starting authplain\n";
   next ~isdata:true ~cur_state:`AuthPlain ~next_state:[`DataStream] context >>= function
   | `DataStream text ->
+    Log_.log `Info3 (Printf.sprintf "### REMOVE THIS authplain %s\n" text); 
     authenticate text context
   | _ -> return `Rset (* will not get here, cause of DataStream *)
 
@@ -549,6 +595,7 @@ let rec authlogin user context =
   Log_.log `Debug "smtp starting authlogin\n";
   next ~isdata:true ~cur_state:`AuthLogin ~next_state:[`DataStream] context >>= function
   | `DataStream text -> 
+    Log_.log `Info3 (Printf.sprintf "### REMOVE THIS authlogin %s\n" text); 
     begin
     match user with
     | None ->
