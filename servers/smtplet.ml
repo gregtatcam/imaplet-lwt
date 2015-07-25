@@ -521,12 +521,14 @@ let all state context = function
   | _ -> return (`State (state,context))
 
 let spoof_master content context =
-  match context.config.master with
-  | Some master when master <> "localhost" && master <> "127.0.0.1" && 
-      Str.string_match (Str.regexp_case_fold "^from:") content 0 ->
-    Log_.log `Debug "### spoofing master\n";
-    Str.replace_first (Str.regexp "[^@]+>") (master ^ ">") content
-  | _ -> content
+  if Str.string_match (Str.regexp_case_fold "^from:") content 0 then (
+    match context.config.master with
+    | Some master when master <> "localhost" && master <> "127.0.0.1" ->
+      Log_.log `Debug "### spoofing master\n";
+      Str.replace_first (Str.regexp "[^@]+>") (master ^ ">") content
+    | _ -> content
+  ) else
+    content
 
 let rec datastream context =
   Log_.log `Debug "smtp: starting datastream\n";
@@ -534,19 +536,26 @@ let rec datastream context =
   | `DataStream str ->
     let str = spoof_master str context in
     if buffer_ends context.buff "\r\n" && str = "." then (
-      let (_,_,relay_rec) = List.hd context.rcpt in
-      if relay_rec = `None then (
-        catch (fun () ->
-         send_to_imap imap_addr context >>
-         write context "250 OK"
-        )  
-        (fun ex -> write context "554 5.5.0 Transaction failed") >> 
-        return `Rset
-      ) else (
-        async (fun () -> Smtplet_relay.relay context.config.stun_header context (send_to_imap imap_addr));
-        write context "250 OK" >>
-        return `Rset
-      )
+      async (fun () ->
+        Lwt_list.iter_p (fun rcpt ->
+          let context = {context with rcpt = [rcpt]} in
+          let (_,_,relay_rec) = rcpt in
+          if relay_rec = `None then (
+            catch (fun () ->
+              send_to_imap imap_addr context
+            )  
+            (fun ex -> 
+              Log_.log `Error 
+                (Printf.sprintf "### IMAP delivery failure: %s\n" (Printexc.to_string ex));
+              Smtplet_relay.failed (send_to_imap imap_addr) "554 5.5.0 Transaction failed" context
+            )
+          ) else (
+            Smtplet_relay.relay context.config.stun_header context (send_to_imap imap_addr)
+          )
+        ) context.rcpt
+      );
+      write context "250 OK" >>
+      return `Rset
     ) else (
       Buffer.add_string context.buff (str ^ "\r\n");
       return (`State (datastream, context))
@@ -556,7 +565,7 @@ let rec datastream context =
 
 let rec rcptto context =
   Log_.log `Debug "smtp: starting rcptto\n";
-  next ~cur_state:`RcptTo ~next_state:[`RcpTo;`Data;`Vrfy;`Noop;`Helo;`Ehlo;`Rset] context >>= function
+  next ~cur_state:`RcptTo ~next_state:[`RcptTo;`Data;`Vrfy;`Noop;`Helo;`Ehlo;`Rset] context >>= function
   | `RcptTo r -> return (`State (rcptto, {context with rcpt = r :: context.rcpt}))
   | `Data -> return (`State (datastream,context))
   | cmd -> all (rcptto) context cmd

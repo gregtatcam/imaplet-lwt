@@ -64,3 +64,4 @@
 * fix opam lint errors
 * add dedup to calculate duplicate attachments in mbox
 * add replication and routing via 'master'
+* add multiple recipient support
