@@ -56,6 +56,7 @@ type imapConfig = {
   resolve: [`File of string|`NS of ((string*string) list) * (string list)] option;
   relayfrom: string option; (* file defining 'from' users allowed to relay, default None *)
   relay_authreq: bool; (* require authenticated user to relay, default false *)
+  replicate: bool; (* replicate client with master, default true (master must be set too) *)
   master: string option; (* master address, used for replication, default None *)
   master_repo: string option; (* master repo location, default None - same as irmin_path *)
   replicate_interval: float; (* frequency of replication polling in sec, default
@@ -101,6 +102,7 @@ let default_config = {
   resolve = None;
   relayfrom = None;
   relay_authreq = false;
+  replicate = true;
   master = None;
   master_repo = None;
   replicate_interval = 30.;
@@ -269,6 +271,7 @@ let config_of_lines lines =
           | "resolve" -> {acc with resolve = resolve_of_string (log n) v}
           | "relayfrom" -> {acc with relayfrom = Some v}
           | "relay_authreq" -> {acc with relay_authreq = bval n v false}
+          | "replicate" -> {acc with replicate = bval n v true}
           | "master" -> {acc with master = Some v}
           | "master_repo" -> {acc with master_repo = Some v}
           | "replicate_interval" -> {acc with replicate_interval = fval n v 30.}

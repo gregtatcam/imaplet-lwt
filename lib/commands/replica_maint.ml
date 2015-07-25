@@ -43,7 +43,7 @@ let sync user mlogout config =
   let open Irmin_storage in
   match config.master with
   | Some master 
-    when master <> "localhost" && master <> "127.0.0.1" && config.data_store = `Irmin ->
+    when config.replicate && master <> "localhost" && master <> "127.0.0.1" && config.data_store = `Irmin ->
   async(fun () ->
   let local = Utils.user_path ~path:srv_config.irmin_path ~user () in
   let path = 
@@ -54,6 +54,12 @@ let sync user mlogout config =
   let remote = Printf.sprintf "git://%s%s" master path in
   let upstream = Irmin.remote_uri remote in
   Log_.log `Info3 (Printf.sprintf "### synching local %s with remote %s\n" local remote);
+  let pick () =
+    Lwt.pick [
+      Lwt_mutex.lock mlogout >> return `Done;
+      Lwt_unix.sleep config.replicate_interval >> return `Timeout; 
+    ]
+  in
   let rec _maintenance ?(pull_type=`Merge) () =
     catch (fun () ->
       (* need to synchronize??? with the client access or the versioning takes
@@ -61,17 +67,14 @@ let sync user mlogout config =
       create local >>= fun t ->
       pull_exn ~pull_type upstream t >>
       push_exn upstream t >>
-      Lwt.pick [
-        Lwt_mutex.lock mlogout >> return `Done;
-        Lwt_unix.sleep config.replicate_interval >> return `Timeout; 
-      ] >>= function
-      | `Done -> return ()
-      | `Timeout -> _maintenance ()
+      pick ()
     ) 
     (fun ex -> 
       Log_.log `Error (Printf.sprintf "### replication maintenance error: %s\n" (Printexc.to_string ex));
-      return ()
-    ) >> _maintenance () 
+      pick ()
+    ) >>= function
+    | `Done -> return ()
+    | `Timeout -> _maintenance () 
   in
   Ssl_.get_user_keys ~user Server_config.srv_config >>= fun keys ->
   IrminStorage.create Server_config.srv_config user "INBOX" keys >>= fun store ->

@@ -55,6 +55,7 @@ type imapConfig = {
   resolve: [`File of string|`NS of ((string*string) list) * (string list)] option;
   relayfrom: string option; (* file defining 'from' users allowed to relay *)
   relay_authreq: bool; (* require authenticated user to relay, default false *)
+  replicate: bool; (* replicate client with master, default true (master must be set too) *)
   master: string option; (* master address, used for replication, default None *)
   master_repo: string option; (* master repo location, default None - same as irmin_path *)
   replicate_interval: float; (* frequency of replication polling in sec, default

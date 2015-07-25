@@ -115,6 +115,9 @@ hybrid false
 # relay_authreq, require authentication for relay
 relay_authreq false
 
+# replicate, replicate client with master, default true
+# replicate
+
 # master address used for replication
 #master
 
