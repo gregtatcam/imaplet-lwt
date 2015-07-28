@@ -65,3 +65,4 @@
 * add dedup to calculate duplicate attachments in mbox
 * add replication and routing via 'master'
 * add multiple recipient support
+* reduce UID dependency - reference message metadata via message hash, hash to uid map is stored in the index
