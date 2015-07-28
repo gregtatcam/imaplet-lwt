@@ -79,12 +79,19 @@ let send_data r w context =
     let dc = Lwt_io.of_bytes ~mode:Lwt_io.input lwt_buff in
     (* send one line of data at a time *)
     let rec send () =
-      Lwt_io.read_line_opt dc >>= function
-      | Some str -> write_relay w str >> send ()
-      | None -> write_relay w "." >>
-        read_relay_rc r "^250" >>= fun res ->
-        write_relay w "QUIT" >>
-        return res
+      catch (fun () ->
+        Lwt_io.read_line_opt dc >>= function
+        | Some str -> write_relay w str >> send ()
+        | None -> write_relay w "." >>
+          read_relay_rc r "^250" >>= fun res ->
+          write_relay w "QUIT" >>
+          return res
+      )
+      ( fun ex ->
+        let msg = Printexc.to_string ex in
+        Log_.log `Error (Printf.sprintf "### failed to send data %s\n" msg); 
+        return (`PermanentFailure msg)
+      )
     in
     send ()
   ) else (
