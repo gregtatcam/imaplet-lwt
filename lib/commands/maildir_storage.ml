@@ -585,9 +585,10 @@ struct
     Utils.with_file tmp_file ~flags:[Unix.O_CREAT;Unix.O_WRONLY] ~perms:0o660 ~mode:Lwt_io.Output
     ~f:(fun oc ->
       begin
-        if t.config.maildir_parse then
-          Email_parse.message_to_blob t.config t.keys message
-        else
+        if t.config.maildir_parse then (
+          Email_parse.message_to_blob t.config t.keys message >>= fun (msg_hash, message) ->
+          return message
+        ) else
           return (encrypt t (Mailbox.Message.to_string message))
       end >>= fun message ->
       Lwt_io.write oc message

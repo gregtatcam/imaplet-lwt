@@ -276,7 +276,8 @@ let parse ?(transform=default_transform) pub_key config (message:Mailbox.Message
   let hash = Imap_crypto.get_hash (Mailbox.Message.to_string message) in
   do_encrypt pub_key config (transform (`Postmark (Mailbox.Postmark.to_string message.postmark))) >>= fun postmark ->
   do_encrypt_content pub_key config message.email save_attachment hash transform >>= fun (headers,content, attachments) ->
-  save_message hash postmark headers content attachments
+  save_message hash postmark headers content attachments >>
+  return hash
 
 (* there must be a better way to do it TBD *)
 let rec printable buffer str =
@@ -395,8 +396,8 @@ let message_to_blob config keys message =
   ~save_attachment:(fun msg_hash contid attachment ->
     push_attach (Some attachment);
     return ()
-  ) >>
-  return (Buffer.contents buffer_out)
+  ) >>= fun hash ->
+  return (hash,(Buffer.contents buffer_out))
 
 (* lazy_read_message lazily reads the message from the storage
  * lazy_read_metadata - same for metadata
