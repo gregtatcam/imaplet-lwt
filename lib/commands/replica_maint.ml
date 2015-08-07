@@ -23,18 +23,57 @@
 open Lwt
 open Irmin_unix
 
-let store = Irmin.basic (module Irmin_git.FS) (module Irmin.Contents.String)
+module Store = Irmin.Basic (Irmin_git.FS) (Irmin.Contents.String)
+module View = Irmin.View(Store)
+
+let opt = function
+  | None -> "nil"
+  | Some x -> x
+
+let opt_opt = function
+  | None -> "nil"
+  | Some x -> opt x
+
+let pr path old x y =
+  Log_.log `Info3 (Printf.sprintf "### merging path %s\n" (String.concat "/" path));
+  old () >>= function
+  | `Ok o ->
+    Log_.log `Info3 (Printf.sprintf "\t--- old %s\n" (opt_opt o));
+    Log_.log `Info3 (Printf.sprintf "\t--- x %s\n" (opt x));
+    Log_.log `Info3 (Printf.sprintf "\t--- y %s\n" (opt y));return ()
+  | `Conflict c -> Log_.log `Info3 (Printf.sprintf "\t--- conflict %s\n" c);return ()
+
+module ImapContents =
+  struct
+    include Irmin.Contents.String
+    (* simple merge, assume one user updating her mailbox, so any change goes
+     * into the merged revision
+     *)
+    let merge path ~old x y =
+      let open Irmin.Merge.OP in
+      pr path old x y >>
+      begin
+      if x = None then
+        ok y
+      else
+        ok x
+      end
+  end
+
+let store = Irmin.basic (module Irmin_git.FS) (module ImapContents)
 
 let create local =
   let config = Irmin_git.config ~root:local ~bare:true () in
   Irmin.create store config task
 
-let pull_exn ?depth ?(pull_type=`Merge) upstream t =
+let pull_exn ?depth upstream local =
   let msg = "Synching with upstream store" in
-  Irmin.pull_exn (t msg) ?depth upstream pull_type
+  create local >>= fun t ->
+  Irmin.pull_exn (t msg) ?depth upstream `Merge
 
-let push_exn ?depth upstream t =
+let push_exn ?depth upstream local =
   let msg = "Pushing to upstream store" in
+  create local >>= fun t ->
   Irmin.push_exn (t msg) ?depth upstream
 
 (* how is depth controlled ??? TBD *)
@@ -60,13 +99,12 @@ let sync user mlogout config =
       Lwt_unix.sleep config.replicate_interval >> return `Timeout; 
     ]
   in
-  let rec _maintenance ?(pull_type=`Merge) () =
+  let rec _maintenance () =
     catch (fun () ->
       (* need to synchronize??? with the client access or the versioning takes
        * care of this? *)
-      create local >>= fun t ->
-      pull_exn ~pull_type upstream t >>
-      push_exn upstream t >>
+      pull_exn upstream local >>
+      push_exn upstream local >>
       pick ()
     ) 
     (fun ex -> 
@@ -76,10 +114,6 @@ let sync user mlogout config =
     | `Done -> return ()
     | `Timeout -> _maintenance () 
   in
-  Ssl_.get_user_keys ~user Server_config.srv_config >>= fun keys ->
-  IrminStorage.create Server_config.srv_config user "INBOX" keys >>= fun store ->
-  IrminStorage.exists store >>= function
-  | `No -> _maintenance ~pull_type:`Update ()
-  | _ -> _maintenance ()
+  _maintenance ()
   );
   | _ -> ()
