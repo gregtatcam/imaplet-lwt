@@ -66,3 +66,5 @@
 * add replication and routing via 'master'
 * add multiple recipient support
 * reduce UID dependency - reference message metadata via message hash, hash to uid map is stored in the index
+* add custom content merge
+* move hash references to the immutable storage location
