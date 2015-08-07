@@ -230,7 +230,7 @@ let handle_append ic oc mailbox msgfile =
     write_echo oc cmd >>
     write_echo oc message >>
     read_net_echo ic >>
-    return (cnt + 1)
+    return (`Ok (cnt + 1))
   ) 0 >>= fun _ ->
   return ()
 

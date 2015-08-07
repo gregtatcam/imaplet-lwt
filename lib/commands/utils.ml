@@ -256,11 +256,13 @@ let rec get_message ic buffer f acc =
   let open Lwt in
   Lwt_io.read_line_opt ic >>= function
   | None -> 
-    if Buffer.length buffer > 0 then
+    if Buffer.length buffer > 0 then (
       let content = Buffer.contents buffer in
       Buffer.clear buffer;
-      f acc content
-    else
+      f acc content >>= function
+      | `Ok acc -> return acc
+      | `Done acc -> return acc
+    ) else
       return acc
   | Some line ->
     let line = line ^ "\n" in
@@ -268,8 +270,9 @@ let rec get_message ic buffer f acc =
       let content = Buffer.contents buffer in
       Buffer.clear buffer;
       Buffer.add_string buffer line;
-      f acc content >>= fun acc ->
-      get_message ic buffer f acc 
+      f acc content >>= function
+      | `Ok acc -> get_message ic buffer f acc 
+      | `Done acc -> return acc
     ) else (
       Buffer.add_string buffer line;
       get_message ic buffer f acc
@@ -277,7 +280,7 @@ let rec get_message ic buffer f acc =
 
 let fold_email_with_file file f init =
   Lwt_io.with_file ~mode:Lwt_io.Input file (fun ic ->
-    get_message ic (Buffer.create 100) f init
+    get_message ic (Buffer.create 100) f init 
   )
 
 let fold_email_with_file1 file f init =
