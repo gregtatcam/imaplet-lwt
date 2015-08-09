@@ -60,13 +60,13 @@ let rec args i script addr port ssl user =
     | "-script" -> args (i+2) Sys.argv.(i+1) addr port ssl user
     | "-address" -> args (i+2) script Sys.argv.(i+1) port ssl user
     | "-port" -> args (i+2) script addr (int_of_string (Sys.argv.(i+1))) ssl user
-    | "-ssl" -> args (i+1) script addr port true user
+    | "-ssl" -> args (i+2) script addr port (bool_of_string (Sys.argv.(i+1))) user
     | "-user" -> args (i+2) script addr port ssl (get_user Sys.argv.(i+1))
     | _ -> raise InvalidCommand
 
 let usage () =
-  Printf.fprintf stderr "usage: client -script [path] -address [address] -port
-  [port] -ssl [-user [user:pswd]]\n%!"
+  Printf.fprintf stderr "usage: client -script [path] -address [address] \
+  -port [port] [-ssl [true|false]] [-user [user:pswd]]\n%!"
 
 let process_meta line = 
   let re = Re_posix.compile_pat ~opts:[`ICase] "^(timer_start|timer_stop|echo)[ \t]+(.*)$" in
