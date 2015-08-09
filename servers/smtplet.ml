@@ -18,7 +18,6 @@ open Imaplet
 open Commands
 open Socket_utils
 open Server_config
-open Account
 open Dates
 open Smtplet_context
 
@@ -28,6 +27,16 @@ exception Valid
 let _ = Log_.set_log "smtplet.log"
 
 let imap_addr = `Unix (Filename.concat Install.data_path "sock/smtp")
+
+let authenticate_user ?(b64=false) user ?password () =
+  catch (fun () ->
+    Account.authenticate_user ~b64 user ?password ()
+  )
+  (fun ex ->
+    Log_.log `Error (Printf.sprintf "### authentication error: %s" (Printexc.to_string ex));
+    return ("",None,false)
+  )
+
 
 (*
  From dovecot@localhost.local  Thu Jul 17 14:53:00 2014
@@ -58,7 +67,12 @@ let add_postmark from_ msg =
 let send_to_imap addr context =
   Log_.log `Info1 "smtp: sending to imap\n";
   let (_from,domain) = context.from in
-  let msg = Stun_maint.cache_stun_records domain (Buffer.contents context.buff) in
+  let msg = 
+    if context.config.stun_header = true then
+      Stun_maint.cache_stun_records domain (Buffer.contents context.buff)
+    else
+      Buffer.contents context.buff
+  in
   Log_.log `Info3 (Printf.sprintf "%s" (if String.length msg > 1000 then
     (String.sub msg 0 1000) else (msg)));
   let (_to,_,_) = List.hd context.rcpt in
@@ -567,19 +581,19 @@ let rec rcptto context =
   Log_.log `Debug "smtp: starting rcptto\n";
   next ~cur_state:`RcptTo ~next_state:[`RcptTo;`Data;`Vrfy;`Noop;`Helo;`Ehlo;`Rset] context >>= function
   | `RcptTo r -> return (`State (rcptto, {context with rcpt = r :: context.rcpt}))
-  | `Data -> return (`State (datastream,context))
+  | `Data -> return (`State (datastream,{context with buff = Buffer.create 100}))
   | cmd -> all (rcptto) context cmd
 
 let rec mailfrom context =
   Log_.log `Debug "smtp: starting mailfrom\n";
   next ~cur_state:`MailFrom ~next_state:[`RcptTo;`Vrfy;`Noop;`Helo;`Ehlo;`Rset] context >>= function 
-  | `RcptTo r -> return (`State (rcptto, {context with rcpt = r :: context.rcpt}))
+  | `RcptTo r -> return (`State (rcptto, {context with rcpt = [r]}))
   | cmd -> all (mailfrom) context cmd
 
 let authenticate text ?password context =
   begin
   match password with 
-  | None -> plain_auth text
+  | None -> Account.plain_auth text
   | Some password ->
     authenticate_user ~b64:true text ~password ()
   end >>= fun (user,pswd,auth) ->
