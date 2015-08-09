@@ -177,7 +177,7 @@ let () =
         ~save_attachment:(fun _ contid attachment ->
           map := MapStr.add (key contid cnt) attachment !map;
           return ()
-        ) >>= fun () ->
+        ) >>= fun _ ->
         (if lzy then (
           let postmark = get map (key "postmark" cnt) in
           let headers = get map (key "headers" cnt) in

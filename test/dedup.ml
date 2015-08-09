@@ -25,7 +25,7 @@ let () =
           dedup := MapStr.add hash (1, String.length attachment,comps) !dedup
         );
         return ()
-      ) >> return (`Ok (cnt+1))
+      ) >>= fun _ -> return (`Ok (cnt+1))
     ) 1 >>= fun _ ->
     let (dup,total,ctotal) = MapStr.fold (fun k (cnt,size,comps) (dup,total,ctotal) ->
       if cnt > 1 then (
