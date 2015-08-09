@@ -25,12 +25,12 @@ let opt_val = function
 
 let rec args i archive addr port ehlo from rcptto =
   if i >= Array.length Sys.argv then
-    mbox,addr,port,ehlo,from,rcptto
+    archive,addr,port,ehlo,from,rcptto
   else
     match Sys.argv.(i) with 
     | "-archive" -> args (i+2) (Some Sys.argv.(i+1)) addr port ehlo from rcptto
     | "-address" -> args (i+2) archive (Some Sys.argv.(i+1)) port ehlo from rcptto
-    | "-port" -> args (i+2) archive addr (int_of_string (Some Sys.argv.(i+1)) ehlo from rcptto
+    | "-port" -> args (i+2) archive addr (Some (int_of_string Sys.argv.(i+1))) ehlo from rcptto
     | "-ehlo" -> args (i+1) archive addr port (bool_of_string (Sys.argv.(i+1))) from rcptto
     | "-from" -> args (i+2) archive addr port ehlo (Some Sys.argv.(i+1)) rcptto
     | "-rcptto" -> args (i+2) archive addr port ehlo from (Some Sys.argv.(i+1))
@@ -42,20 +42,36 @@ let usage () =
 
 let commands f =
   try 
-    let archive,addr,port,ehlo,from,rcptto = args None None None false None None in
+    let archive,addr,port,ehlo,from,rcptto = args 1 None None None false None None in
     f (opt_val archive) (opt_val addr) (opt_val port) ehlo (opt_val from) (opt_val rcptto)
   with _ -> usage ()
 
+let post archive from rcpt f =
+  Utils.fold_email_with_file archive (fun acc message ->
+    let ic = Lwt_io.of_bytes ~mode:Lwt_io.Input (Lwt_bytes.of_string message) in
+    let feeder () = 
+      Lwt_io.read_line_opt ic >>= function
+      (* escape single dot *)
+      | Some str -> if str = "." then return (Some "..") else return (Some str)
+      | None -> return None
+    in
+    feeder () >>= fun _ -> (* ignore the from postmark *)
+    f ~from ~rcpt feeder >>= function
+    | `Ok -> Lwt_io.close ic >> return (`Ok ())
+    | `Error err ->
+      Printf.printf "failed: %s\n%!" err;
+      Lwt_io.close ic >>
+      return (`Done ())
+  ) () >>
+  return `Ok
+
 let () =
-  commands (fun archive addr port ehlo from rcptto
+  commands (fun archive addr port ehlo from rcptto ->
     Lwt_main.run (
       catch(fun() ->
-        Utils.fold_email_with_file archive (fun acc message ->
-          let t = Smtplet_clnt.create archive addr port ehlo from rcptto (fun () ->
-          ) >>= function
-          | `Ok
-          | `Error err
-        )
+        let t = Smtplet_clnt.create addr port ehlo (post archive from rcptto) in
+        Smtplet_clnt.send_server t >>= fun _ ->
+        return ()
       )
       (fun ex -> Printf.fprintf stderr "client: fatal exception: %s %s"
         (Printexc.to_string ex) (Printexc.get_backtrace()); return()

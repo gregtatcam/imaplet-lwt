@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: 03a9d0060f86b6e7d1ee2f387bee602f)
+# DO NOT EDIT (digest: 9c2e14df8157d63b9bf75b943f1c1b90)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -78,6 +78,7 @@ true: annot, bin_annot
 "lib/commands/response.cmx": for-pack(Commands)
 "lib/commands/seq_iterator.cmx": for-pack(Commands)
 "lib/commands/server_config.cmx": for-pack(Commands)
+"lib/commands/smtplet_clnt.cmx": for-pack(Commands)
 "lib/commands/socket_utils.cmx": for-pack(Commands)
 "lib/commands/ssl_.cmx": for-pack(Commands)
 "lib/commands/storage.cmx": for-pack(Commands)
@@ -448,6 +449,26 @@ true: annot, bin_annot
 "utils/client.native": pkg_tls.lwt
 "utils/client.native": pkg_zip
 <utils/*.ml{,i,y}>: pkg_zip
+# Executable smtp_client
+"utils/smtp_client.native": pkg_cstruct.unix
+"utils/smtp_client.native": pkg_dns
+"utils/smtp_client.native": pkg_dns.lwt
+"utils/smtp_client.native": pkg_fieldslib.syntax
+"utils/smtp_client.native": pkg_ipaddr
+"utils/smtp_client.native": pkg_irmin.unix
+"utils/smtp_client.native": pkg_lwt
+"utils/smtp_client.native": pkg_lwt.syntax
+"utils/smtp_client.native": pkg_lwt.unix
+"utils/smtp_client.native": pkg_nocrypto
+"utils/smtp_client.native": pkg_re
+"utils/smtp_client.native": pkg_re.posix
+"utils/smtp_client.native": pkg_sexplib.syntax
+"utils/smtp_client.native": pkg_str
+"utils/smtp_client.native": pkg_threads
+"utils/smtp_client.native": pkg_tls.lwt
+"utils/smtp_client.native": use_commands
+"utils/smtp_client.native": use_imaplet
+"utils/smtp_client.native": use_parsemail
 # Executable stun
 "utils/stun.native": pkg_cstruct.unix
 "utils/stun.native": pkg_dns

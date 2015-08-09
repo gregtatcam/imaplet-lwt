@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: 28b2a6c8dceb8028d0394079e75a9227)
+# DO NOT EDIT (digest: fd6cbc388cd9cd812387f2a8ef0cd8a4)
 Account
 Amailbox
 Configuration
@@ -28,6 +28,7 @@ Replica_maint
 Response
 Seq_iterator
 Server_config
+Smtplet_clnt
 Socket_utils
 Ssl_
 Storage

@@ -17,9 +17,17 @@ open Lwt
 
 type t
 
+type result = [`Ok|`Error of string]
+
+(* 
+ * return `Ok to continue posting more messages or `Done to stop
+ *)
+type post = ((from:string -> rcpt:string -> (unit -> string option Lwt.t) -> result Lwt.t) ->
+  result Lwt.t)
+
 (* log * ip * port * ehlo * from * rcptto * data-feed *)
 val create : 
   ?log:([`None|`Error|`Debug|`Info1|`Info2|`Info3] -> string -> unit) ->
-  string -> int -> bool -> string -> string -> (unit -> string option Lwt.t) -> t
+  string -> int -> bool -> post -> t
 
-val send_server :t -> [`Ok|`Error of string] Lwt.t
+val send_server :t -> result Lwt.t

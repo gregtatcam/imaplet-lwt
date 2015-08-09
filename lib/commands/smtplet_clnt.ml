@@ -16,14 +16,21 @@
 open Lwt
 open Socket_utils
 
+type result = [`Ok|`Error of string]
+
+type post = ((from:string -> rcpt:string -> (unit -> string option Lwt.t) -> result Lwt.t) ->
+  result Lwt.t)
+
 (* from rcpt data *)
 type t =
-  {ip:string;port:int;ehlo:bool;from:string;rcptto:string;
+  {ip:string;port:int;ehlo:bool;
   log:([`None|`Error|`Debug|`Info1|`Info2|`Info3] -> string -> unit) option;
-  line_of_data: (unit -> string option Lwt.t)}
+  post: post}
 
-let create ?log ip port ehlo from rcptto line_of_data =
-  {ip;port;ehlo;from;rcptto;log;line_of_data}
+type post_info = {smtp:t;from:string;rcpt:string;feeder:(unit -> string option Lwt.t)}
+
+let create ?log ip port ehlo post =
+  {ip;port;ehlo;log;post}
 
 let timeout = 120.
 
@@ -66,23 +73,21 @@ let read_server_rc t r rc =
 (*
  * send data to the server
  *)
-let send_data t r w =
-  write_server t w "DATA" >>
-  read_server_rc t r "^250\\|354" >>= fun res ->
+let send_data t1 r w =
+  write_server t1.smtp w "DATA" >>
+  read_server_rc t1.smtp r "^250\\|354" >>= fun res ->
   if res = `Ok then (
     (* send one line of data at a time *)
     let rec send () =
       catch (fun () ->
-        t.line_of_data () >>= function
-        | Some str -> write_server t w str >> send ()
-        | None -> write_server t w "." >>
-          read_server_rc t r "^250" >>= fun res ->
-          write_server t w "QUIT" >>
-          return res
+        t1.feeder () >>= function
+        | Some str -> write_server t1.smtp w str >> send ()
+        | None -> write_server t1.smtp w "." >>
+          read_server_rc t1.smtp r "^250" 
       )
       ( fun ex ->
         let msg = Printexc.to_string ex in
-        dolog t `Error (Printf.sprintf "### failed to send data %s\n" msg); 
+        dolog t1.smtp `Error (Printf.sprintf "### failed to send data %s\n" msg); 
         return (`Error msg)
       )
     in
@@ -92,22 +97,27 @@ let send_data t r w =
   )
 
 (* send rcptto *)
-let send_rcptto t r w =
-  write_server t w (Printf.sprintf "RCPT TO: <%s>" t.rcptto) >>
-  read_server_rc t r "^250" >>= fun res ->
+let send_rcptto t1 r w =
+  write_server t1.smtp w (Printf.sprintf "RCPT TO: <%s>" t1.rcpt) >>
+  read_server_rc t1.smtp r "^250" >>= fun res ->
   if res = `Ok then
-    send_data t r w 
+    send_data t1 r w 
   else
     return res
 
 (* send from *)
 let send_from t r w =
-  write_server t w (Printf.sprintf "MAIL FROM: <%s>" t.from) >>
-  read_server_rc t r "^250" >>= fun res ->
-  if res = `Ok then
-    send_rcptto t r w 
-  else
-    return res
+  t.post (fun ~from ~rcpt feeder ->
+    let t1 = {smtp = t; from; rcpt; feeder} in
+    write_server t w (Printf.sprintf "MAIL FROM: <%s>" from) >>
+    read_server_rc t r "^250" >>= fun res ->
+    if res = `Ok then
+      send_rcptto t1 r w 
+    else
+      return res
+  ) >>= fun res ->
+  write_server t w "QUIT" >>
+  return res
 
 (* read ehlo response *)
 let rec read_ehlo t r = function
@@ -164,21 +174,23 @@ let send_starttls t sock r w =
 (* start state machine *)
 let greetings t sock r w =
   read_server_rc t r "^220" >>= function
-  | `Ok -> send_ehlo t r w (fun capabilities ->
-    if is_capability capabilities "starttls" then
-      send_starttls t sock r w 
-    else if t.ehlo then
-      return (`Error "starttls is required")
-    else
-      send_from t r w)
+  | `Ok -> 
+    send_ehlo t r w (fun capabilities ->
+      if is_capability capabilities "starttls" then
+        send_starttls t sock r w 
+      else if t.ehlo then
+        return (`Error "starttls is required")
+      else
+        send_from t r w
+    )
   | res -> return res
 
-(* try to send to available ports until success *)
+(* start smtp state machine *)
 let send_server t = 
   Lwt.pick [
     Lwt_unix.sleep timeout >> return `Timeout;
     (catch (fun () -> client_send (`Inet (t.ip,t.port)) (fun res sock ic oc ->
-         greetings t sock ic oc) `Ok >>= fun res -> return (`Ok res)) 
+       greetings t sock ic oc) `Ok >>= fun res -> return (`Ok res)) 
     (fun ex -> dolog t `Error (Printf.sprintf "### failed to send %s\n"
       (Printexc.to_string ex)); return `Timeout (* try another port *))
     )

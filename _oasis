@@ -115,6 +115,7 @@ Library commands
                     Response,
                     Seq_iterator,
                     Server_config,
+                    Smtplet_clnt,
                     Socket_utils,
                     Ssl_,
                     Storage,
@@ -254,6 +255,14 @@ Executable client
   CompiledObject  : native
   MainIs	  : client.ml
   BuildDepends	  : lwt,lwt.unix,lwt.syntax,re,re.posix,threads,tls.lwt,zip,str
+
+Executable smtp_client
+  Build$:           flag(utils)
+  Install	  : false
+  Path		  : utils
+  CompiledObject  : native
+  MainIs	  : smtp_client.ml
+  BuildDepends	  : lwt,lwt.unix,lwt.syntax,imaplet,imaplet.commands
 
 Executable stun
   Build		  : true
