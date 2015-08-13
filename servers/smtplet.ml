@@ -37,7 +37,6 @@ let authenticate_user ?(b64=false) user ?password () =
     return ("",None,false)
   )
 
-
 (*
  From dovecot@localhost.local  Thu Jul 17 14:53:00 2014
     for <dovecot@localhost>; Thu, 17 Jul 2014 14:53:00 +0100 (BST)
@@ -65,6 +64,7 @@ let add_postmark from_ msg =
  * should it be SSL? TBD 
  *)
 let send_to_imap addr context =
+  catch (fun () ->
   Log_.log `Info1 "smtp: sending to imap\n";
   let (_from,domain) = context.from in
   let msg = 
@@ -91,8 +91,13 @@ let send_to_imap addr context =
     read () >>= fun resp -> (* a OK APPEND completed *)
     write "a logout\r\n" >>= fun () ->
     read () >>= fun resp -> (* * BYE *)
-    return ()
-  ) ()
+    return true
+  ) true
+  ) 
+  (fun ex -> 
+    Log_.log `Error (Printf.sprintf "### send to imap exception: %s\n" (Printexc.to_string ex)); 
+    return false
+  )
 
 let write context msg = 
   Log_.log `Info1 (Printf.sprintf "<-- %s\n" msg);
@@ -550,25 +555,31 @@ let rec datastream context =
   | `DataStream str ->
     let str = spoof_master str context in
     if buffer_ends context.buff "\r\n" && str = "." then (
+      (* send relayed on another thread *)
       async (fun () ->
         Lwt_list.iter_p (fun rcpt ->
           let context = {context with rcpt = [rcpt]} in
           let (_,_,relay_rec) = rcpt in
           if relay_rec = `None then (
-            catch (fun () ->
-              send_to_imap imap_addr context
-            )  
-            (fun ex -> 
-              Log_.log `Error 
-                (Printf.sprintf "### IMAP delivery failure: %s\n" (Printexc.to_string ex));
-              Smtplet_relay.failed (send_to_imap imap_addr) "554 5.5.0 Transaction failed" context
-            )
+            return ()
           ) else (
-            Smtplet_relay.relay context.config.stun_header context (send_to_imap imap_addr)
+            Smtplet_relay.relay context.config.stun_header context 
+              (fun context -> send_to_imap imap_addr context >>= fun _ -> return())
           )
         ) context.rcpt
       );
-      write context "250 OK" >>
+      (* serialize send to the local accounts *)
+      Lwt_list.fold_left_s (fun acc rcpt ->
+        let context = {context with rcpt = [rcpt]} in
+        let (_,_,relay_rec) = rcpt in
+        if relay_rec = `None then (
+          send_to_imap imap_addr context >>= fun res ->
+          return (acc && res)
+        ) else (
+          return acc
+        )
+      ) true context.rcpt >>= fun res ->
+      write context (if res then "250 OK" else "554 5.5.0 Transaction failed") >>
       return `Rset
     ) else (
       Buffer.add_string context.buff (str ^ "\r\n");
