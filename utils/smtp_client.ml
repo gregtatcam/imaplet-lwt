@@ -59,7 +59,6 @@ let post archive from rcpt f =
     f ~from ~rcpt feeder >>= function
     | `Ok -> Lwt_io.close ic >> return (`Ok ())
     | `Error err ->
-      Printf.printf "failed: %s\n%!" err;
       Lwt_io.close ic >>
       return (`Done ())
   ) () >>
@@ -69,7 +68,9 @@ let () =
   commands (fun archive addr port ehlo from rcptto ->
     Lwt_main.run (
       catch(fun() ->
-        let t = Smtplet_clnt.create addr port ehlo (post archive from rcptto) in
+        let t = Smtplet_clnt.create 
+          ~log:(fun level msg -> if level = `Error then Printf.printf "%s%!" msg else ()) 
+          addr port ehlo (post archive from rcptto) in
         Smtplet_clnt.send_server t >>= fun _ ->
         return ()
       )
