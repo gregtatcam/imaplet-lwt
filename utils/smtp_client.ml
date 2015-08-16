@@ -47,7 +47,8 @@ let commands f =
   with _ -> usage ()
 
 let post archive from rcpt f =
-  Utils.fold_email_with_file archive (fun acc message ->
+  Utils.fold_email_with_file archive (fun cnt message ->
+    Printf.printf "%d\n%!" cnt;
     let ic = Lwt_io.of_bytes ~mode:Lwt_io.Input (Lwt_bytes.of_string message) in
     let feeder () = 
       Lwt_io.read_line_opt ic >>= function
@@ -57,11 +58,12 @@ let post archive from rcpt f =
     in
     feeder () >>= fun _ -> (* ignore the from postmark *)
     f ~from ~rcpt feeder >>= function
-    | `Ok -> Lwt_io.close ic >> return (`Ok ())
+    | `Ok -> Lwt_io.close ic >> return (`Ok (cnt+1))
     | `Error err ->
+      Printf.printf "error %s\n%!" err;
       Lwt_io.close ic >>
-      return (`Done ())
-  ) () >>
+      return (`Done (cnt))
+  ) 1 >>
   return `Ok
 
 let () =
