@@ -39,30 +39,31 @@ let parse_labels str =
   let labels = Str.split (Str.regexp ",") str in
   List.fold_left (fun acc l -> (Regex.dequote l) :: acc) [] labels
 
-let rec args i mbox index labels outdir rand =
+let rec args i mbox index labels outdir rand size =
   if i >= Array.length Sys.argv then
-    mbox, index,labels, outdir, rand
+    mbox, index,labels, outdir, rand, size
   else
     match Sys.argv.(i) with 
-    | "-archive" -> args (i+2) Sys.argv.(i+1) index labels outdir rand
-    | "-index" -> args (i+2) mbox (parse_start_stop Sys.argv.(i+1)) labels outdir rand
-    | "-labels" -> args (i+2) mbox index (parse_labels Sys.argv.(i+1)) outdir rand
-    | "-split" -> args (i+2) mbox index labels (Some Sys.argv.(i+1)) rand
-    | "-rand" -> args (i+1) mbox index labels outdir true
+    | "-archive" -> args (i+2) Sys.argv.(i+1) index labels outdir rand size
+    | "-index" -> args (i+2) mbox (parse_start_stop Sys.argv.(i+1)) labels outdir rand size
+    | "-labels" -> args (i+2) mbox index (parse_labels Sys.argv.(i+1)) outdir rand size
+    | "-split" -> args (i+2) mbox index labels (Some Sys.argv.(i+1)) rand size
+    | "-rand" -> args (i+1) mbox index labels outdir true size
+    | "-size" -> args (i+2) mbox index labels outdir rand size
     | _ -> raise InvalidCommand
 
 let usage () =
   Printf.fprintf stderr "usage: get_messages -archive filename -index
-  start[:stop] -labels [label1,...,labeln] -split [outdir] -rand\n%!"
+  start[:stop] -labels [label1,...,labeln] -split [outdir] -rand -size [maxmsgsizeinMB]\n%!"
 
 let commands f =
   try 
-    let mbox,index,labels,outdir,rand = args 1 "" (1,max_int) [] None false in
+    let mbox,index,labels,outdir,rand,size = args 1 "" (1,max_int) [] None false None in
     if mbox = "" then
       raise InvalidCommand
     else
       try 
-        f mbox index labels outdir rand
+        f mbox index labels outdir rand size
       with ex -> Printf.printf "%s\n%!" (Printexc.to_string ex)
   with _ -> usage ()
 
@@ -96,9 +97,11 @@ let mailbox_of_gmail_label message =
       (label)
   )
 
-let filtered message label labels = 
-  if labels = [] then
+let filtered message label labels size = 
+  if labels = [] || size = None then
     false
+  else if String.length message > (Utils.option_value_exn size) * 1024 * 1024 then
+    true
   else (
     (List.exists (fun l -> (String.lowercase l) = (String.lowercase label)) labels) = false
   )
@@ -148,14 +151,14 @@ let fold_email_rand path f init =
   loop MapStr.empty (1,init) >>= fun (_,acc) ->
   return acc
 
-let get_messages path start stop labels outdir rand =
+let get_messages path start stop labels outdir rand size =
   let fold = if rand then fold_email_rand else Utils.fold_email_with_file in
   fold path (fun (cnt,outfiles) message ->
     if cnt > stop then
       return (`Done (cnt,outfiles))
     else (
       let label = mailbox_of_gmail_label message in
-      if filtered message label labels = false then (
+      if filtered message label labels size = false then (
         begin
         if cnt >= start then
           output message label outfiles outdir
@@ -170,8 +173,8 @@ let get_messages path start stop labels outdir rand =
   MapStr.fold (fun _ oc _ -> Lwt_io.close oc) outfiles (return ())
 
 let () =
-  commands (fun mbox (start,stop) labels outdir rand ->
+  commands (fun mbox (start,stop) labels outdir rand size ->
     Lwt_main.run (
-      get_messages mbox start stop labels outdir rand
+      get_messages mbox start stop labels outdir rand size
     )
   )
