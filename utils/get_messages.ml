@@ -49,7 +49,8 @@ let rec args i mbox index labels outdir rand size =
     | "-labels" -> args (i+2) mbox index (parse_labels Sys.argv.(i+1)) outdir rand size
     | "-split" -> args (i+2) mbox index labels (Some Sys.argv.(i+1)) rand size
     | "-rand" -> args (i+1) mbox index labels outdir true size
-    | "-size" -> args (i+2) mbox index labels outdir rand size
+    | "-size" -> args (i+2) mbox index labels outdir rand 
+      (Some ((int_of_string Sys.argv.(i+1)) * 1024 * 1024))
     | _ -> raise InvalidCommand
 
 let usage () =
@@ -100,7 +101,7 @@ let mailbox_of_gmail_label message =
 let filtered message label labels size = 
   if labels = [] || size = None then
     false
-  else if String.length message > (Utils.option_value_exn size) * 1024 * 1024 then
+  else if String.length message > Utils.option_value_exn size then
     true
   else (
     (List.exists (fun l -> (String.lowercase l) = (String.lowercase label)) labels) = false
