@@ -104,6 +104,15 @@ let write context msg =
   let (_,w,_) = context.io in
   Lwt_io.write w (msg ^ "\r\n") 
 
+let write_return context msg log res =
+  log res;
+  write context msg >>
+  return res
+
+let log_return log res =
+  log res;
+  return res
+
 let read context =
   let (r,_,_) = context.io in
   catch (fun () ->
@@ -125,16 +134,13 @@ let buffer_ends buffer str =
   else
     (Buffer.sub buffer (buf_len-str_len) str_len) = str 
 
-let syntx_helo next_state ~msg str context =
+let syntx_helo log next_state ~msg str context =
   if List.exists (fun s -> s = `Helo) next_state = false then (
-    write context msg >>
-    return `NextOutOfSeq
+    write_return context msg log `NextOutOfSeq
   ) else if Regex.match_regex ~regx:"^[ \t]+\\([^ \t]\\)+$" str then (
-    write context "250 OK" >>
-    return `Helo
+    write_return context "250 OK" log `Helo
   ) else (
-    write context "501 5.5.2 Syntax: HELO hostname" >>
-    return `Next
+    write_return context "501 5.5.2 Syntax: HELO hostname" log `Next
   )
 
 let starttls_required context =
@@ -156,10 +162,9 @@ let auth_required context =
   else
     false
 
-let syntx_ehlo next_state ~msg str context =
+let syntx_ehlo log next_state ~msg str context =
   if List.exists (fun s -> s = `Ehlo) next_state = false then (
-    write context msg >>
-    return `NextOutOfSeq
+    write_return context msg log `NextOutOfSeq
   ) else if Regex.match_regex ~regx:"^[ \t]+\\([^ \t]+\\)$" str then (
     Lwt_unix.gethostname () >>= fun host ->
     let host = "250-" ^ host in
@@ -175,65 +180,53 @@ let syntx_ehlo next_state ~msg str context =
         host :: cap*)
     in
     Lwt_list.iter_s (fun c -> write context c) cap >>
-    return `Ehlo
+    log_return log `Ehlo
   ) else (
-    write context "501 5.5.2 Syntax: EHLO hostname" >>
-    return `Next
+    write_return context "501 5.5.2 Syntax: EHLO hostname" log `Next
   )
 
-let syntx_rset next_state ~msg context =
+let syntx_rset log next_state ~msg context =
   if List.exists (fun s -> s = `Rset) next_state = false then (
-    write context msg >>
-    return `NextOutOfSeq
+    write_return context msg log `NextOutOfSeq
   ) else (
-    write context "250 OK" >>
-    return `Rset
+    write_return context "250 OK" log `Rset
   )
 
-let syntx_noop next_state ~msg context =
+let syntx_noop log next_state ~msg context =
   if List.exists (fun s -> s = `Noop) next_state = false then (
-    write context msg >>
-    return `NextOutOfSeq
+    write_return context msg log `NextOutOfSeq
   ) else (
-    write context "250 OK" >> 
-    return `Next
+    write_return context "250 OK" log `Next
   )
 
-let syntx_vrfy next_state ~msg str context =
+let syntx_vrfy log next_state ~msg str context =
   if List.exists (fun s -> s = `Vrfy) next_state = false then (
-    write context msg >>
-    return `NextOutOfSeq
+    write_return context msg log `NextOutOfSeq
   ) else if Regex.match_regex ~regx:"^[ \t]+<?\\([^ <>\t]+\\)>?$" str then (
     let user = Str.matched_group 1 str in
     authenticate_user user () >>= fun (_,_,auth) ->
     if auth then (
-      write context ("252 " ^ user) >>
-      return `Next
+      write_return context ("252 " ^ user) log `Next
     ) else (
-      write context ("550 5.7.8 " ^ user ^ "Recipient address rejected: User unknown in local recipient table") >>
-      return `Next
+      write_return context 
+        ("550 5.7.8 " ^ user ^ "Recipient address rejected: User unknown in local recipient table") log `Next
     )
   ) else (
-    write context "501 5.5.2 Bad recipient address syntax" >>
-    return `Next
+    write_return context "501 5.5.2 Bad recipient address syntax" log `Next
   ) 
 
-let syntx_quit context =
-  write context "250 OK" >>
-  return `Quit
+let syntx_quit log context =
+  write_return context "250 OK" log `Quit
 
-let syntx_from next_state ~msg cmd context =
+let syntx_from log next_state ~msg cmd context =
   if List.exists (fun s -> s = `MailFrom) next_state = false then (
-    write context msg >>
-    return `NextOutOfSeq
+    write_return context msg log `NextOutOfSeq
   ) else if Regex.match_regex ~case:false ~regx:"^[ \t]+FROM:[ \t]*<?\\([^ <>@\t]+\\)\\(@\\([^>]*\\)\\)?" cmd then (
     let user = Str.matched_group 1 cmd in
     let domain = try Some (Str.matched_group 3 cmd) with Not_found -> None in
-    write context "250 OK" >>
-    return (`MailFrom (user,domain))
+    write_return context "250 OK" log (`MailFrom (user,domain))
   ) else (
-    write context "501 5.5.2 Syntax: MAIL FROM:<address>" >>
-    return `Next
+    write_return context "501 5.5.2 Syntax: MAIL FROM:<address>" log `Next
   )
 
 (* is this the master domain 
@@ -354,30 +347,26 @@ let valid_from context =
   else
     return res
 
-let syntx_rcpt next_state ~msg cmd context =
+let syntx_rcpt log next_state ~msg cmd context =
   if List.exists (fun s -> s = `RcptTo) next_state = false then (
-    write context msg >>
-    return `NextOutOfSeq
+    write_return context msg log `NextOutOfSeq
   ) else if Regex.match_regex ~case:false ~regx:"^[ \t]+TO:[ \t]*<?\\([^ <>@\t]+\\)@\\([^>]*\\)" cmd then (
     let user = Str.matched_group 1 cmd in
     let domain =  Str.matched_group 2 cmd in
     in_my_domain context domain >>= fun res ->
     if res = `NoInterface then ( (* sent to wrong interface *)
-      write context "550 5.1.2 : Not accepting on this network interface" >>
-      return `Next
+      write_return context "550 5.1.2 : Not accepting on this network interface" log `Next
     ) else if res = `Yes then (
       authenticate_user_domain user (Some domain) >>= fun (fqn,_,auth) ->
       if auth then (
-        write context "250 OK" >>
-        return (`RcptTo (fqn,domain,`None))
+        write_return context "250 OK" log (`RcptTo (fqn,domain,`None))
       ) else (
-        write context "550 5.7.8 : Recipient address rejected: User unknown in local recipient table" >>
-        return `Next
+        write_return context 
+          "550 5.7.8 : Recipient address rejected: User unknown in local recipient table" log `Next
       )
     (* have to relay, only allow authenticated users to relay *)
     ) else if context.config.relay_authreq && context.auth = None then (
-      write context "550 5.7.1 : Authentication required" >>
-      return `Next
+      write_return context "550 5.7.1 : Authentication required" log `Next
     ) else (
       begin
       if context.auth <> None then
@@ -404,132 +393,118 @@ let syntx_rcpt next_state ~msg cmd context =
          * need a way to figure it out?
          *)
         if List.length mx_rr > 0 then (
-          write context "250 OK" >>
-          return (`RcptTo (user,domain,`MXRelay mx_rr))
+          write_return context "250 OK" log (`RcptTo (user,domain,`MXRelay mx_rr))
         ) else if (try let _ = Unix.inet_addr_of_string relay_domain in true with _ -> false) then (
           (* temp work around for direct send - if the address is ip then use
            * it, need to make a more general case, look at the headers, check if
            * STUN mapped address in the header (additional header X-?) matches
            * this STUN mapped address *)
-          write context "250 OK" >>
-          return (`RcptTo (user,domain, `DirectRelay (relay_domain,[25;587;2587])))
+          write_return context "250 OK" log (`RcptTo (user,domain, `DirectRelay (relay_domain,[25;587;2587])))
         ) else (
           (* local hostname *)
           Utils.gethostbyname relay_domain >>= fun hosts ->
           if List.length hosts > 0 then (
-            return (`RcptTo (user,domain, `DirectRelay (List.hd hosts,[25;587;2587])))
+            log_return log (`RcptTo (user,domain, `DirectRelay (List.hd hosts,[25;587;2587])))
           ) else (
-            write context "550 5.1.2 : Invalid domain" >>
-            return `Next
+            write_return context "550 5.1.2 : Invalid domain" log `Next
           )
         )
       ) else (
-        write context 
-          "550 5.7.8 : From address rejected: User unknown in local recipient table or invalid domain" >>
-        return `Next
+        write_return context 
+          "550 5.7.8 : From address rejected: User unknown in local recipient table or invalid domain" 
+          log `Next
       )
     )
   ) else (
-    write context "501 5.5.2 Syntax: RCPT TO:<address>" >>
-    return `Next
+    write_return context "501 5.5.2 Syntax: RCPT TO:<address>" log `Next
   )
 
-let syntx_data next_state ~msg cmd context =
+let syntx_data log next_state ~msg cmd context =
   if List.exists (fun s -> s = `Data) next_state = false then (
-    write context msg >>
-    return `NextOutOfSeq
+    write_return context msg log `NextOutOfSeq
   ) else if Regex.match_regex ~regx:"^[ \t]*$" cmd then (
-    write context "354 End data with <CR><LF>.<CR><LF>" >>
-    return `Data
+    write_return context "354 End data with <CR><LF>.<CR><LF>" log `Data
   ) else (
-    write context "501 5.5.2 Syntax: DATA" >>
-    return `Next
+    write_return context "501 5.5.2 Syntax: DATA" log `Next
   )
 
-let syntx_starttls next_state ~msg cmd context =
+let syntx_starttls log next_state ~msg cmd context =
   if List.exists (fun s -> s = `Starttls) next_state = false then (
-    write context msg >>
-    return `NextOutOfSeq
+    write_return context msg log `NextOutOfSeq
   ) else if Regex.match_regex ~regx:"^[ \t]*$" cmd = false then (
-    write context "501 5.5.2 Syntax error" >>
-    return `Next
+    write_return context "501 5.5.2 Syntax error" log `Next
   ) else (
     let (_,_,s) = context.io in
     match s with
     | `Reg sock -> 
-      write context "220 ready to start TLS" >>
-      return (`Starttls sock)
+      write_return context "220 ready to start TLS" log (`Starttls sock)
     | _ ->
-      write context "454 4.5.0 TLS not available due to local problem" >>
-      return `Next
+      write_return context "454 4.5.0 TLS not available due to local problem" log `Next
   )
 
-let syntx_auth next_state ~msg cmd context =
+let syntx_auth log next_state ~msg cmd context =
   if List.exists (fun s -> s = `AuthPlain || s = `AuthLogin) next_state = false then (
-    write context msg >>
-    return `NextOutOfSeq
+    write_return context msg log `NextOutOfSeq
   ) else if Regex.match_regex ~case:false 
     ~regx:"^[ \t]+PLAIN[ \t]+\\([^ \t]+\\)$" cmd then (
-    return (`AuthPlain (Str.matched_group 1 cmd))
+    log_return log (`AuthPlain (Str.matched_group 1 cmd))
   ) else if Regex.match_regex ~case:false ~regx:"^[ \t]+PLAIN[ \t]*$" cmd then (
-    write context "334 " >> (* request the text *)
-    return (`AuthPlain "")
+    (* request the text *)
+    write_return context "334 " log (`AuthPlain "")
   ) else if Regex.match_regex ~case:false ~regx:"^[ \t]+LOGIN[ \t]*$" cmd then (
-    write context "334 VXNlcm5hbWU6" >>  (* 334 Username *)
-    return `AuthLogin
+    (* 334 Username *)
+    write_return context "334 VXNlcm5hbWU6" log `AuthLogin
   ) else (
-    write context "501 5.5.2 Syntax error" >>
-    return `NextAuthError
+    write_return context "501 5.5.2 Syntax error" log `NextAuthError
   )
+
+let dolog str cur_state next_state =
+  Log_.log `Info3 (Printf.sprintf "--> %s\n" 
+    begin
+    match next_state with
+    | `AuthPlain _ -> "AUTH PLAIN ..."
+    | `AuthLogin -> "AUTH LOGIN ..."
+    | `NextAuthError -> "AUTH error ..."
+    | `NextOutOfSeq when (String.lowercase (String.sub str 0 4)) = "auth" -> "AUTH out of seq ..."
+    | `DataStream _ when cur_state = `AuthPlain || cur_state = `AuthLogin -> "AUTH data ..."
+    | _ -> str
+    end)
 
 let next ?(isdata=false) ?(msg="503 5.5.1 Command out of sequence") ~cur_state ~next_state context =
   read context >>= function
   | None -> Log_.log `Debug "smtp: client terminated\n";return `Quit
   | Some str -> 
-  begin
+  let log = dolog str cur_state in
   let domatch ?(tmpl="\\(.*\\)$") rx =
     Regex.match_regex ~case:false ~regx:("^[ \t]*" ^ rx ^ tmpl) str in
   let get () = try Str.matched_group 1 str with _ -> "" in
   if isdata then (
-    return (`DataStream str)
+    log_return log (`DataStream str)
   ) else if domatch ~tmpl:"\\([ \t]+[^ \t]+?\\)?$" "HELO" then (
-    syntx_helo next_state ~msg (get ()) context
+    syntx_helo log next_state ~msg (get ()) context
   ) else if domatch ~tmpl:"\\([ \t]+[^ \t]+?\\)?$" "EHLO" then (
-    syntx_ehlo next_state ~msg (get ()) context
+    syntx_ehlo log next_state ~msg (get ()) context
   ) else if domatch ~tmpl:"\\([ \t]+[^ \t]+?.*\\)?$" "MAIL" then (
-    syntx_from next_state ~msg (get ()) context
+    syntx_from log next_state ~msg (get ()) context
   ) else if domatch ~tmpl:"\\([ \t]+[^ \t]+?.*\\)?$" "RCPT" then (
-    syntx_rcpt next_state ~msg (get ()) context
+    syntx_rcpt log next_state ~msg (get ()) context
   ) else if domatch ~tmpl:"\\([ \t]*.*\\)$" "DATA" then (
-    syntx_data next_state ~msg (get()) context
+    syntx_data log next_state ~msg (get()) context
   ) else if domatch ~tmpl:"\\([ \t]+[^ \t]+?\\)?$" "NOOP" then (
-    syntx_noop next_state ~msg context
+    syntx_noop log next_state ~msg context
   ) else if domatch ~tmpl:"\\([ \t]+[^ \t]+?\\)?$" "RSET" then (
-    syntx_rset next_state ~msg context
+    syntx_rset log next_state ~msg context
   ) else if domatch ~tmpl:"\\([ \t]+[^ \t]+?\\)?$" "STARTTLS" then (
-    syntx_starttls next_state ~msg (get ()) context
+    syntx_starttls log next_state ~msg (get ()) context
   ) else if domatch ~tmpl:"\\([ \t]+[^ \t]+?\\)?$" "QUIT" then (
-    syntx_quit context
+    syntx_quit log context
   ) else if domatch ~tmpl:"\\([ \t]+[^ \t]+?\\)?$" "VRFY" then (
-    syntx_vrfy next_state ~msg (get ()) context
+    syntx_vrfy log next_state ~msg (get ()) context
   ) else if domatch ~tmpl:"\\([ \t]+.*]+?\\)?$" "AUTH" then (
-    syntx_auth next_state ~msg (get ()) context
+    syntx_auth log next_state ~msg (get ()) context
   ) else (
-    write context "502 5.5.1 Error: command not recognized" >>
-    return `Next
+    write_return context "502 5.5.1 Error: command not recognized" log `Next
   )
-  end >>= fun res ->
-  let log_msg =
-  match res with
-  | `AuthPlain _ -> "AUTH PLAIN ..."
-  | `AuthLogin -> "AUTH LOGIN ..."
-  | `NextAuthError -> "AUTH error ..."
-  | `NextOutOfSeq when (String.lowercase (String.sub str 0 4)) = "auth" -> "AUTH out of seq ..."
-  | `DataStream _ when cur_state = `AuthPlain || cur_state = `AuthLogin -> "AUTH data ..."
-  | _ -> str
-  in
-  Log_.log `Info3 (Printf.sprintf "--> %s\n" log_msg);
-  return res
 
 let all state context = function
   | `Quit -> return `Quit
