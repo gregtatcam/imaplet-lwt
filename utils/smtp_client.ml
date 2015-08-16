@@ -48,7 +48,7 @@ let commands f =
 
 let post archive from rcpt f =
   Utils.fold_email_with_file archive (fun cnt message ->
-    Printf.printf "%d\n%!" cnt;
+    Printf.printf "%d\r%!" cnt;
     let ic = Lwt_io.of_bytes ~mode:Lwt_io.Input (Lwt_bytes.of_string message) in
     let feeder () = 
       Lwt_io.read_line_opt ic >>= function
@@ -74,6 +74,7 @@ let () =
           ~log:(fun level msg -> if level = `Error then Printf.printf "%s%!" msg else ()) 
           addr port ehlo (post archive from rcptto) in
         Smtplet_clnt.send_server t >>= fun _ ->
+        Printf.printf "done\n%!";
         return ()
       )
       (fun ex -> Printf.fprintf stderr "client: fatal exception: %s %s"
