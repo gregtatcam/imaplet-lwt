@@ -1,10 +1,10 @@
 (*
  * Copyright (c) 2013-2014 Gregory Tsipenyuk <gregtsip@cam.ac.uk>
- * 
+ *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
  * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
  * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
@@ -32,9 +32,12 @@ type post_info = {smtp:t;from:string;rcpt:string;feeder:(unit -> string option L
 let create ?log ip port ehlo post =
   {ip;port;ehlo;log;post}
 
+(* it may take a bit of time for the smtp server to write a large message to the
+ * imap server, so the response could take a long time. need to fix it on the
+ * smtp server side, sent response right away, send a failure later if needed *)
 let timeout = 120.
 
-let dolog t level msg = 
+let dolog t level msg =
   match t.log with
   | None -> ()
   | Some log -> log level msg
@@ -44,7 +47,7 @@ let dolog t level msg =
  *)
 let write_server t w msg =
   dolog t `Info3 (Printf.sprintf "<-- server write: %s\n" msg);
-  Lwt_io.write w (msg ^ "\r\n") 
+  Lwt_io.write w (msg ^ "\r\n")
 
 (*
  * read response from the server
@@ -58,12 +61,12 @@ let read_server t r =
   | None -> return None
 
 (*
- * read response from the server, 
+ * read response from the server,
  * match the response with the regex for Ok
  *)
 let read_server_rc t r rc =
   read_server t r >>= function
-  | Some str -> 
+  | Some str ->
     if Regex.match_regex ~regx:rc str then
       return `Ok
     else
@@ -79,19 +82,19 @@ let send_data t1 r w =
   if res = `Ok then (
     (* send one line of data at a time *)
     let rec send () =
-      catch (fun () ->
-        t1.feeder () >>= function
-        | Some str -> write_server t1.smtp w str >> send ()
-        | None -> write_server t1.smtp w "." >>
-          read_server_rc t1.smtp r "^250" 
-      )
-      ( fun ex ->
-        let msg = Printexc.to_string ex in
-        dolog t1.smtp `Error (Printf.sprintf "### failed to send data %s\n" msg); 
-        return (`Error msg)
-      )
+      t1.feeder () >>= function
+      | Some str -> write_server t1.smtp w str >> send ()
+      | None -> write_server t1.smtp w "." >>= fun () ->
+        read_server_rc t1.smtp r "^250"
     in
-    send ()
+    catch (fun () ->
+      send ()
+    )
+    (fun ex ->
+      let msg = Printexc.to_string ex in
+      dolog t1.smtp `Error (Printf.sprintf "### smtp client: failed to send data %s\n" msg);
+      return (`Error msg)
+    )
   ) else (
     return res
   )
@@ -101,7 +104,7 @@ let send_rcptto t1 r w =
   write_server t1.smtp w (Printf.sprintf "RCPT TO: <%s>" t1.rcpt) >>
   read_server_rc t1.smtp r "^250" >>= fun res ->
   if res = `Ok then
-    send_data t1 r w 
+    send_data t1 r w
   else
     return res
 
@@ -112,7 +115,7 @@ let send_from t r w =
     write_server t w (Printf.sprintf "MAIL FROM: <%s>" from) >>
     read_server_rc t r "^250" >>= fun res ->
     if res = `Ok then
-      send_rcptto t1 r w 
+      send_rcptto t1 r w
     else
       return res
   ) >>= fun res ->
@@ -129,7 +132,7 @@ let rec read_ehlo t r = function
       if Regex.match_regex ~regx:"^250\\([ -]\\)\\(.*\\)$" str then (
         let capabilities = (Str.matched_group 2 str) :: capabilities in
         (* last response must be "250 " *)
-        if (Str.matched_group 1 str) = "-" then 
+        if (Str.matched_group 1 str) = "-" then
           read_ehlo t r (`Ok capabilities)
         else
           return (`Ok capabilities)
@@ -150,9 +153,9 @@ let send_ehlo t r w (f:(string list -> [`Ok|`Error of string] Lwt.t)) =
 
 (* check for capability property *)
 let is_capability capabilities capability =
-  List.exists (fun cap -> 
+  List.exists (fun cap ->
     Regex.match_regex ~case:false ~regx:capability cap
-  ) capabilities 
+  ) capabilities
 
 (* starttls with the server *)
 let send_starttls t sock r w =
@@ -163,8 +166,8 @@ let send_starttls t sock r w =
     catch (fun () ->
     starttls_client t.ip sock () >>= fun (r,w) ->
     send_ehlo t r w (fun _ -> send_from t r w)
-    ) (fun ex -> 
-        dolog t `Error 
+    ) (fun ex ->
+        dolog t `Error
         (Printf.sprintf "### starttls exception: %s\n"
         (Printexc.to_string ex)); return (`Error "starttls failed")
       )
@@ -174,10 +177,10 @@ let send_starttls t sock r w =
 (* start state machine *)
 let greetings t sock r w =
   read_server_rc t r "^220" >>= function
-  | `Ok -> 
+  | `Ok ->
     send_ehlo t r w (fun capabilities ->
       if is_capability capabilities "starttls" then
-        send_starttls t sock r w 
+        send_starttls t sock r w
       else if t.ehlo then
         return (`Error "starttls is required")
       else
@@ -186,14 +189,14 @@ let greetings t sock r w =
   | res -> return res
 
 (* start smtp state machine *)
-let send_server t = 
-  Lwt.pick [
-    Lwt_unix.sleep timeout >> return `Timeout;
-    (catch (fun () -> client_send (`Inet (t.ip,t.port)) (fun res sock ic oc ->
-       greetings t sock ic oc) `Ok >>= fun res -> return (`Ok res)) 
-    (fun ex -> dolog t `Error (Printf.sprintf "### failed to send %s\n"
-      (Printexc.to_string ex)); return `Timeout (* try another port *))
-    )
-  ] >>= function
-  | `Timeout -> dolog t `Info1 "### timeout\n"; return (`Error "timeout")
-  | `Ok res -> dolog t `Info1 "### succeeded\n"; return res
+let send_server t =
+  catch (fun () ->
+    client_send (`Inet (t.ip,t.port))
+      (fun res sock ic oc -> greetings t sock ic oc) `Ok >>= fun res ->
+    return res
+  )
+  (fun ex ->
+    let err = Printexc.to_string ex in
+    dolog t `Error (Printf.sprintf "### failed to send %s\n" err);
+    return (`Error err)
+  )
