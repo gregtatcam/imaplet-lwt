@@ -14,13 +14,24 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 
+type acct_config = {
+  acct_data_store : [`Irmin|`Workdir|`Mailbox|`Maildir]; (* type of storage, irmin/maildir/workdir supported *)
+  acct_encrypt : bool; (* encrypt messages, default true *)
+  acct_compress : bool; (* compress messages, but not attachments, default true *)
+  acct_compress_attach : bool; (* compress attachments, default false *)
+  acct_auth_required: bool; (* require user authentication, priv key encrypted with password, default true *)
+  acct_maildir_parse: bool; (* parse message into MIME parts when in maildir storage format, default true *)
+  acct_single_store: bool; (* single-store attachments in irmin and workdir format, default true *)
+  acct_hybrid: bool; (* hybrid of irmin and workdir store (store should be set to irmin, default false *)
+}
+
 val authenticate : Imaplet_types.authtype -> string ->
-  [`Ok of Imaplet_types.response * string * string | `Error of Imaplet_types.response] Lwt.t
+  [`Ok of Imaplet_types.response * string * string * acct_config option | `Error of Imaplet_types.response] Lwt.t
 
 val login : string -> string ->
-  [`Ok of Imaplet_types.response * string * string | `Error of Imaplet_types.response] Lwt.t
+  [`Ok of Imaplet_types.response * string * string * acct_config option | `Error of Imaplet_types.response] Lwt.t
 
 val authenticate_user : ?b64:bool -> ?users:string -> string -> ?password:string
--> unit -> (string*string option*bool) Lwt.t
+-> unit -> (string*string option*bool*acct_config option) Lwt.t
 
-val plain_auth : string -> (string*string option*bool) Lwt.t
+val plain_auth : string -> (string*string option*bool*acct_config option) Lwt.t

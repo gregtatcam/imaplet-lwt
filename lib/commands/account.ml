@@ -17,6 +17,17 @@ open Lwt
 open Imaplet_types
 open Utils
 
+type acct_config = {
+  acct_data_store : [`Irmin|`Workdir|`Mailbox|`Maildir]; (* type of storage, irmin/maildir/workdir supported *)
+  acct_encrypt : bool; (* encrypt messages, default true *)
+  acct_compress : bool; (* compress messages, but not attachments, default true *)
+  acct_compress_attach : bool; (* compress attachments, default false *)
+  acct_auth_required: bool; (* require user authentication, priv key encrypted with password, default true *)
+  acct_maildir_parse: bool; (* parse message into MIME parts when in maildir storage format, default true *)
+  acct_single_store: bool; (* single-store attachments in irmin and workdir format, default true *)
+  acct_hybrid: bool; (* hybrid of irmin and workdir store (store should be set to irmin, default false *)
+}
+
 (**
  CAPABILITY IMAP4rev1 LITERAL+ SASL-IR LOGIN-REFERRALS ID ENABLE IDLE SORT
  SORT=DISPLAY THREAD=REFERENCES THREAD=REFS THREAD=ORDEREDSUBJECT MULTIAPPEND
@@ -28,6 +39,30 @@ open Utils
 (** users file:
   * dovecot:{PLAIN}dovecot:/Users/dovecot:/var/mail/dovecot
 **)
+let get_bool v n = 
+  match String.get v n with
+  | 't' -> true
+  | _ -> false
+
+let get_store = function
+  | "irmin" -> `Irmin
+  | "workdir" -> `Workdir
+  | "maildir" -> `Maildir
+  | "mailbox" -> `Mailbox
+
+let get_config buff =
+ if Str.string_match (Str.regexp
+ ".*:\\(irmin\|workdir\|maildir\|mailbox\\):\\(a[tf]\\):\\(e[tf]\\):\\(c[tf][tf]\\):\\(s[tf]\\):\\(h[tf]\\):\\(m[tf]\\)$") buff 0 then (
+   Some {acct_data_store = get_store (Str.matched_group 1 buff);
+   acct_auth_required = get_bool (Str.matched_group 2 buff) 1;
+   acct_encrypt = get_bool (Str.matched_group 3 buff) 1;
+   acct_compress = get_bool (Str.matched_group 4 buff) 1;
+   acct_compress_attach = get_bool (Str.matched_group 4 buff) 2;
+   acct_single_store = get_bool (Str.matched_group 5 buff) 1;
+   acct_hybrid = get_bool (Str.matched_group 6 buff) 1;
+   acct_maildir_parse = get_bool (Str.matched_group 7 buff) 1;}
+ ) else
+   None 
 
 let parse_users buff user password =
   try 
@@ -46,12 +81,12 @@ let parse_users buff user password =
      else
        false
    in
-   if u = user && p then
-    true
-   else
-    false
+   if u = user && p then (
+     (true,get_config buff)
+   ) else
+    (false,None)
   with _ ->
-    false
+    (false,None)
 
 let b64decode b64 =
    (*let buff = Str.global_replace (Str.regexp "=$") "" b64 in*)
@@ -87,14 +122,14 @@ let rec read_users r user password =
       | Some res -> 
         if match_user res user then (
           if password = None then
-            return (true)
-          else if parse_users res user (option_value_exn password) then
-            return (true)
-          else
-            return (false)
+            return (true,get_config res)
+          else (
+            let (res,config) = parse_users res user (option_value_exn password) in
+            return (res,config)
+          )
         ) else
           read_users r user password
-      | None -> return (false)
+      | None -> return (false,None)
 
 (** have to make users configurable **)
 let authenticate_user ?(b64=false) ?(users=Install.users_path) user ?password () =
@@ -108,14 +143,14 @@ let authenticate_user ?(b64=false) ?(users=Install.users_path) user ?password ()
     )
   in
   Lwt_io.with_file ~mode:Lwt_io.Input users (fun r -> 
-    read_users r user password) >>= fun res ->
-  return (user,password,res)
+    read_users r user password) >>= fun (res,config) ->
+  return (user,password,res,config)
 
 let auth_user user password resp_ok resp_no =
-  authenticate_user user ~password () >>= fun (_,_,res) ->
+  authenticate_user user ~password () >>= fun (_,_,res,config) ->
   if res then
     return (`Ok (Resp_Ok
-    (None,Utils.formated_capability(Configuration.auth_capability)), user, password))
+    (None,Utils.formated_capability(Configuration.auth_capability)), user, password, config))
   else
     return (`Error (Resp_No (None,resp_no)))
 
@@ -123,7 +158,7 @@ let plain_auth text =
   match (parse_user_b64 text) with
   | Some (u,p) -> 
     authenticate_user u ?password:(Some p) () 
-  | None -> return ("",None,false)
+  | None -> return ("",None,false,None)
 
 let _plain_auth text =
   match (parse_user_b64 text) with

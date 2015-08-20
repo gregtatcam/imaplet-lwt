@@ -69,3 +69,4 @@
 * add custom content merge
 * move hash references to the immutable storage location
 * added basic smtp client library and standalone
+* add per/user store configuration to "users", i.e. ability to have different store for different users

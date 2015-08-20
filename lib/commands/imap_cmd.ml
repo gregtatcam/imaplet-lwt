@@ -205,6 +205,17 @@ let handle_noop context =
 let handle_done context =
   response context None (Resp_Ok (None, "IDLE")) None
 
+let get_user_config config = 
+  let open Server_config in
+  let open Account in
+  function
+  | Some c ->
+      {config with data_store = c.acct_data_store; encrypt = c.acct_encrypt;
+      compress = c.acct_compress; compress_attach = c.acct_compress_attach;
+      auth_required = c.acct_auth_required; maildir_parse = c.acct_maildir_parse; 
+      single_store = c.acct_single_store; hybrid = c.acct_hybrid;}
+  | None -> config
+
 (**
  * Not Authenticated state
 **)
@@ -220,18 +231,18 @@ let handle_authenticate context auth_type text =
     ]
   end >>= fun text ->
   Account.authenticate auth_type text >>= function
-    | `Ok (m,u,p) -> 
+    | `Ok (m,u,p,c) -> 
       Replica_maint.sync u context.user_logout Server_config.srv_config;
       response context (Some State_Authenticated) m (Some
-        (Amailbox.create context.config u (Some p)))
+        (Amailbox.create (get_user_config context.config c) u (Some p)))
     | `Error e -> response context None e None
 
 let handle_login context user password =
   Account.login user password >>= function
-    | `Ok (m,u,p) -> 
+    | `Ok (m,u,p,c) -> 
       Replica_maint.sync u context.user_logout Server_config.srv_config;
       response context (Some State_Authenticated) m (Some
-        (Amailbox.create context.config u (Some p)))
+      (Amailbox.create (get_user_config context.config c) u (Some p)))
     | `Error e -> response context None e None
 
 let handle_starttls context =

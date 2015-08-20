@@ -30,7 +30,8 @@ let imap_addr = `Unix (Filename.concat Install.data_path "sock/smtp")
 
 let authenticate_user ?(b64=false) user ?password () =
   catch (fun () ->
-    Account.authenticate_user ~b64 user ?password ()
+    Account.authenticate_user ~b64 user ?password () >>= fun (u,p,r,_) ->
+    return (u,p,r)
   )
   (fun ex ->
     Log_.log `Error (Printf.sprintf "### authentication error: %s" (Printexc.to_string ex));
@@ -579,7 +580,8 @@ let rec mailfrom context =
 let authenticate text ?password context =
   begin
   match password with 
-  | None -> Account.plain_auth text
+  | None -> Account.plain_auth text >>= fun (user,pswd,auth,_) ->
+    return (user,pswd,auth)
   | Some password ->
     authenticate_user ~b64:true text ~password ()
   end >>= fun (user,pswd,auth) ->
