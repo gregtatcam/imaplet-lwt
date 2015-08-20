@@ -99,13 +99,12 @@ let mailbox_of_gmail_label message =
   )
 
 let filtered message label labels size = 
-  if labels = [] || size = None then
-    false
-  else if String.length message > Utils.option_value_exn size then
+  if size <> None && String.length message > Utils.option_value_exn size then
     true
-  else (
+  else if labels <> [] then (
     (List.exists (fun l -> (String.lowercase l) = (String.lowercase label)) labels) = false
-  )
+  ) else
+    false
 
 let output message label outfiles = function
   | None -> Lwt_io.fprintf Lwt_io.stdout "%s%!" message >> return outfiles
