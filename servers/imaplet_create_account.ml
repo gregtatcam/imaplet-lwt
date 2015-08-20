@@ -37,24 +37,50 @@ let get_mbox_type t =
   | "mbox" -> `Mailbox
   | _ -> raise InvalidCommand
 
-let rec args i user force mbox_type ignore =
+let mbox_type_to_string t =
+  match t with
+  | `Irmin -> "irmin"
+  | `Workdir -> "workdir"
+  | `Maildir -> "maildir"
+  | `Mailbox -> "mbox"
+
+let rec args i user force mbox_type ignore encrypt compress compressattch hybrid single =
   if i >= Array.length Sys.argv then
-    user,force,mbox_type,ignore
+    user,force,mbox_type,ignore,encrypt,compress,compressattch,hybrid,single
   else (
     match Sys.argv.(i) with 
-    | "-u" -> args (i+2) (Some Sys.argv.(i+1)) force mbox_type ignore
-    | "-f" -> args (i+1) user true mbox_type ignore
+    | "-u" -> args (i+2) (Some Sys.argv.(i+1)) force mbox_type ignore encrypt
+    compress compressattch hybrid single
+    | "-f" -> args (i+1) user true mbox_type ignore encrypt compress
+    compressattch hybrid single
     | "-t" -> args (i+2) user force (get_mbox_type Sys.argv.(i+1)) ignore
-    | "-i" -> args (i+1) user force mbox_type true
+    encrypt compress compressattch hybrid single
+    | "-i" -> args (i+1) user force mbox_type true encrypt compress
+    compressattch hybrid single
+    | "-e" -> args (i+2) user force mbox_type ignore (bool_of_string
+    Sys.argv.(i+1)) compress compressattch hybrid single
+    | "-c" -> args (i+2) user force mbox_type ignore encrypt (bool_of_string
+    Sys.argv.(i+1)) compressattch hybrid single
+    | "-ca" -> args (i+2) user force mbox_type ignore encrypt compress
+    (bool_of_string Sys.argv.(i+1)) hybrid single
+    | "-h" -> args (i+2) user force mbox_type ignore encrypt compress
+    compressattch (bool_of_string Sys.argv.(i+1)) single
+    | "-s" -> args (i+2) user force mbox_type ignore encrypt compress
+    compressattch hybrid (bool_of_string Sys.argv.(i+1))
     | _ -> raise InvalidCommand
   )
 
 let usage () =
-  Printf.printf "usage: imaplet_create_account -u [user:pswd] [-f] -t [irmin|workdir|maildir|mbox] [-i]\n%!"
+  Printf.printf "usage: imaplet_create_account -u [user:pswd] [-f] -t
+  [irmin|workdir|maildir|mbox] [-i] -e [true|false] -c [true|false] -ca
+  [true|false] -h [true|false] -s [true|false]\n%!"
 
 let commands f =
   try 
-    let (user,force,mbox_type,ignore) = args 1 None false `Irmin false in
+    let
+    (user,force,mbox_type,ignore,encrypt,compress,compressattch,hybrid,single) =
+      args 1 None false `Irmin false srv_config.encrypt srv_config.compress
+      srv_config.compress_attach srv_config.hybrid srv_config.single_store in
     if user = None || 
       Regex.match_regex ~regx:("^\\([^:]+\\):\\([^:]+\\)$")
       (Utils.option_value_exn user) = false then
@@ -63,7 +89,7 @@ let commands f =
       try 
         f (Str.matched_group 1 (Utils.option_value_exn user)) 
           (Str.matched_group 2 (Utils.option_value_exn user)) force mbox_type
-          ignore
+          ~ignore ~encrypt ~compress ~compressattch ~hybrid ~single
       with ex -> Printf.printf "%s\n%!" (Printexc.to_string ex)
   with _ -> usage ()
 
@@ -114,11 +140,27 @@ let check_users user_path user pswd =
     return ()
   )
 
-let set_users user pswd =
+let frmt_bool = function
+  | true -> 't'
+  | false -> 'f'
+
+let user_config mbox_type ~encrypt ~compress ~compressattch ~hybrid ~single =
+  Printf.sprintf "%s:a%c:e%c:c%c%c:s%c:h%c:m%c"
+  (mbox_type_to_string mbox_type)
+  (frmt_bool srv_config.auth_required)
+  (frmt_bool encrypt)
+  (frmt_bool compress)
+  (frmt_bool compressattch)
+  (frmt_bool single)
+  (frmt_bool hybrid)
+  (frmt_bool srv_config.maildir_parse)
+
+let set_users user pswd mbox_type ~encrypt ~compress ~compressattch ~hybrid ~single =
   let new_user = 
-    (Printf.sprintf "%s:{SHA256}%s::::%s" user
+    (Printf.sprintf "%s:{SHA256}%s::::%s:%s" user
     (Imap_crypto.get_hash ~hash:`Sha256 pswd) 
-    (Utils.user_path ~path:srv_config.irmin_path ~user ())) in
+    (Utils.user_path ~path:srv_config.irmin_path ~user ())
+    (user_config mbox_type ~encrypt ~compress ~compressattch ~hybrid ~single)) in
   Utils.lines_of_file srv_config.users_path ~init:[] ~f:(fun line acc ->
     if Regex.match_regex ~case:false ~regx:("^" ^ user ^ ":") line then
       return acc
@@ -171,7 +213,8 @@ let failed user_path msg =
 let created = ref None
 
 let () =
-  commands (fun user pswd force mbox_type ignore ->
+  commands (fun user pswd force mbox_type ~ignore ~encrypt ~compress ~compressattch
+  ~hybrid ~single->
     let user_path = Utils.user_path ~regx:"%user%.*$" ~path:srv_config.user_cert_path ~user () in
     let user_cert_path = Utils.user_path ~path:srv_config.user_cert_path ~user () in 
     let irmin_path = Utils.user_path ~path:srv_config.irmin_path ~user () in
@@ -248,7 +291,7 @@ let () =
             create_mailbox "Sent Messages"
           )
         ) >>= fun () ->
-        set_users user pswd >>= fun () ->
+        set_users user pswd mbox_type ~encrypt ~compress ~compressattch ~hybrid ~single >>= fun () ->
         Printf.printf "success\n%!";
         return ()
       ) (function
