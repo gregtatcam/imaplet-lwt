@@ -33,6 +33,7 @@ open Lwt
 
 module MapStr = Map.Make(String)
 
+(* metadata - stores timers and echo to the terminal *)
 module Meta =
   struct
     let timers = ref MapStr.empty
@@ -43,6 +44,7 @@ exception InvalidCommand
 
 let compression = ref false
 
+(* get user/password from the command line *)
 let get_user str = 
   try
     let re = Re_posix.compile_pat ~opts:[`ICase] "^([^:]+):(.+)$" in
@@ -52,6 +54,7 @@ let get_user str =
     Some (user,pswd)
   with Not_found -> raise InvalidCommand
 
+(* process command line *)
 let rec args i script addr port ssl user =
   if i >= Array.length Sys.argv then
     script,addr,port,ssl,user
@@ -68,6 +71,7 @@ let usage () =
   Printf.fprintf stderr "usage: client -script [path] -address [address] \
   -port [port] [-ssl [true|false]] [-user [user:pswd]]\n%!"
 
+(* script meta line contains start/stop timers and server response echo to the terminal *)
 let process_meta line = 
   let re = Re_posix.compile_pat ~opts:[`ICase] "^(timer_start|timer_stop|echo)[ \t]+(.*)$" in
   try
@@ -87,6 +91,7 @@ let process_meta line =
     | _ -> `Done
   with Not_found -> `Done
 
+(* keep on reading the meta lines, if not then return the line (command) *)
 let rec read_script strm =
   Lwt_stream.get strm >>= function
   | None -> return None
@@ -95,9 +100,13 @@ let rec read_script strm =
     | `Ok -> read_script strm
     | `Done -> return (Some line)
 
+(* preprocess the stream for the login and the meta header *)
 let get_script file user =
   let strm = Lwt_io.read_lines file in
   let strm =
+    (* if user/pswd passed in the command line then insert "login" command at the top of
+     * the script stream 
+     *)
     match user with
     | None -> strm
     | Some (user,pswd) ->
@@ -105,6 +114,7 @@ let get_script file user =
         ["a login " ^ user ^ " " ^ pswd;"^[^ ]+ (OK|BAD|NO)"] in
         Lwt_stream.append strm1 strm
   in
+  (* process meta lines at the begining of the script *)
   let rec header strm =
     Lwt_stream.peek strm >>= function
     | None -> return ()
@@ -116,6 +126,7 @@ let get_script file user =
   header strm >>
   return strm
 
+(* parse command line arguments and pass to the callback *)
 let commands f =
   try 
     let script,addr,port,ssl,user = args 1 "" "127.0.0.1" 993 true None in
@@ -124,6 +135,7 @@ let commands f =
       with ex -> Printf.printf "%s\n%!" (Printexc.to_string ex)
   with _ -> usage ()
 
+(* initialize/connect socket *)
 let socket addr port =
   let sockaddr = Unix.ADDR_INET (Unix.inet_addr_of_string "0.0.0.0",0) in
   let socket = Lwt_unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
@@ -135,22 +147,26 @@ let socket addr port =
   let oc = Lwt_io.of_fd ~mode:Lwt_io.output socket in
   return (ic,oc)
 
+(* connect via ssl *)
 let ssl_socket addr port =
   Nocrypto_entropy_lwt.initialize () >>
   X509_lwt.authenticator `No_authentication_I'M_STUPID >>= fun auth ->
   Tls_lwt.connect auth (addr,port)
 
+(* connect regular or ssl *)
 let connect addr port ssl =
   if ssl then
     ssl_socket addr port
   else
     socket addr port
 
+(* in/out buffer if compression is enabled *)
 let inbuffer = ref (Buffer.create 100)
 let outbuffer = ref (Buffer.create 100)
 
 let buff_size = 1024
 
+(* uncompress *)
 let inflate strm inbuff =
   let outbuff = String.create buff_size in
   let rec _inflate inbuff offset len =
@@ -174,6 +190,9 @@ let inflate strm inbuff =
   in
   _inflate inbuff 0 (String.length inbuff)
 
+(* reading/uncompression is done in chunks and
+ * part of the chunk could be next compressed data stream
+ * so the part is stored in the cache *)
 let read_cache ic =
   if Buffer.length !inbuffer > 0 then (
     let contents = Buffer.contents !inbuffer in
@@ -186,11 +205,20 @@ let read_cache ic =
     | size -> return (Some (String.sub buff 0 size))
   )
 
-let zip_read ic =
+(* return the line if not compressed,
+ * uncompress otherwise *)
+let zip_read ?count ic =
   if !compression = false then (
-    Lwt_io.read_line_opt ic 
+    match count with 
+    | None -> Lwt_io.read_line_opt ic 
+    | Some count -> 
+      let buff = String.create count in
+      Lwt_io.read_into_exactly ic buff 0 count >>
+      return (Some buff)
   ) else (
+    (* initialize zlib *)
     let strm = Zlib.inflate_init true in
+    (* recusevily uncompress chunks of data *)
     let rec read () =
       read_cache ic >>= function
       | None -> return None
@@ -207,14 +235,16 @@ let zip_read ic =
     read ()
   )
 
-let read_net_echo ic =
-  zip_read ic >>= function
+(* read server response and output to the terminal if the echo is on *)
+let read_net_echo ?count ic =
+  zip_read ?count ic >>= function
   | None -> return None
   | Some line ->
     if !Meta.echo then
       Printf.printf "%s\n%!" line;
     return (Some line)
 
+(* write command to the server, echo to the terminal if echo is on *)
 let write_echo oc command =
   let command = command ^ "\r\n" in
   if !Meta.echo then
@@ -222,7 +252,8 @@ let write_echo oc command =
   let command = if !compression then Imap_crypto.do_compress command else command in
   Lwt_io.write oc command >> Lwt_io.flush oc
 
-(* send append to the server *)
+(* send append to the server, append is expaned in that the actuall append data 
+ * is referenced by a file *)
 let handle_append ic oc mailbox msgfile =
   Utils.fold_email_with_file msgfile (fun cnt message ->
     let cmd = 
@@ -234,12 +265,14 @@ let handle_append ic oc mailbox msgfile =
   ) 0 >>= fun _ ->
   return ()
 
+(* check if compression command *)
 let is_compression command =
   if Regex.match_regex ~regx:"compress deflate" command then
     true
   else
     !compression
 
+(* execute command at a time *)
 let exec_command strm ic oc =
   read_script strm >>= function
   | None -> return `Done
@@ -251,7 +284,23 @@ let exec_command strm ic oc =
       write_echo oc command >> return (`Ok (is_compression command))
     )
 
-let read_response strm ic =
+(* check if need to read a chunk,
+ * i.e. fetch response for a body is like:
+ * '* 1000 FETCH (FLAGS () BODY[] {7990}...)'
+ * where {size} where size is the size of the data, ')' not counted
+ *)
+let re_chunk = Re_posix.compile_pat ~opts:[`ICase] "^* [^ ]+ FETCH.+ [{]([0-9]+)[}]$"
+
+let is_read_chunk line =
+  try
+    let subs = Re.exec re_chunk line in
+    let count = int_of_string (Re.get subs 1) + 1 in (* +1 for ')' *)
+    Some count
+  with Not_found -> None
+
+(* recursively read server response, stop when the response matches regex if
+ * specfied in the script *)
+let rec read_response strm ic =
   read_script strm >>= function
   | None -> return `Done
   | Some regex ->
@@ -259,16 +308,25 @@ let read_response strm ic =
     read_net_echo ic >>= function
     | None -> return `Ok
     | Some line ->
-      if Re.execp (Re_posix.compile_pat ~opts:[`ICase] regex) line then (
-        if !Meta.echo = false then
-          Printf.printf "%s\n%!" line;
-        return `Ok
-      ) else (
-        read ic
-      )
+      match is_read_chunk line  with
+      | Some count -> 
+        begin
+        read_net_echo ~count ic >>= function
+        | None -> return `Ok
+        | Some _ -> read ic
+        end
+      | None ->
+        if Re.execp (Re_posix.compile_pat ~opts:[`ICase] regex) line then (
+          if !Meta.echo = false then
+            Printf.printf "%s\n%!" line;
+          return `Ok
+        ) else (
+          read ic
+        )
   in
   read ic
 
+(* output the timers *)
 let output_meta () =
   Printf.printf "---- timers\n%!";
   MapStr.iter (fun key value ->
@@ -278,10 +336,11 @@ let output_meta () =
 let () =
   commands (fun script addr port ssl user ->
     Lwt_main.run (catch(fun() ->
+        (* recursively execute stream commands *)
         let rec exec strm ic oc =
           exec_command strm ic oc >>= function
-          | `Done -> return ()
-          | `OkAppend -> exec strm ic oc
+          | `Done -> return () (* done reading stream *)
+          | `OkAppend -> exec strm ic oc (* append is special, reads from a file *)
           | `Ok compr -> 
             read_response strm ic >>= function
             | `Done -> return ()
@@ -290,10 +349,15 @@ let () =
               exec strm ic oc 
         in
         Lwt_io.with_file ~mode:Lwt_io.Input script (fun file ->
+          (* read the script file into the stream *)
           get_script file user >>= fun strm ->
+          (* connect to the server *)
           connect addr port ssl >>= fun (ic,oc) ->
+          (* read capability greeting from the server *)
           read_net_echo ic >>= fun _ -> 
+          (* execute script commands *)
           exec strm ic oc >>= fun () ->
+          (* print the meta, like execution timers *)
           output_meta ();
           return ()
         )
