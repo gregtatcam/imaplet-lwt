@@ -465,7 +465,7 @@ let fetch mailboxt resp_prefix resp_writer sequence fetchattr changedsince buid 
          by the iterator *)
         Interpreter.exec_fetch seq sequence message fetchattr changedsince buid >>= fun res ->
         match res with
-        | Some res -> resp_writer res; return (`Ok acc)
+        | Some res -> resp_writer res >> return (`Ok acc)
         | None -> return (`Ok acc)
     ) () >>= fun _ -> return `Ok
 
