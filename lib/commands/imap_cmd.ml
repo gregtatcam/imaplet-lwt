@@ -552,7 +552,9 @@ let handle_notauthenticated context = function
   | Cmd_Login (u, p) -> handle_login context u p 
   | Cmd_Starttls -> handle_starttls context
   | Cmd_Lappend (user,pswd,mailbox,literal) -> 
-      let mbx = Amailbox.create context.config user pswd in
+      (* user is already authenticated by smtp, just need to get the config *)
+      Account.authenticate_user user () >>= fun (_,_,_,c) ->
+      let mbx = Amailbox.create (get_user_config context.config c) user pswd in
       let context = {context with mailbox = ref mbx} in
       handle_append context mailbox None None literal 
 
