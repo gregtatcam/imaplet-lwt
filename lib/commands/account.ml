@@ -52,7 +52,7 @@ let get_store = function
 
 let get_config buff =
  if Str.string_match (Str.regexp
- ".*:\\(irmin\|workdir\|maildir\|mailbox\\):\\(a[tf]\\):\\(e[tf]\\):\\(c[tf][tf]\\):\\(s[tf]\\):\\(h[tf]\\):\\(m[tf]\\)$") buff 0 then (
+ ".*:\\(irmin\\|workdir\\|maildir\\|mailbox\\):\\(a[tf]\\):\\(e[tf]\\):\\(c[tf][tf]\\):\\(s[tf]\\):\\(h[tf]\\):\\(m[tf]\\)$") buff 0 then (
    Some {acct_data_store = get_store (Str.matched_group 1 buff);
    acct_auth_required = get_bool (Str.matched_group 2 buff) 1;
    acct_encrypt = get_bool (Str.matched_group 3 buff) 1;
