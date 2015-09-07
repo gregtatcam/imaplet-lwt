@@ -32,6 +32,12 @@ val concat_path : string -> string -> string
 
 val make_email_message : string -> Mailbox.Message.t
 
+val make_postmark_email : string -> (string * string)
+
+val concat_postmark_email : string -> string -> string
+
+val make_message_with_postmark : string -> string
+
 val option_value : 'a option -> default:'a -> 'a
 
 val option_value_exn : ?ex:exn -> 'a option -> 'a

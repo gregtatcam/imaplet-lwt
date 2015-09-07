@@ -17,6 +17,8 @@ open Sexplib
 open Sexplib.Conv
 open Imaplet_types
 
+let concat ?(sep="") l = String.concat sep l
+
 let formated_capability capability =
   "CAPABILITY " ^ capability
 
@@ -88,37 +90,64 @@ let message_of_string postmark email =
   {Mailbox.Message.postmark=Mailbox.Postmark.of_string postmark; 
    Mailbox.Message.email = Email.of_string email}
 
-let make_email_message message =
-  let size = String.length message in
-  let headers = String.sub message 0 (if size < 1024 * 5 then size else 1024 * 5) in
-  if Regex.match_regex headers ~regx:"^\\(From [^\r\n]+\\)[\r\n]+?" then ( 
-    let post = Str.matched_group 1 headers in
-    let email = Str.last_chars message (size - (String.length
-      (Str.matched_string headers))) in
-    (message_of_string post email)
+let re_postmark = Re_posix.compile_pat ~opts:[`ICase] "^(From [^\r\n]+)[\r\n]+(.+)$"
+let re_from = Re_posix.compile_pat ~opts:[`ICase] "^From: ([^<]+)<([^>]+)"
+let re_date = Re_posix.compile_pat ~opts:[`ICase] "^Date: \\([.]+\\)[\r\n]+"
+
+(* create postmark from email,
+ * assume postmark is not included
+ *)
+let make_postmark message =
+  let from buff =
+    let subs = Re.all ~pos:0 ~len:1000 re_from buff in
+    if List.length subs = 1 then
+      Re.get (List.hd subs) 2
+    else
+      "daemon@localhost.local"
+  in
+  let date_time buff =
+    let subs = Re.all ~pos:0 ~len:1000 re_date buff in
+    let time =
+      if List.length subs = 1 then (
+        try 
+          Dates.email_to_date_time_exn (Re.get (List.hd subs) 1)
+        with _ -> Dates.ImapTime.now()
+      ) else
+        Dates.ImapTime.now()
+    in
+    Dates.postmark_date_time ~time ()
+  in
+  concat ["From ";(from message);" ";(date_time message)]
+
+(* split message into postmark and email
+ * create postmark if email doesn't have it
+ *)
+let make_postmark_email message =
+  let subs = Re.all re_postmark message in
+  if List.length subs = 1 then (
+    let post = Re.get (List.hd subs) 1 in
+    let email = Re.get (List.hd subs) 2 in
+    (post, email)
   ) else (
-    (* try to construct the postmark, since the message could be malformed,
-    * look at a slice that should include the headers
-    *)
-    let from buff =
-      if Regex.match_regex buff ~regx:"^From: \\([^<]+\\)<\\([^>]+\\)" then
-        Str.matched_group 2 buff
-      else
-        "From daemon@localhost.local"
-    in
-    let date_time buff =
-      let time =
-        if Regex.match_regex buff ~regx:"^Date: \\([.]+\\)[\r\n]+" then (
-          try 
-            Dates.email_to_date_time_exn (Str.matched_group 1 buff)
-          with _ -> Dates.ImapTime.now()
-        ) else
-          Dates.ImapTime.now()
-      in
-      Dates.postmark_date_time ~time ()
-    in
-    let post = ("From " ^ (from headers) ^ " " ^ (date_time headers)) in
-    (message_of_string post message)
+    (make_postmark message, message)
+  )
+
+(* create parsed message from postmark and email *)
+let make_email_message message =
+  let (postmark,email) = make_postmark_email message in
+  message_of_string postmark email
+
+(* concat postmark and email into message *)
+let concat_postmark_email postmark email =
+  concat ~sep:"\r\n" [postmark;email]
+
+(* add postmark to message if message doesn't have one *)
+let make_message_with_postmark message =
+  if Re.execp ~pos:0 ~len:1000 re_postmark message then (
+    message
+  ) else (
+    let postmark = make_postmark message in
+    concat_postmark_email postmark message
   )
 
 let option_value o ~default = 
