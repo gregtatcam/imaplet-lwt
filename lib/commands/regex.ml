@@ -35,9 +35,9 @@ let replace ?(case=true) ~regx ~tmpl str =
   
 let dq = "\""
 
-let group re = "\\(" ^ re ^ "\\)"
+let group re = String.concat "" ["\\(" ; re ; "\\)"]
 
-let orx re1 re2 = re1 ^ "\\|" ^ re2
+let orx re1 re2 = String.concat "" [re1 ; "\\|" ; re2]
 
 let dequote re =
   replace ~regx:"\"" ~tmpl:"" re
@@ -48,15 +48,15 @@ let quote ?(always=true) re =
   else if match_regex re ~regx:"^\"[^\"]*\"$" then
     re
   else
-    dq ^ re ^ dq
+    String.concat "" [dq ; re ; dq]
 
-let list_of re = "(" ^ re ^ ")"
+let list_of re = String.concat "" ["(" ; re ; ")"]
 
-let dlist_of re = "((" ^ re ^ "))"
+let dlist_of re = String.concat "" ["((" ; re ; "))"]
 
-let bkt_list_of re = "\\[" ^ re ^ "\\]"
+let bkt_list_of re = String.concat "" ["\\[" ; re ; "\\]"]
 
-let ang_list_of re = "<" ^ re ^ ">"
+let ang_list_of re = String.concat "" ["<" ; re ; ">"]
 
 let astring = "[^\r\n{()%*\"]+"
 
@@ -78,7 +78,7 @@ let optional re = (group re) ^ "?"
 
 let orxl l = String.concat "\\|" l
 
-let all_of_it re = "^" ^ re ^ "$"
+let all_of_it re = String.concat "" ["^" ; re ; "$"]
 
 let nz_number = "[1-9][0-9]*"
 
@@ -112,34 +112,34 @@ let yyyy = group "[0-9][0-9][0-9][0-9]"
 
 let time = group "[0-9][0-9]:[0-9][0-9]:[0-9][0-9]"
 
-let time1 = (group "[0-9][0-9]:[0-9][0-9]:[0-9][0-9]") ^ (group ".[0-9]+") ^ "?"
+let time1 = String.concat "" [(group "[0-9][0-9]:[0-9][0-9]:[0-9][0-9]") ; (group ".[0-9]+") ; "?"]
 
 let zone = group "[+-][0-9][0-9][0-9][0-9]"
 
 let zone1 = (group "[+-][0-9][0-9]:[0-9][0-9]") ^ "?"
 
 let date_regex =
-  dd ^ "-" ^ mon ^ "-" ^ yyyy
+  String.concat "" [dd ; "-" ; mon ; "-" ; yyyy]
 
 let date_dqregex = quote( date_regex )
 
 let date_time_regex = 
-  dd_fixed ^ "-" ^ mon ^ "-" ^ yyyy ^ " " ^ time ^ " " ^ zone
+  String.concat "" [dd_fixed ; "-" ; mon ; "-" ; yyyy ; " " ; time ; " " ; zone]
 
 let date_time_dqregex =
   quote( date_time_regex)
 
 (**Date: Mon, 7 Feb 1994 21:52:25 -0800 (PST)**) 
 let email_date_regex =
-  dd ^ " " ^ mon ^ " " ^ yyyy ^ " " ^ time ^ " " ^ zone
+  String.concat "" [dd ; " " ; mon ; " " ; yyyy ; " " ; time ; " " ; zone]
 
 (* Thu, 17 Jul 2014 14:53:00 +0100 (BST) *)
 let smtp_date_regex =
-  dayofweek ^ ", " ^ email_date_regex
+  String.concat "" [dayofweek ; ", " ; email_date_regex]
 
 (* 2014-10-25 09:25:47.045025+01:00 *)
 let sys_date_time_regex =
-  yyyy ^ "-" ^ mon1 ^ "-" ^ dd1 ^ " " ^ time1 ^ zone1
+  String.concat "" [yyyy ; "-" ; mon1 ; "-" ; dd1 ; " " ; time1 ; zone1]
 
 (* append regex *)
 let append_regex =
@@ -149,7 +149,7 @@ let append_regex =
   let mailbox = group (orx mbox qmbox) in
   let flags = group (" " ^ list_of astring) in
   let date = group (" " ^ date_time_dqregex) in
-  "^" ^ tag ^ " " ^ cmd ^ " " ^ mailbox ^ flags ^ "?" ^ date ^ "? $"
+  String.concat "" ["^" ; tag ; " " ; cmd ; " " ; mailbox ; flags ; "?" ; date ; "? $"]
 
 let lappend_regex =
   let cmd = "lappend" in
@@ -159,4 +159,4 @@ let lappend_regex =
   let user = group astring in
   let quser = group qstring in
   let user_ = group (orx user quser) in
-  "^" ^ tag ^ " " ^ cmd ^ " " ^ mailbox ^ " " ^ user_ ^ "$"
+  String.concat "" ["^" ; tag ; " " ; cmd ; " " ; mailbox ; " " ; user_ ; "$"]
