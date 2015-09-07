@@ -66,8 +66,7 @@ let default_bodystr_fields =
   }
 
 let flags_to_string flags =
-  List.fold_left (fun acc fl -> if acc = "" then fl_to_str fl else
-    acc ^ " " ^ (fl_to_str fl)) "" flags
+  String.concat " " (List.map fl_to_str flags)
 
 let map_of_alist (l:string list) =
   List.fold_left (fun m i -> MapStr.add i () m) MapStr.empty l
@@ -95,37 +94,34 @@ let get_blnk_header headers (key:string) : string =
 (** build envelope structure for the address:
 jdoe@domain.com
 **)
+let addr_re = all_of_it ( String.concat "" [group  "[^@]+" ; "@" ; (group ".+")] )
 let get_addr (addr:string) : string =
-  if match_regex addr ~regx:(all_of_it ( (group  "[^@]+") ^ "@" ^ (group ".+") )) then (
+  if match_regex addr ~regx:addr_re then (
     let mbox = Str.matched_group 1 addr in
     let host = Str.matched_group 2 addr in
-    "NIL" ^ space ^ (quote mbox) ^ space ^  (quote host)
+    String.concat space ["NIL" ; (quote mbox) ; (quote host)]
   ) else ( (** ?? **)
-    "NIL" ^ space ^ (quote addr) ^ space ^ (quote "")
+    String.concat space ["NIL" ; (quote addr) ; (quote "")]
   ) 
 
 (** build envelope structure for the mailbox address:
 Jon Doe <jdoe@domain.com>
 **)
+let mbox_addr_re = all_of_it ( String.concat "" [optional "[^<>]+" ; "<" ; group "[^<>]+" ; ">"])
 let get_mbox_addr (addr:string) : (string) =
-  if match_regex addr ~regx:(all_of_it ( (optional "[^<>]+") ^ "<" ^ (group "[^<>]+") ^ ">")) then
+  if match_regex addr ~regx:mbox_addr_re then
     let disp = try Str.matched_group 1 addr with _ -> "" in
     let addr = Str.matched_group 2 addr in
-    dlist_of (( quote  (replace ~regx:" " ~tmpl:"" disp) ) ^ space ^ (get_addr  addr) )
+    dlist_of (String.concat "" [quote  (replace ~regx:" " ~tmpl:"" disp) ; space ; get_addr  addr ])
   else
-    dlist_of ( (quote "")  ^ space ^ (get_addr addr) )
+    dlist_of ( String.concat "" [(quote "")  ; space ; (get_addr addr) ])
 
 (** build envelope structure for the group list **)
 let get_mbox_list (group:string) (addr:string) : (string) =
   let lmbx = Str.split (Str.regexp ",") addr in
-  dlist_of ((quote "") ^ space ^ (quote "") ^ space ^ (quote group) ^ space ^ (quote "NIL")) ^
-  (List.fold_left (fun acc i -> 
-    if acc = "" then
-      get_mbox_addr i
-    else 
-      acc ^ space ^ (get_mbox_addr i)
-  ) "" lmbx) ^
-  dlist_of ((quote "") ^ space ^ (quote "") ^ space ^ (quote "NIL") ^ space ^ (quote "NIL"))
+  String.concat "" [dlist_of (String.concat space [quote "" ; quote "" ; quote group ; quote "NIL"]) ;
+  String.concat space (List.map get_mbox_addr lmbx) ;
+  dlist_of (String.concat space [quote "" ; quote "" ; quote "NIL" ; quote "NIL"])]
 
 (** build envelope structure for the address fields **)
 let rec get_address headers key =
@@ -149,31 +145,31 @@ let rec get_address headers key =
 (** fetch the flags **)
 let exec_fetch_flags metadata =
   let flags = flags_to_string metadata.flags in
-  return ("FLAGS" ^ space ^ (list_of flags)) 
+  return (String.concat "" ["FLAGS" ; space ; (list_of flags)]) 
 
 (** fetch internal date **)
 let exec_fetch_internaldate metadata =
-  return ("INTERNALDATE" ^ space ^ (quote (date_time_to_email metadata.internal_date)))
+  return (String.concat "" ["INTERNALDATE" ; space ; quote (date_time_to_email metadata.internal_date)])
 
 (** fetch internal date **)
 let exec_fetch_modseq metadata =
-  return ("MODSEQ" ^ space ^ (to_plist (Int64.to_string metadata.modseq)))
+  return (String.concat "" ["MODSEQ" ; space ; to_plist (Int64.to_string metadata.modseq)])
 
 (** fetch rfc822 message **)
 let exec_fetch_rfc822 email =
   email_to_str email >>= fun (str,length) ->
-  return ("RFC822 {" ^ (string_of_int length) ^ "}" ^ crlf ^ str)
+  return (String.concat "" ["RFC822 {" ; string_of_int length ; "}" ; crlf ; str])
 
 (** fetch rfc822 header **)
 let exec_fetch_rfc822header (module LE:LazyEmail_inst) =
   let str = LE.LazyEmail.header_to_str ~excl:exclude LE.this in
   let length = String.length str in
-  return ("RFC822.HEADER {" ^ (string_of_int length) ^ "}" ^ crlf ^ str)
+  return (String.concat "" ["RFC822.HEADER {" ; string_of_int length ; "}" ; crlf ; str])
 
 (** fetch rfc822 text **)
 let exec_fetch_rfc822text (module LE:LazyEmail_inst) =
   LE.LazyEmail.raw_content LE.this >>= fun str ->
-  return ("RFC822.TEXT {" ^ (string_of_int (String.length str)) ^ "}" ^ crlf ^ str)
+  return (String.concat "" ["RFC822.TEXT {" ; string_of_int (String.length str) ; "}" ; crlf ; str])
 
 (** fetch rfc822 text **)
 let exec_fetch_rfc822size (module LE:LazyEmail_inst) =
@@ -434,27 +430,19 @@ let exec_fetch_envelope_unf headers =
       get_nil_header headers "in-reply-to";
       get_nil_header headers "message-id";
     ] in
-  return (List.fold_left (fun acc i -> if acc = "" then i
-      else acc ^ space ^ i) "" envelope)
+  return (String.concat space envelope)
 
 (** fetch envelope **)
 let exec_fetch_envelope headers =
   exec_fetch_envelope_unf headers >>= fun env ->
-  return ("ENVELOPE (" ^ env ^ "))")
+  return (String.concat "" ["ENVELOPE (" ; env ; "))"])
 
 let exec_fetch_uid metadata =
   return ("UID " ^ (string_of_int metadata.uid))
 
 (** 4.3.2.1. **)
 let section_part_str (l:int list) : string =
-  List.fold_left
-  (fun acc i -> 
-    let i = string_of_int i in 
-    if acc = "" then 
-      i 
-    else 
-      acc ^ "." ^ i
-  ) "" l
+  String.concat "." (List.map string_of_int l)
   (* is this needed TBD
   in
   if str <> "" then
@@ -476,7 +464,7 @@ let body_part_str (l:int list) (str:string) : (string*string) =
     part, str
   )
   in
-    part ^ " {" ^ (string_of_int (String.length str)) ^ "}", str
+  String.concat "" [part ; " {" ; string_of_int (String.length str) ; "}"], str
 
 let exec_fetch_header ?(incl=`Map MapStr.empty) ?(excl=MapStr.empty) (module LE:LazyEmail_inst) =
   LE.LazyEmail.header_to_str ~incl ~excl LE.this
@@ -489,16 +477,11 @@ let body_template_str (prefix:string) (content:string) (sec:sectionPart)
 (part:bodyPart) : string =
   let (part,str) = body_part_str part content in
   let sec = section_part_str sec in
-  "BODY[" ^ sec ^ prefix ^ "]" ^ part ^ crlf ^ str
+  String.concat "" ["BODY[" ; sec ; prefix ; "]" ; part ; crlf ; str]
   
 let mk_headers_fetch_str prefix headers =
-  prefix ^ " " ^
-  (List.fold_left (fun acc h -> 
-    if acc = "(" then
-      acc ^ String.uppercase h
-    else 
-      acc ^ " " ^ (String.uppercase h)
-  ) "(" headers) ^ ")"
+  String.concat "" [prefix ; " " ; 
+  "("; String.concat " " (List.map String.uppercase headers); ")"]
 
 let exec_fetch_msgtext email (msgtext:sectionMsgtext) (sec:sectionPart) (part:bodyPart) =
   (match msgtext with
@@ -519,12 +502,7 @@ let exec_fetch_mime email (sec:sectionPart) (part:bodyPart) =
   body_template_str "MIME" str sec part
 
 let secpart_to_str secPart =
-  List.fold_left (fun acc i ->
-    if acc = "" then
-      string_of_int i
-    else
-      acc ^ ":" ^ (string_of_int i)
-  ) "" secPart
+  String.concat ":" (List.map string_of_int secPart)
 
 let exec_fetch_email_body (module LE:LazyEmail_inst) (sec:sectionPart) (part:bodyPart) =
   begin
@@ -633,11 +611,11 @@ let get_params_of_list l def =
       if match_regex nv ~regx:"^[ ]*\\([^= ]+\\)[ ]*=[ ]*\\([^ ]+\\|\"[^\"]+\"\\)[ ]*$" then (
         let name = Str.matched_group 1 nv in
         let value = Str.matched_group 2 nv in
-        let nv = (quote name) ^ " " ^ (quote value) in
+        let nv = String.concat "" [quote name ; " " ; quote value] in
         if acc = def then
           nv
         else
-          acc ^ " " ^ nv
+          String.concat "" [acc ; " " ; nv]
       ) else ( 
         acc
       )
@@ -664,11 +642,11 @@ let fetch_type_and_param content_type_val : (string*string*string) =
     let type_subtype = String.trim type_subtype in
     let tspecials = "][()><@,;:\\/?=" in
     let token = "a-z0-9_-" in
-    let quoted_re = quote ("[" ^ tspecials ^ token ^ "]+") in
-    let token_re = "[" ^ token ^ "]+" in
+    let quoted_re = quote (String.concat "" ["[" ; tspecials ; token ; "]+"]) in
+    let token_re = String.concat "" ["[" ; token ; "]+"] in
     let value_re = group (orx token_re quoted_re) in
     let attribute_re = group token_re in
-    let re = "^" ^ attribute_re ^ "/" ^ value_re ^ "$" in
+    let re = String.concat "" ["^" ; attribute_re ; "/" ; value_re ; "$"] in
     let (t,st) =
     if match_regex ~case:false type_subtype ~regx:re then 
       (Str.matched_group 1 type_subtype,Str.matched_group 2 type_subtype)
@@ -692,7 +670,7 @@ let fetch_disposition disp =
       let name = Str.matched_group 1 disp in
       let params = Str.matched_group 3 disp in
       let params = get_params_of_str ~str:params ~def:"NIL" in
-      list_of ((quote name) ^ " " ^ (list_of params))
+      list_of (String.concat "" [(quote name) ; " " ; (list_of params)])
     else
       list_of (quote disp)
 
@@ -743,12 +721,11 @@ let format_simple (basic:bodystr_fields) (body:bool) : string =
 let fetch_message_bodystructure (module LE:LazyEmail_inst) basic body bodystructure_folder =
   exec_fetch_envelope_unf (LE.LazyEmail.header LE.this) >>= fun env ->
   bodystructure_folder (module LE:LazyEmail_inst) body >>= fun bodystr ->
-  let main =(format_basic basic) ^ " " ^ (list_of env) ^ bodystr ^ " " ^ basic.blines in
+  let main =String.concat "" [(format_basic basic) ; " " ; (list_of env) ; bodystr ; " " ; basic.blines] in
   (** md5, disposition, language, location **)
   let all =
     if body = false then
-      let extension =  "NIL" ^ " " ^ basic.bdisp ^ " " ^ "NIL" ^ " " ^ "NIL" in
-      main ^ " " ^ extension
+      String.concat " " [main ; "NIL" ; basic.bdisp ; "NIL" ; "NIL"]
     else
       main
   in
@@ -764,14 +741,12 @@ let fetch_multipart_bodystructure lazyemail lemail (basic:bodystr_fields) body b
     bodystructure_folder email body >>= fun bodystr ->
     return (acc ^ bodystr)
   ) "" lemail >>= fun main ->
-  let main = (main ^ " " ^ basic.bsubtype) in
   (** params, disposition, language, location **)
   let all =
   if body = false then 
-    let extension = basic.bparams ^ " " ^ basic.bdisp ^ " " ^ "NIL" ^ " " ^ "NIL" in
-    main ^ " " ^ extension
+    String.concat " " [main; basic.bsubtype; basic.bparams ; basic.bdisp ; "NIL" ; "NIL"]
   else
-    main
+    String.concat " " [main; basic.bsubtype]
   in
   return (list_of all)
 
@@ -809,9 +784,9 @@ let exec_fetch_att seq sequence message att =
     LM.LazyMessage.get_message_metadata LM.this >>= fun meta ->
     f meta
   in
-  Lwt_list.fold_left_s
-  (fun acc item ->
-    (match item with
+  Lwt_list.map_s
+  (fun item ->
+    match item with
     | Fetch_Body -> email message exec_fetch_body 
     (** TBD set \Seen **)
     | Fetch_BodySection (spec,part) -> email message (exec_fetch_body_section spec part)
@@ -826,12 +801,9 @@ let exec_fetch_att seq sequence message att =
     | Fetch_Rfc822Header -> email message exec_fetch_rfc822header 
     | Fetch_Rfc822Size -> email message exec_fetch_rfc822size 
     | Fetch_Rfc822Text -> email message exec_fetch_rfc822text 
-    | Fetch_Uid -> metadata message exec_fetch_uid) >>= fun res ->
-    if acc = "" then
-      return res
-    else
-      return (acc ^ space ^ res)
-  ) "" att
+    | Fetch_Uid -> metadata message exec_fetch_uid
+  ) att >>= fun l ->
+  return (String.concat " " l)
 
 let exec_fetch_macro seq sequence message macro =
   match macro with
@@ -856,7 +828,7 @@ let exec_fetch seq sequence (module LM:LazyMessage_inst) attr changedsince buid 
     changedsince) > 0) then (
       exec_fetch_all seq sequence (module LM:LazyMessage_inst) attr buid >>= fun str ->
       let seq = string_of_int seq in
-      return (Some (seq ^ space ^ "FETCH" ^ space ^ (list_of str)))
+      return (Some (String.concat space [seq ; "FETCH" ; list_of str]))
   ) else
     return None
 
@@ -896,17 +868,17 @@ let format_flags seq modseq buid (record:mailbox_message_metadata) =
   let seq = string_of_int seq in
   let uid = 
     if buid then 
-      "UID " ^ (string_of_int record.uid) ^ space
+      String.concat "" ["UID " ; string_of_int record.uid ; space]
     else
       ""
   in
   let modseq = 
     if modseq then
-      "MODSEQ (" ^ (Int64.to_string record.modseq) ^ ") " 
+      String.concat "" ["MODSEQ (" ; (Int64.to_string record.modseq) ; ") "] 
     else
       ""
   in
-  seq ^ space ^ "FETCH (" ^ uid ^ modseq ^ "FLAGS (" ^ flags ^ ")"
+  String.concat "" [seq ; space ; "FETCH (" ; uid ; modseq ; "FLAGS (" ; flags ; ")"]
 
 (* send response for silent even if modseq is on
  * don't send response if the flag update
