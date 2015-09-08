@@ -1,0 +1,10 @@
+_build/*
+*/_build/*
+*.native
+*.out
+*.txt
+*.mlpack
+*.gz
+*.log
+*.sh
+*.mbox
