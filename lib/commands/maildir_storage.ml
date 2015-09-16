@@ -34,24 +34,39 @@ module MapFlag = Map.Make(
 let _mail_path config user =
   Utils.user_path ~path:config.Server_config.mail_path ~user ()
 
+(* message body without the headers *)
 let _raw_content t =
   match Email.raw_content t with
   | Some os -> Octet_stream.to_string os
   | None -> ""
 
-module LazyMaildirEmail : LazyEmail_intf with type c = Email.t =
+(* lazy string returns email message string, lazy email.t returns parsed email
+ * message 
+ *)
+type maildir_email_accessor = string Lwt.t lazy_t * Email.t Lwt.t lazy_t 
+
+module LazyMaildirEmail : LazyEmail_intf with type c = maildir_email_accessor =
   struct
     (* plain content *)
-    type c = Email.t
+    type c = maildir_email_accessor
 
-    type t = Email.t
+    type t = maildir_email_accessor
 
     let create c = c
 
-    let empty = Email.empty ()
+    let empty = 
+      (Lazy.from_fun (fun () -> return ""),Lazy.from_fun (fun () -> return (Email.empty ())))
+
+    let email_of_t t =
+      let (_,lazy_email) = t in
+      Lazy.force lazy_email 
+
+    let t_of_email e =
+      (Lazy.from_fun (fun () -> return (_raw_content e)), Lazy.from_fun (fun () -> return e))
 
     let header ?(incl=`Map MapStr.empty) ?(excl=MapStr.empty) t =
-      List.filter (fun (n,_) ->
+      email_of_t t >>= fun email ->
+      return (List.filter (fun (n,_) ->
         let dont_incl =
         match incl with
         | `Map incl -> 
@@ -61,44 +76,60 @@ module LazyMaildirEmail : LazyEmail_intf with type c = Email.t =
         in
         (dont_incl = true ||
           MapStr.is_empty excl = false && MapStr.mem (String.lowercase n) excl = true) = false
-      ) (Header.to_list (Email.header t))
+      ) (Header.to_list (Email.header email)))
 
     let header_to_str ?(incl=`Map MapStr.empty) ?(excl=MapStr.empty) t =
-      List.fold_left (fun str (n,v) ->
-        str ^ n ^ ":" ^ v ^ Email_parse.crlf
-      ) "" (header ~incl ~excl t)
+      header ~incl ~excl t >>= fun headers ->
+      return (String.concat "" (List.fold_right (fun (n,v) acc-> List.concat
+        [[n;":";v;Email_parse.crlf];acc]) headers []))
 
     let content t =
+      email_of_t t >>= fun email ->
       return (
-        match (Email.content t) with
-        | `Data _ -> `Data (_raw_content t)
-        | `Message m -> `Message m
-        | `Multipart lm -> `Multipart lm
+        match (Email.content email) with
+        | `Data _ -> `Data (_raw_content email)
+        | `Message m -> `Message (t_of_email m)
+        | `Multipart lm -> `Multipart (List.map (fun m -> t_of_email m) lm)
       )
       
     let raw_content t =
-      return (_raw_content t)
+      email_of_t t >>= fun email ->
+      return (_raw_content email)
 
+    (* return email message with headers *)
     let to_string ?(incl=`Map MapStr.empty) ?(excl=MapStr.empty) t =
-      let headers = header_to_str ~incl ~excl t in
-      raw_content t >>= fun content ->
-      return (headers ^ Email_parse.crlf ^ content)
+      if incl = (`Map MapStr.empty) && excl = MapStr.empty then (
+        let (lazy_str,_) = t in
+        (* return raw message as is *)
+        Lazy.force lazy_str
+      ) else (
+        (* exclude/include headers *)
+        header_to_str ~incl ~excl t >>= fun headers ->
+        raw_content t >>= fun content ->
+        return (String.concat "" [headers;Email_parse.crlf;content])
+      )
 
     let lines t =
-      Utils.lines (_raw_content t)
+      email_of_t t >>= fun email ->
+      return (Utils.lines (_raw_content email))
 
     let size t =
-      Bytes.length (_raw_content t)
+      email_of_t t >>= fun email ->
+      return (Bytes.length (_raw_content email))
 
   end
 
 let _email msg =
-  msg.Mailbox.Message.email
+  Lazy.force msg >>= fun msg ->
+  return msg.Mailbox.Message.email
 
 let _postmark msg = 
-  msg.Mailbox.Message.postmark
+  Lazy.force msg >>= fun msg ->
+  return msg.Mailbox.Message.postmark
 
-type maildir_accessor = Mailbox.Message.t * mailbox_message_metadata
+(* lazy string returns message string w/out postmark, lazy message.t returns parsed message
+ *)
+type maildir_accessor = string Lwt.t lazy_t * Mailbox.Message.t Lwt.t lazy_t * mailbox_message_metadata
 
 module LazyMaildirMessage : LazyMessage_intf with type c = maildir_accessor =
   struct
@@ -108,24 +139,29 @@ module LazyMaildirMessage : LazyMessage_intf with type c = maildir_accessor =
     let create c = c
 
     let get_postmark t =
-      let (msg,_) = t in
-      return (Mailbox.Postmark.to_string (_postmark msg))
+      let (_,msg,_) = t in
+      _postmark msg >>= fun postmark ->
+      return (Mailbox.Postmark.to_string postmark)
 
     let get_headers_block t =
-      let (msg,_) = t in
-      let header = Email.header (_email msg) in
+      let (_,msg,_) = t in
+      _email msg >>= fun email ->
+      let header = Email.header email in
       return (String_monoid.to_string (Header.to_string_monoid header))
 
     let get_content_block t =
-      let (msg,_) = t in
-      return (_raw_content (_email msg))
+      let (_,msg,_) = t in
+      _email msg >>= fun email ->
+      return (_raw_content email)
 
     let get_email t =
-      let (msg,_) = t in
-      return (build_lazy_email_inst (module LazyMaildirEmail) (_email msg))
+      let (str,msg,_) = t in
+      let lazy_email = Lazy.from_fun (fun () ->
+        _email msg) in
+      return (build_lazy_email_inst (module LazyMaildirEmail) (str, lazy_email))
 
     let get_message_metadata t =
-      let (_,meta) = t in
+      let (_,_,meta) = t in
       return meta
   end
 
@@ -374,7 +410,7 @@ let write_uidlist path l =
   Utils.with_file ~lock:true path ~flags:[Unix.O_WRONLY;Unix.O_TRUNC] ~perms:0o660 ~mode:Lwt_io.Output 
   ~f:(fun co ->
     Lwt_list.iter_s (fun (_,uid,file) ->
-      Lwt_io.write_line co ((string_of_int uid) ^ " " ^ file)
+      Lwt_io.write_line co (String.concat " " [string_of_int uid ; file])
     ) l
   ) 
 
@@ -382,7 +418,7 @@ let write_uidlist path l =
 let append_uidlist path uid file =
   Utils.with_file ~lock:true path ~flags:[Unix.O_WRONLY;Unix.O_APPEND] ~perms:0o660 ~mode:Lwt_io.Output 
   ~f:(fun co ->
-    Lwt_io.write_line co ((string_of_int uid) ^ " " ^ file)
+    Lwt_io.write_line co (String.concat " " [string_of_int uid ; file])
   ) 
 
 let subscribe_path mail_path user =
@@ -578,9 +614,8 @@ struct
       message
     )
 
-  (* append message(s) to selected mailbox *)
-  let append t message message_metadata =
-    let file = make_message_file_name (MaildirPath.to_maildir t.mailbox) message_metadata in
+  (* write message to the file *)
+  let write_message t file message =
     let tmp_file = MaildirPath.file_path t.mailbox (`Tmp file) in
     Utils.with_file tmp_file ~flags:[Unix.O_CREAT;Unix.O_WRONLY] ~perms:0o660 ~mode:Lwt_io.Output
     ~f:(fun oc ->
@@ -588,14 +623,22 @@ struct
         if t.config.maildir_parse then (
           Email_parse.message_to_blob t.config t.keys message >>= fun (msg_hash, message) ->
           return message
-        ) else
-          return (encrypt t (Mailbox.Message.to_string message))
+        ) else (
+          (* email parser expect \n, need to fix in the parser TBD *)
+          let message = Re.replace_string (Re_posix.compile_pat "\r\n") ~by:"\n" message in
+          return (encrypt t message)
+        )
       end >>= fun message ->
       Lwt_io.write oc message
     ) >>= fun () ->
     let cur_file = current t file in
     Lwt_unix.link tmp_file cur_file >>
-    Lwt_unix.unlink tmp_file >>= fun () ->
+    Lwt_unix.unlink tmp_file
+  
+  (* append message(s) to selected mailbox *)
+  let append t message message_metadata =
+    let file = make_message_file_name (MaildirPath.to_maildir t.mailbox) message_metadata in
+    write_message t file message >>= fun () ->
     t.uidlist := None;
     append_uidlist (MaildirPath.file_path t.mailbox `Uidlist) message_metadata.uid file 
 
@@ -665,26 +708,44 @@ struct
     )
 
   let fetch_ t position uids =
+    Printexc.record_backtrace true;
+    let skip_postmark ci =
+      if t.config.maildir_parse then
+        return ()
+      else (
+        Lwt_io.read_line ci >>= fun _ ->
+        return ()
+      )
+    in
     get_file t position uids >>= function
     | `Ok (_,uid,size,file) ->
       let (internal_date,_,modseq,flags) = message_file_name_to_data t.mailbox file in
       let metadata = {uid;modseq;internal_date;size;flags} in
       let lazy_read = Lazy.from_fun (fun () ->
-        Utils.with_file (current t file) ~flags:[Unix.O_RDONLY] ~perms:0o660 ~mode:Lwt_io.Input
-        ~f:(fun ci -> Lwt_io.read ci)) in
+        let t1 = Unix.gettimeofday () in
+        let path = current t file in
+        Lwt_io.with_file path ~mode:Lwt_io.Input (fun ci ->
+          skip_postmark ci >>
+          Lwt_io.read ci
+        ) >>= fun msg ->
+        Stats.add_readt (Unix.gettimeofday() -. t1);
+        return msg) in
       if t.config.maildir_parse then (
           assemble_message t lazy_read metadata
       ) else (
+        let lazy_message = Lazy.from_fun (fun () ->
         Lazy.force lazy_read >>= fun buffer ->
         let seq = Mailbox.With_seq.of_string (decrypt t buffer) in
-        let message = Utils.option_value_exn 
-            (Mailbox.With_seq.fold_message seq ~f:(fun _ message -> Some message) ~init:None) in
+        return (Utils.option_value_exn 
+            (Mailbox.With_seq.fold_message seq ~f:(fun _ message -> Some
+            message) ~init:None))) in
         return (`Ok (Lazy_message.build_lazy_message_inst (module LazyMaildirMessage)
-            (message,metadata)))
+            (lazy_read, lazy_message, metadata)))
       )
     | `Eof -> return `Eof
     | `NotFound -> return `NotFound
 
+  let total_fetch = ref 0.
   (* fetch messages from selected mailbox *)
   let fetch t position =
     fetch_uidlist t >>= fun uids ->
@@ -728,9 +789,7 @@ struct
       LazyMessage.LazyMessage.get_postmark LazyMessage.this >>= fun postmark ->
       LazyMessage.LazyMessage.get_email LazyMessage.this >>= fun (module LE:LazyEmail_inst) ->
       LE.LazyEmail.to_string LE.this >>= fun email ->
-      let message = 
-        { Mailbox.Message.postmark=Mailbox.Postmark.of_string postmark;
-          Mailbox.Message.email=Email.of_string email} in
+      let message = String.concat Email_parse.crlf [postmark ; email] in
       append t2 message message_metadata
 
   let commit t =
