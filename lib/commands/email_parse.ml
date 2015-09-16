@@ -272,8 +272,9 @@ let default_transform = function
   | `Body b -> b
   | `Attachment a -> a
 
-let parse ?(transform=default_transform) pub_key config (message:Mailbox.Message.t) ~save_message ~save_attachment =
-  let hash = Imap_crypto.get_hash (Mailbox.Message.to_string message) in
+let parse ?(transform=default_transform) pub_key config message ~save_message ~save_attachment =
+  let hash = Imap_crypto.get_hash message in
+  let message = Utils.make_email_message message in
   do_encrypt pub_key config (transform (`Postmark (Mailbox.Postmark.to_string message.postmark))) >>= fun postmark ->
   do_encrypt_content pub_key config message.email save_attachment hash transform >>= fun (headers,content, attachments) ->
   save_message hash postmark headers content attachments >>
