@@ -10,9 +10,8 @@ let dedup = ref MapStr.empty
 let () =
   Lwt_main.run (
     let config = {Server_config.srv_config with compress = false;compress_attach = false; encrypt = false } in
-    Utils.fold_email_with_file1 Sys.argv.(1) (fun cnt message ->
-      Printf.printf "message %d, size %d\n%!" cnt ((String.length
-      (Mailbox.Message.to_string message))/(1024*1024));
+    Utils.fold_email_with_file Sys.argv.(1) (fun cnt message ->
+      Printf.printf "message %d, size %d\n%!" cnt ((String.length message)/(1024*1024));
       Ssl_.get_system_keys Server_config.srv_config >>= fun (pub,_) ->
       Email_parse.parse pub config message ~save_message:(fun _ _ _ _ _ -> return ())
       ~save_attachment:(fun _ _ attachment -> 

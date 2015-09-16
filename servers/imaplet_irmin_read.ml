@@ -98,9 +98,7 @@ let postmark = replace ~regx:"FROM" ~tmpl:from_ postmark in
   let message = replace ~regx:"TO" ~tmpl:to_ message in
   let message = replace ~regx:"EMAIL" ~tmpl:email_ message in
   let message = replace ~regx:"ID" ~tmpl:id_ message in
-  let postmark = Mailbox.Postmark.of_string postmark in
-  let email = Email.of_string message in
-  {Mailbox.Message.postmark;Mailbox.Message.email}
+  postmark ^ "\r\n" ^ message
 
 let append user mailbox =
   let open Storage_meta in

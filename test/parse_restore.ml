@@ -93,10 +93,7 @@ let commands f =
 let fill file push_stream =
   let add_message buffer push_stream =
     if Buffer.length buffer > 0 then (
-      let wseq = Mailbox.With_seq.of_string (Buffer.contents buffer) in
-      Mailbox.With_seq.fold_message wseq ~f:(fun _ message ->
-        push_stream (Some message);
-      ) ~init:()
+      push_stream (Some (Buffer.contents buffer))
     ) else (
       ()
     )

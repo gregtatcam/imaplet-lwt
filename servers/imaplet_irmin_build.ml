@@ -220,15 +220,16 @@ let mailbox_of_gmail_label message =
 
 let append_messages ist path flags =
   Printf.printf "#### appending messages %s\n%!" path;
-  let wseq = Mailbox.With_seq.t_of_file path in
-  Mailbox.With_seq.fold_message wseq ~f:(fun _ (message:Mailbox.Message.t) ->
-    if Regex.match_regex (Mailbox.Postmark.to_string message.postmark) ~regx:"^From[ ]+MAILER_DAEMON" then 
-      return ()
+  Utils.fold_email_with_file path (fun acc message ->
+    if Regex.match_regex ~regx:"^From[ ]+MAILER_DAEMON" message then 
+      return (`Ok acc)
     else (
-      let size = String.length (Email.to_string message.email) in
-      append ist message size flags ""
+      let (_,email) = Utils.make_postmark_email message in
+      let size = String.length email in
+      append ist message size flags "" >>
+      return (`Ok acc)
     )
-  ) ~init:(return())
+  ) ()
   
 let gmail_mailboxes = ref MapStr.empty;;
 gmail_mailboxes := MapStr.add "INBOX" "" !gmail_mailboxes;;
@@ -250,13 +251,11 @@ let filter_folder folders f =
     List.exists (fun n -> (lowercase (Regex.dequote n)) = (lowercase f)) folders = false
 
 let parse_message content =
-  let wseq = Mailbox.With_seq.of_string content in
-  Mailbox.With_seq.fold_message wseq ~f:(fun _ message ->
-    let headers = String_monoid.to_string (Header.to_string_monoid (Email.header message.email)) in
-    let (mailbox,fl) = mailbox_of_gmail_label headers in
-    let size = String.length (Email.to_string message.email) in
-    (Some (mailbox,size,fl,message))
-  ) ~init:None
+  let (_,email) = Utils.make_postmark_email content in
+  let headers = Utils.substr ~start:0 ~size:(Some 1000) email in
+  let (mailbox,fl) = mailbox_of_gmail_label headers in
+  let size = String.length email in
+  Some (mailbox,size,fl,content)
 
 let rec get_message ic buffer folders =
   let parse_content content folders f =
@@ -353,7 +352,7 @@ let append_maildir_message ist ?uid path flags =
   if Regex.match_regex buffer ~regx:"^From[ ]+MAILER_DAEMON" then 
     return ()
   else (
-    let message = Utils.make_email_message buffer in
+    let message = Utils.make_message_with_postmark buffer in
     append ist ?uid message size flags ""
   )
 

@@ -60,7 +60,7 @@ sig
     f:('a -> [`Folder of (string*int)|`Mailbox of (string*int)] -> 'a Lwt.t) -> 'a Lwt.t
 
   (* append message(s) to selected mailbox *)
-  val append : t -> Mailbox.Message.t -> mailbox_message_metadata -> unit Lwt.t 
+  val append : t -> string -> mailbox_message_metadata -> unit Lwt.t 
 
   (* delete a message
    *)
