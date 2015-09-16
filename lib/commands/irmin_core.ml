@@ -79,6 +79,7 @@ module LazyIrminEmail : LazyEmail_intf with type c = email_irmin_accessors =
 
     let header ?(incl=`Map MapStr.empty) ?(excl=MapStr.empty) t =
       let sexp = Sexp.of_string (Bytes.sub t.headers t.email.header.offset t.email.header.length) in
+      return(
       List.filter (fun (n,_) ->
         let dont_incl =
         match incl with
@@ -90,12 +91,12 @@ module LazyIrminEmail : LazyEmail_intf with type c = email_irmin_accessors =
         (* exclude if it is not on included list or is on excluded list *)
         (dont_incl = true ||
           MapStr.is_empty excl = false && MapStr.mem (String.lowercase n) excl = true) = false
-      ) (list_of_sexp (fun sexp -> pair_of_sexp string_of_sexp string_of_sexp sexp) sexp)
+      ) (list_of_sexp (fun sexp -> pair_of_sexp string_of_sexp string_of_sexp sexp) sexp))
 
     let header_to_str ?(incl=`Map MapStr.empty) ?(excl=MapStr.empty) t =
-      List.fold_left (fun str (n,v) ->
-        str ^ n ^ ":" ^ v ^ crlf
-      ) "" (header ~incl ~excl t)
+      header ~incl ~excl t >>= fun hdr ->
+      return (String.concat "" (List.fold_right (fun (n,v) acc-> List.concat
+        [[n;":";v;crlf];acc]) hdr []))
 
     let convert t =
       match t.email.content with
@@ -119,39 +120,44 @@ module LazyIrminEmail : LazyEmail_intf with type c = email_irmin_accessors =
 
     let raw_content t =
       let buffer = Buffer.create 100 in
+      let add_string ?(crlf=false) str = 
+        Buffer.add_string buffer str;
+        if crlf then Buffer.add_string buffer Regex.crlf 
+      in
       let rec _raw_content t with_header last_crlf =
         let header t buffer with_header = 
-          if with_header then 
-            Buffer.add_string buffer ((header_of_sexp_str 
-              (Bytes.sub t.headers t.email.header.offset t.email.header.length)) ^ crlf)
+          if with_header then
+            add_string ~crlf:true (header_of_sexp_str (Bytes.sub t.headers t.email.header.offset t.email.header.length))
         in
         convert t >>= fun c ->
         header t buffer with_header;
         match c with
-        | `Data data -> Buffer.add_string buffer (data ^ crlf); return ()
+        | `Data data -> add_string ~crlf:true data; return ()
         | `Message email -> _raw_content email true crlf
         | `Multipart_ (boundary,lemail) ->
-          Buffer.add_string buffer crlf;
+          add_string crlf;
           Lwt_list.iter_s (fun email ->
-            Buffer.add_string buffer (boundary ^ crlf);
+            add_string ~crlf:true boundary;
             _raw_content email true crlf
           ) lemail >>= fun () ->
-          Buffer.add_string buffer (boundary ^ "--" ^ crlf ^ last_crlf);
+          add_string boundary;
+          add_string ~crlf:true "--";
+          add_string last_crlf;
           return ()
       in
       _raw_content t false "" >>
       return (Buffer.contents buffer)
 
     let to_string ?(incl=`Map MapStr.empty) ?(excl=MapStr.empty) t =
-      let headers = header_to_str ~incl ~excl t in
+      header_to_str ~incl ~excl t >>= fun headers ->
       raw_content t >>= fun content ->
-      return (headers ^ crlf ^ content)
+      return (String.concat crlf [headers ; content])
 
     let size t =
-      t.email.part.size
+      return t.email.part.size
 
     let lines t =
-      t.email.part.lines
+      return t.email.part.lines
 
   end
 
@@ -265,14 +271,7 @@ module Key_ :
       add_path key "mailboxes"
 
     (* convert key to path, keep "imaplet", user, and "mailboxes" *)
-    let key_to_string key = 
-      List.fold_left
-      (fun acc item -> 
-        if acc = "" then
-          "/" ^ item
-        else
-          acc ^ "/" ^ item
-     ) "" key
+    let key_to_string key = "/" ^ (String.concat "/" key)
 
     (* convert key to path, remove "imaplet",user, and "mailboxes" *)
     let key_to_path key = 
@@ -652,7 +651,7 @@ module type GitMailboxIntf =
     val copy_mailbox : t -> [`Sequence of int|`UID of int] -> t ->
       mailbox_message_metadata -> unit Lwt.t
     val read_mailbox_metadata : t -> mailbox_metadata Lwt.t
-    val append_message : t -> Mailbox.Message.t -> mailbox_message_metadata -> unit Lwt.t
+    val append_message : t -> string -> mailbox_message_metadata -> unit Lwt.t
     val update_mailbox_metadata : t -> mailbox_metadata -> unit Lwt.t
     val update_message_metadata : t -> [`Sequence of int|`UID of int] -> mailbox_message_metadata ->
       [`NotFound|`Eof|`Ok] Lwt.t
@@ -685,9 +684,9 @@ module GitMailboxMake
     let get_key mbox_key = function
     | `Metamailbox -> Key_.add_path mbox_key "metambox"
     | `Index -> Key_.add_path mbox_key "index"
-    | `Storage (msg_hash,contid) -> Key_.t_of_path ("storage/" ^ msg_hash ^ "/" ^ contid) 
-    | `Hashes hash -> Key_.t_of_path ("storage/" ^ hash ^ "/hashes")
-    | `Metamessage hash -> Key_.add_path mbox_key ("messages/" ^ hash ^ "/metamsg")
+    | `Storage (msg_hash,contid) -> Key_.t_of_path (String.concat "" ["storage/" ; msg_hash ; "/" ; contid]) 
+    | `Hashes hash -> Key_.t_of_path (String.concat hash ["storage/" ; "/hashes"])
+    | `Metamessage hash -> Key_.add_path mbox_key (String.concat hash ["messages/" ; "/metamsg"])
     | `Blob hash -> Key_.t_of_path ("storage/" ^ hash) 
     | `MetamsgRoot hash -> Key_.add_path mbox_key ("messages/" ^ hash)
     | `Subscriptions -> Key_.t_of_path "subscriptions"
