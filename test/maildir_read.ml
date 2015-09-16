@@ -85,13 +85,47 @@ let read_uidlst file =
     read []
   )
 
-let read_message file w =
+let readt = ref 0.
+let writet = ref 0.
+
+let timeit acc t =
+  let t1 = Unix.gettimeofday() in
+  acc := !acc +. (t1 -. t);
+  t1
+
+let sp = " "
+
+let buff_size = 15_000_000
+
+let write w buff =
+  let len = String.length buff in
+  let rec write_ offset =
+    if offset + 2048 >= len then (
+      Lwt_io.write_from_string_exactly w buff offset (len - offset)
+    ) else (
+      Lwt_io.write_from_string_exactly w buff offset 2048 >>= fun () ->
+      write_ (offset + 2048)
+    )
+  in
+  write_ 0
+
+let read_write_message file w =
   Lwt_io.with_file file ~mode:Lwt_io.Input (fun ic ->
     let rec read () =
       catch (fun () ->
-        Lwt_io.read ~count:1024 ic >>= fun buff ->
+        let t=Unix.gettimeofday() in
+        Lwt_io.read ic >>= fun buff ->
+        let t = timeit readt t in
         if buff <> "" then (
-          Lwt_io.write w buff >>= fun () ->
+          let l = ["*"; sp;"1"; sp; "FETCH"; sp; "("; "BODY[]"; sp; "{";string_of_int
+          (String.length buff); "}";"\r\n";buff;")";"\r\n"] in
+          Lwt_io.write w "* 1 FETCH (BODY[] {123}" >>= fun () ->
+          write w buff >>= fun () ->
+          Lwt_io.write w ")\r\n" >>= fun () ->
+          (*Lwt_list.iter_s (fun v ->
+            Lwt_io.write w v
+          ) l >>= fun () ->*)
+          let _ = timeit writet t in
           read ()
         ) else
           return ()
@@ -105,7 +139,7 @@ let read_files repo w =
   Lwt_list.iter_s (fun (uid,file) ->
     Printf.printf "%d\n%!" uid;
     let file = Filename.concat (Filename.concat repo "cur") file in
-    read_message file w 
+    read_write_message file w
   ) uids
 
 let () =
@@ -116,9 +150,12 @@ let () =
           Lwt_io.read_line_opt r >>= function
           | Some l ->
             if l = "read" then (
+              readt := 0.;
+              writet := 0.;
               let t = Unix.gettimeofday () in
               read_files repo w >>= fun () ->
-              Printf.printf "total time %.04f\n%!" (Unix.gettimeofday() -. t);
+              Printf.printf "total read: %.04f, write %.04f, time %.04f\n%!"
+              !readt !writet (Unix.gettimeofday() -. t);
               loop ()
             ) else (
               return ()
