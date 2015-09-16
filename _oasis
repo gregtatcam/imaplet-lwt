@@ -118,6 +118,7 @@ Library commands
                     Smtplet_clnt,
                     Socket_utils,
                     Ssl_,
+                    Stats,
                     Storage,
                     Storage_meta,
                     Utils
