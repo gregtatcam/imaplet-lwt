@@ -72,7 +72,7 @@ val append : t -> string -> Lwt_io.input_channel -> Lwt_io.output_channel ->
 val search : t -> (unit -> unit Lwt.t) -> (searchKey) searchKeys -> bool ->
   [`NotExists|`NotSelectable|`Error of string|`Ok of (int64 option * int list)] Lwt.t
 
-val fetch : t -> (unit -> unit Lwt.t) -> (string->unit Lwt.t) -> sequence ->
+val fetch : t -> (unit -> unit Lwt.t) -> (string list->unit Lwt.t) -> sequence ->
   fetch -> int64 option -> bool -> [`NotExists|`NotSelectable|`Error of string|`Ok] Lwt.t
 
 val store : t -> (unit -> unit Lwt.t) -> (string->unit Lwt.t) -> sequence -> storeFlags -> mailboxFlags list -> 
