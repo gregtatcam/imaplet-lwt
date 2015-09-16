@@ -14,6 +14,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 open Imaplet_types
+open Lwt
 
 module StatusResponse : sig
   type response_type = Ok|Bad|No|Preauth|Bye
@@ -87,15 +88,30 @@ end = struct
     to_str str
 end
 
+let do_compress compress resp =
+  match compress with
+  | None -> resp
+  | Some _ -> Imap_crypto.do_compress ~header:true resp
+
+let buff_size = 1500 
+
+let write w buff =
+  let len = String.length buff in
+  let rec write_ offset =
+   if offset + buff_size >= len then (
+     Lwt_io.write_from_string_exactly w buff offset (len - offset)
+   ) else (
+     Lwt_io.write_from_string_exactly w buff offset buff_size >>
+     write_ (offset + buff_size)
+   )
+  in
+  write_ 0
+
 let write_resp compress id w ?(tag="*") resp =
   let send_wcrlf w str = 
     Log_.log `Info3 (Printf.sprintf "<-- %s: %s\n" (Int64.to_string id) str);
-    let buff = 
-    match compress with
-    | None -> str ^ Regex.crlf
-    | Some _ -> Imap_crypto.do_compress ~header:true (str ^ Regex.crlf)
-    in
-    Lwt_io.write w buff >> Lwt_io.flush w
+    let buff = do_compress compress (str ^ Regex.crlf) in
+    write w buff
   in
   match resp with
   | Resp_Ok (code, s) -> send_wcrlf w (StatusResponse.ok ~tag ~code s)
@@ -109,3 +125,17 @@ let write_resp compress id w ?(tag="*") resp =
 
 let write_resp_untagged compress id writer text =
   write_resp compress id writer (Resp_Untagged text)
+
+let write_resp_untagged_vector compress id w resp =
+  let l = List.concat [["*"];resp;[Regex.crlf]] in
+  if compress <> None then (
+    (* need to do stream compression *)
+    write_resp_untagged compress id w (String.concat "" l)
+  ) else (
+    let t = Unix.gettimeofday () in
+    Lwt_list.iter_s (fun v ->
+      write w v
+    ) l >>= fun () ->
+    Stats.add_writet (Unix.gettimeofday() -. t);
+    return ()
+  )

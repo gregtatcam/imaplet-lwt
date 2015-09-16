@@ -35,3 +35,6 @@ module StatusResponse :
 val write_resp : compressionAlgrthm option -> int64 -> Lwt_io.output_channel -> ?tag:string -> response -> unit Lwt.t
 
 val write_resp_untagged : compressionAlgrthm option -> int64 -> Lwt_io.output_channel -> string -> unit Lwt.t
+
+val write_resp_untagged_vector : compressionAlgrthm option -> int64 ->
+  Lwt_io.output_channel -> string list -> unit Lwt.t
