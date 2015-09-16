@@ -25,15 +25,15 @@ module type LazyEmail_intf =
     val empty : t
     val create : c -> t
     val header : ?incl:[`Regx of string|`Map of unit Map.Make(String).t] -> ?excl:unit Map.Make(String).t -> 
-      t -> (string * string) list 
+      t -> ((string * string) list) Lwt.t
     val header_to_str : ?incl:[`Regx of string|`Map of unit Map.Make(String).t] -> 
-      ?excl:unit Map.Make(String).t -> t -> string
+      ?excl:unit Map.Make(String).t -> t -> string Lwt.t
     val content : t -> [`Data of string|`Message of t|`Multipart of t list] Lwt.t
     val raw_content : t -> string Lwt.t
     val to_string : ?incl:[`Regx of string|`Map of unit Map.Make(String).t] -> ?excl:unit Map.Make(String).t -> 
       t -> string Lwt.t
-    val size : t -> int
-    val lines : t -> int
+    val size : t -> int Lwt.t
+    val lines : t -> int Lwt.t
   end
 
 module type LazyEmail_inst =
