@@ -70,3 +70,4 @@
 * move hash references to the immutable storage location
 * added basic smtp client library and standalone
 * add per/user store configuration to "users", i.e. ability to have different store for different users
+* move message parsing from append to email parser, user String.concat for efficiency, return Lwt type, return string list in fetch for efficiency
