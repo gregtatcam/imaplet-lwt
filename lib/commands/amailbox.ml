@@ -291,7 +291,7 @@ let get_message_from_client reader writer compression literal =
   let message = String.create size in
   (* timeout and how long? what if the message fairly big? *)
   Lwt_io.read_into_exactly reader message 0 size >>= fun () ->
-  let message = Utils.make_email_message message in
+  let message = Utils.make_message_with_postmark message in
   return (message,size)
 
 let find_fl flags fl =
