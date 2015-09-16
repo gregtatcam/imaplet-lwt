@@ -24,7 +24,7 @@ val exec_search : (module Lazy_message.LazyMessage_inst) -> (searchKey) searchKe
 val get_sequence : string -> (seq_set list)
 
 val exec_fetch : int -> sequence -> (module Lazy_message.LazyMessage_inst) -> 
-  fetch -> int64 option -> bool -> string option Lwt.t
+  fetch -> int64 option -> bool -> string list option Lwt.t
 
 val exec_store : mailbox_message_metadata->int -> sequence ->
   storeFlags -> mailboxFlags list -> Int64.t option -> bool -> 

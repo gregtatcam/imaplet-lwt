@@ -29,6 +29,10 @@ exception InvalidMessage
 
 module MapStr = Map.Make(String)
 
+let concat_list sep l = 
+  List.fold_left (fun acc i ->
+    if acc = [] then [i] else i :: (sep :: acc)) [] l
+
 let find_header headers name =
   let tol s = String.lowercase s in
   try 
@@ -64,6 +68,8 @@ let default_bodystr_fields =
     blines = "";
     bdisp = "NIL";
   }
+
+let flags_to_string_list flags = List.map fl_to_str flags
 
 let flags_to_string flags =
   String.concat " " (List.map fl_to_str flags)
@@ -144,37 +150,37 @@ let rec get_address headers key =
 
 (** fetch the flags **)
 let exec_fetch_flags metadata =
-  let flags = flags_to_string metadata.flags in
-  return (String.concat "" ["FLAGS" ; space ; (list_of flags)]) 
+  let flags = flags_to_string_list metadata.flags in
+  return (List.concat [["FLAGS" ; space ; "("]; flags; [")"]])
 
 (** fetch internal date **)
 let exec_fetch_internaldate metadata =
-  return (String.concat "" ["INTERNALDATE" ; space ; quote (date_time_to_email metadata.internal_date)])
+  return ["INTERNALDATE" ; space ; quote (date_time_to_email metadata.internal_date)]
 
 (** fetch internal date **)
 let exec_fetch_modseq metadata =
-  return (String.concat "" ["MODSEQ" ; space ; to_plist (Int64.to_string metadata.modseq)])
+  return ["MODSEQ" ; space ; to_plist (Int64.to_string metadata.modseq)]
 
 (** fetch rfc822 message **)
 let exec_fetch_rfc822 email =
   email_to_str email >>= fun (str,length) ->
-  return (String.concat "" ["RFC822 {" ; string_of_int length ; "}" ; crlf ; str])
+  return ["RFC822 {" ; string_of_int length ; "}" ; crlf ; str]
 
 (** fetch rfc822 header **)
 let exec_fetch_rfc822header (module LE:LazyEmail_inst) =
-  let str = LE.LazyEmail.header_to_str ~excl:exclude LE.this in
+  LE.LazyEmail.header_to_str ~excl:exclude LE.this >>= fun str ->
   let length = String.length str in
-  return (String.concat "" ["RFC822.HEADER {" ; string_of_int length ; "}" ; crlf ; str])
+  return ["RFC822.HEADER {" ; string_of_int length ; "}" ; crlf ; str]
 
 (** fetch rfc822 text **)
 let exec_fetch_rfc822text (module LE:LazyEmail_inst) =
   LE.LazyEmail.raw_content LE.this >>= fun str ->
-  return (String.concat "" ["RFC822.TEXT {" ; string_of_int (String.length str) ; "}" ; crlf ; str])
+  return ["RFC822.TEXT {" ; string_of_int (String.length str) ; "}" ; crlf ; str]
 
 (** fetch rfc822 text **)
 let exec_fetch_rfc822size (module LE:LazyEmail_inst) =
-  let size = LE.LazyEmail.size LE.this in
-  return ("RFC822.SIZE " ^ (string_of_int size))
+  LE.LazyEmail.size LE.this >>= fun size ->
+  return ["RFC822.SIZE " ; string_of_int size]
   
 (** get seq_number from the string **)
 let get_seq_number_exn (number:string) : (seq_number) =
@@ -256,7 +262,7 @@ let exec_flag (module LM:LazyMessage_inst) (flag:searchFlags) =
 
 let get_header (module LM:LazyMessage_inst) =
   LM.LazyMessage.get_email LM.this >>= fun (module LE:LazyEmail_inst) ->
-  return (LE.LazyEmail.header LE.this)
+  LE.LazyEmail.header LE.this
 
 (** match the date **)
 let exec_hdr_date message (date:Dates.ImapDate.t) (op:int->int->bool) = 
@@ -435,10 +441,10 @@ let exec_fetch_envelope_unf headers =
 (** fetch envelope **)
 let exec_fetch_envelope headers =
   exec_fetch_envelope_unf headers >>= fun env ->
-  return (String.concat "" ["ENVELOPE (" ; env ; "))"])
+  return ["ENVELOPE (" ; env ; "))"]
 
 let exec_fetch_uid metadata =
-  return ("UID " ^ (string_of_int metadata.uid))
+  return ["UID " ; string_of_int metadata.uid]
 
 (** 4.3.2.1. **)
 let section_part_str (l:int list) : string =
@@ -473,33 +479,33 @@ let exec_fetch_text (module LE:LazyEmail_inst) =
   LE.LazyEmail.raw_content LE.this
 
 (** build body sectin reply string **)
-let body_template_str (prefix:string) (content:string) (sec:sectionPart)
-(part:bodyPart) : string =
+let body_template_str ~prefix ~content sec part =
   let (part,str) = body_part_str part content in
   let sec = section_part_str sec in
-  String.concat "" ["BODY[" ; sec ; prefix ; "]" ; part ; crlf ; str]
+  ["BODY[" ; sec ; prefix ; "]" ; part ; crlf ; str]
   
 let mk_headers_fetch_str prefix headers =
-  String.concat "" [prefix ; " " ; 
-  "("; String.concat " " (List.map String.uppercase headers); ")"]
+  String.concat "" [prefix ; " " ; "("; String.concat " " (List.map String.uppercase headers); ")"]
 
 let exec_fetch_msgtext email (msgtext:sectionMsgtext) (sec:sectionPart) (part:bodyPart) =
   (match msgtext with
-  | Header -> return ("HEADER", exec_fetch_header email )
+  | Header -> 
+    exec_fetch_header email >>= fun header ->
+    return ("HEADER", header)
   | HeaderFields incl -> 
-    return (mk_headers_fetch_str "HEADER.FIELDS" incl,
-      exec_fetch_header ~incl:(`Map (map_of_alist incl)) email )
+    exec_fetch_header ~incl:(`Map (map_of_alist incl)) email >>= fun header ->
+    return (mk_headers_fetch_str "HEADER.FIELDS" incl, header)
   | HeaderFieldsNot excl -> 
-    return (mk_headers_fetch_str "HEADER.FIELDS.NOT" excl,
-      exec_fetch_header ~excl:(map_of_alist excl) email )
+    exec_fetch_header ~excl:(map_of_alist excl) email >>= fun header ->
+    return (mk_headers_fetch_str "HEADER.FIELDS.NOT" excl, header)
   | Text -> exec_fetch_text email >>= fun text -> return ("TEXT",text )
-  ) >>= fun (prefix,str) ->
-  return (body_template_str prefix str sec part)
+  ) >>= fun (prefix,content) ->
+  return (body_template_str ~prefix ~content sec part)
 
 let exec_fetch_mime email (sec:sectionPart) (part:bodyPart) =
   let incl = `Regx "^content-" in
-  let str = exec_fetch_header ~incl email in
-  body_template_str "MIME" str sec part
+  exec_fetch_header ~incl email >>= fun content ->
+  return (body_template_str ~prefix:"MIME" ~content sec part)
 
 let secpart_to_str secPart =
   String.concat ":" (List.map string_of_int secPart)
@@ -511,18 +517,18 @@ let exec_fetch_email_body (module LE:LazyEmail_inst) (sec:sectionPart) (part:bod
   else
     LE.LazyEmail.raw_content LE.this
   end >>= fun content ->
-  return (body_template_str "" content sec part)
+  return (body_template_str ~prefix:"" ~content sec part)
 
 let content_type (module LE:LazyEmail_inst) =
-  let headers = LE.LazyEmail.header ~incl:(`Regx "^content-type") LE.this in
+  LE.LazyEmail.header ~incl:(`Regx "^content-type") LE.this >>= fun headers ->
   let (n,v) = List.hd headers in
   let v = Regex.replace ~regx:"\n" ~tmpl:"" (String.trim v) in
   let v = Regex.replace ~regx:"[ \t]+" ~tmpl:" " v in
-  v
+  return v
 
 let rec walk_debug lazy_email =
   let rec _walk_debug (module LE:LazyEmail_inst) indnt multi =
-    let ctype = content_type (module LE) in
+    content_type (module LE) >>= fun ctype ->
     Printf.fprintf stderr "%s%s %s\n%!" indnt multi ctype;
     LE.LazyEmail.content LE.this >>= function
     | `Data _ -> Printf.fprintf stderr "%scontent\n%!" indnt; return ()
@@ -552,7 +558,7 @@ let find_fetch_section email secPart =
             raise SectionDone
         | `Message m ->
           let lazy_email = lazy_email_of_t (module LE.LazyEmail) m in
-          let ctype = content_type lazy_email in
+          content_type lazy_email >>= fun ctype ->
           if match_regex ~case:false ~regx:"multipart" ctype then
             walk (lazy_email_of_t (module LE.LazyEmail) m) secPart
           else if hd = 1 then
@@ -591,7 +597,7 @@ let exec_fetch_sectext email (secPart:sectionPart) (secText:sectionText option)
   | Some secText ->
       match secText with
       | SectionMsgtext msgtext -> exec_fetch_msgtext email msgtext secPart part
-      | Mime -> return (exec_fetch_mime email secPart part)
+      | Mime -> exec_fetch_mime email secPart part
 
 let exec_fetch_body_section (spec:sectionSpec) (part:bodyPart) email =
   match spec with
@@ -675,10 +681,13 @@ let fetch_disposition disp =
       list_of (quote disp)
 
 (** some bodystructure fields **)
-let fetch_bodystructure_fields (module LE:LazyEmail_inst) : bodystr_fields =
-  let headers = LE.LazyEmail.header LE.this in
-  let bsize = string_of_int (LE.LazyEmail.size LE.this) in
-  let blines = string_of_int (LE.LazyEmail.lines LE.this) in
+let fetch_bodystructure_fields (module LE:LazyEmail_inst) =
+  LE.LazyEmail.header LE.this >>= fun headers ->
+  LE.LazyEmail.size LE.this >>= fun bsize ->
+  let bsize = string_of_int bsize in
+  LE.LazyEmail.lines LE.this >>= fun blines ->
+  let blines = string_of_int blines in
+  return (
   List.fold_left (fun acc (n,v) ->
     let v = String.trim v in
     if match_regex ~case:false n ~regx:"content-type" then (
@@ -694,13 +703,13 @@ let fetch_bodystructure_fields (module LE:LazyEmail_inst) : bodystr_fields =
       {acc with bdisp = fetch_disposition v}
     ) else
       acc
-  ) {default_bodystr_fields with bsize;blines} headers
+  ) {default_bodystr_fields with bsize;blines} headers)
 
-let format_basic (basic:bodystr_fields) : string =
+let format_basic (basic:bodystr_fields) =
   String.concat " "
   [basic.btype;basic.bsubtype;basic.bparams;basic.bid;basic.bdescr;basic.benc;basic.bsize;]
 
-let format_simple (basic:bodystr_fields) (body:bool) : string =
+let format_simple (basic:bodystr_fields) body  =
   let main =
     let l = [basic.btype;basic.bsubtype;basic.bparams;basic.bid;basic.bdescr;basic.benc;basic.bsize;] in
     if basic.btype = "\"text\"" then
@@ -716,42 +725,43 @@ let format_simple (basic:bodystr_fields) (body:bool) : string =
       []
   in
   let all = List.concat [main;extension] in
-  String.concat " " all
+  concat_list " " all
 
 let fetch_message_bodystructure (module LE:LazyEmail_inst) basic body bodystructure_folder =
-  exec_fetch_envelope_unf (LE.LazyEmail.header LE.this) >>= fun env ->
+  LE.LazyEmail.header LE.this >>= fun header ->
+  exec_fetch_envelope_unf header >>= fun env ->
   bodystructure_folder (module LE:LazyEmail_inst) body >>= fun bodystr ->
-  let main =String.concat "" [(format_basic basic) ; " " ; (list_of env) ; bodystr ; " " ; basic.blines] in
+  let main = List.concat [[format_basic basic ; " " ; (list_of env) ]; bodystr ; [" " ; basic.blines]] in
   (** md5, disposition, language, location **)
   let all =
     if body = false then
-      String.concat " " [main ; "NIL" ; basic.bdisp ; "NIL" ; "NIL"]
+      List.concat [main ; ["NIL" ; basic.bdisp ; "NIL" ; "NIL"]]
     else
       main
   in
-  return (list_of (all))
+  return (List.concat [["("];all;[")"]])
 
-let fetch_simple_bodystructure (basic:bodystr_fields) (body:bool) : string =
-  list_of (format_simple basic body)
+let fetch_simple_bodystructure (basic:bodystr_fields) body =
+  List.concat [["("]; format_simple basic body; [")"]]
 
 let fetch_multipart_bodystructure lazyemail lemail (basic:bodystr_fields) body bodystructure_folder =
   Lwt_list.fold_left_s
   (fun acc email ->
     let email = lazy_email_of_t lazyemail email in
     bodystructure_folder email body >>= fun bodystr ->
-    return (acc ^ bodystr)
-  ) "" lemail >>= fun main ->
+    return (List.concat [acc ; bodystr])
+    ) [] lemail >>= fun main ->
   (** params, disposition, language, location **)
   let all =
   if body = false then 
-    String.concat " " [main; basic.bsubtype; basic.bparams ; basic.bdisp ; "NIL" ; "NIL"]
-  else
-    String.concat " " [main; basic.bsubtype]
+    concat_list " " (List.concat [main; [basic.bsubtype; basic.bparams ; basic.bdisp ; "NIL" ; "NIL"]])
+    else
+    concat_list " " (List.concat [main; [basic.bsubtype]])
   in
-  return (list_of all)
+  return (List.concat [["("]; all; [")"]])
 
 let rec fold_email_bodystructure (module LE:LazyEmail_inst) body =
-  let basic = fetch_bodystructure_fields (module LE:LazyEmail_inst) in
+  fetch_bodystructure_fields (module LE:LazyEmail_inst) >>= fun basic ->
   LE.LazyEmail.content LE.this >>= fun cont ->
   match cont with
   | `Data _ -> return (fetch_simple_bodystructure basic body)
@@ -763,13 +773,13 @@ let rec fold_email_bodystructure (module LE:LazyEmail_inst) body =
 
 (** bodyscture for the whole email-message **)
 let exec_fetch_bodystructure email =
-  fold_email_bodystructure email false >>= fun str ->
-  return ("BODYSTRUCTURE " ^ str)
+  fold_email_bodystructure email false >>= fun l ->
+  return ("BODYSTRUCTURE " :: l)
 
 (** bodyscture for the whole email-message **)
 let exec_fetch_body email =
-  fold_email_bodystructure email true >>= fun str ->
-  return ("BODY " ^ str)
+  fold_email_bodystructure email true >>= fun l ->
+  return ("BODY " :: l)
 
 let exec_fetch_att seq sequence message att =
   let email (module LM:LazyMessage_inst) f =
@@ -784,8 +794,9 @@ let exec_fetch_att seq sequence message att =
     LM.LazyMessage.get_message_metadata LM.this >>= fun meta ->
     f meta
   in
-  Lwt_list.map_s
-  (fun item ->
+  Lwt_list.fold_left_s
+  (fun acc item ->
+    begin
     match item with
     | Fetch_Body -> email message exec_fetch_body 
     (** TBD set \Seen **)
@@ -802,8 +813,12 @@ let exec_fetch_att seq sequence message att =
     | Fetch_Rfc822Size -> email message exec_fetch_rfc822size 
     | Fetch_Rfc822Text -> email message exec_fetch_rfc822text 
     | Fetch_Uid -> metadata message exec_fetch_uid
-  ) att >>= fun l ->
-  return (String.concat " " l)
+    end >>= fun l ->
+    if acc = [] then
+      return l
+    else
+      return (List.concat [acc; [space]; l])
+  ) [] att
 
 let exec_fetch_macro seq sequence message macro =
   match macro with
@@ -826,9 +841,9 @@ let exec_fetch seq sequence (module LM:LazyMessage_inst) attr changedsince buid 
   if (buid = false && exec_seq sequence seq || buid = true && (exec_seq sequence record.uid))  &&
     (changedsince = None || Int64.compare record.modseq (option_value_exn
     changedsince) > 0) then (
-      exec_fetch_all seq sequence (module LM:LazyMessage_inst) attr buid >>= fun str ->
+      exec_fetch_all seq sequence (module LM:LazyMessage_inst) attr buid >>= fun l ->
       let seq = string_of_int seq in
-      return (Some (String.concat space [seq ; "FETCH" ; list_of str]))
+      return (Some (List.concat [[seq ; space; "FETCH" ; space]; List.concat [["("]; l; [")"]]]))
   ) else
     return None
 
@@ -864,21 +879,22 @@ let rem_flags (flags:mailboxFlags list) (rem:mailboxFlags list) : (mailboxFlags 
  * * 3 FETCH (MODSEQ (496) FLAGS (\Seen $NotJunk NotJunk))
  *)
 let format_flags seq modseq buid (record:mailbox_message_metadata) =
-  let flags = flags_to_string record.flags in
+  let flags = flags_to_string_list record.flags in
   let seq = string_of_int seq in
   let uid = 
     if buid then 
-      String.concat "" ["UID " ; string_of_int record.uid ; space]
+      ["UID " ; string_of_int record.uid ; space]
     else
-      ""
+      [""]
   in
   let modseq = 
     if modseq then
-      String.concat "" ["MODSEQ (" ; (Int64.to_string record.modseq) ; ") "] 
+      ["MODSEQ (" ; (Int64.to_string record.modseq) ; ") "] 
     else
-      ""
+      [""]
   in
-  String.concat "" [seq ; space ; "FETCH (" ; uid ; modseq ; "FLAGS (" ; flags ; ")"]
+  String.concat "" 
+    (List.concat [[seq ; space ; "FETCH (" ]; uid ; modseq ; ["FLAGS ("] ; flags ; [")"]])
 
 (* send response for silent even if modseq is on
  * don't send response if the flag update
