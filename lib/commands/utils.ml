@@ -17,8 +17,6 @@ open Sexplib
 open Sexplib.Conv
 open Imaplet_types
 
-let concat ?(sep="") l = String.concat sep l
-
 let formated_capability capability =
   "CAPABILITY " ^ capability
 
@@ -117,7 +115,7 @@ let make_postmark message =
     in
     Dates.postmark_date_time ~time ()
   in
-  concat ["From ";(from message);" ";(date_time message)]
+  String.concat "" ["From ";(from message);" ";(date_time message)]
 
 (* split message into postmark and email
  * create postmark if email doesn't have it
@@ -139,7 +137,7 @@ let make_email_message message =
 
 (* concat postmark and email into message *)
 let concat_postmark_email postmark email =
-  concat ~sep:"\r\n" [postmark;email]
+  String.concat "\r\n" [postmark;email]
 
 (* add postmark to message if message doesn't have one *)
 let make_message_with_postmark message =
