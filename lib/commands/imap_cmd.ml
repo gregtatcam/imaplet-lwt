@@ -171,12 +171,13 @@ let handle_compress compression context =
 
 let unsolicited_response context (status:Storage_meta.mailbox_metadata) =
   (* also need to output changes "* EXPUNGE.." *)
-  let resp_writer = (fun str -> (* remove modseq from the fetch response *)
-    write_resp_untagged context.!compression context.id context.!netw
-    (replace ~regx:"MODSEQ ([0-9]+) " ~tmpl:"" str)) in 
+  let untagged msg = write_resp_untagged context.!compression context.id context.!netw msg in
+  let resp_writer = (fun l -> (* remove modseq from the fetch response *)
+    let str = String.concat "" l in
+    untagged (replace ~regx:"MODSEQ ([0-9]+) " ~tmpl:"" str)) in 
   let resp_prefix = (fun () -> return ()) in
-  resp_writer (Printf.sprintf "%d EXISTS" status.count) >>
-  resp_writer (Printf.sprintf "%d RECENT" status.recent) >>
+  untagged (Printf.sprintf "%d EXISTS" status.count) >>
+  untagged (Printf.sprintf "%d RECENT" status.recent) >>
   Amailbox.fetch context.!mailbox resp_prefix resp_writer 
    ([SeqRange (Number 1,Wild)]) (FetchAtt [Fetch_Flags]) 
    (Some context.!noop_modseq) false >>= fun _ ->
@@ -489,14 +490,18 @@ let handle_search context charset search buid =
 
 let handle_fetch context sequence fetchattr changedsince buid =
   let resp_prefix = resp_highestmodseq (changedsince <> None) context in
+  Stats.init();
   let t = Unix.gettimeofday () in
-  Amailbox.fetch context.!mailbox resp_prefix (write_resp_untagged
+  Amailbox.fetch context.!mailbox resp_prefix (write_resp_untagged_vector
       context.!compression context.id context.!netw) sequence fetchattr changedsince buid >>= function
   | `NotExists -> response context None (Resp_No(None,"Mailbox doesn't exist")) None
   | `NotSelectable ->  response context None (Resp_No(None,"Mailbox is not selectable")) None
   | `Error e -> response context None (Resp_No(None,e)) None
   | `Ok ->
-    let resp = Printf.sprintf "FETCH completed %02fsec" (Unix.gettimeofday () -. t) in
+    let d = Unix.gettimeofday () -. t in
+    Log_.log `Info1 (Printf.sprintf "time: read %.04f, write %.04f, total %.04f\n" 
+      (Stats.get_readt()) (Stats.get_writet()) d);
+    let resp = Printf.sprintf "FETCH completed %02fsec" d in
     response context None (Resp_Ok(None, resp)) None
 
 let handle_store context sequence flagsatt flagsval changedsince buid =
