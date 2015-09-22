@@ -4,6 +4,27 @@ open Re
 exception InvalidCommand
 
 let re = Re_posix.compile_pat "^([0-9]+) (.+)$" 
+let re_read = Re_posix.compile_pat "^read ([0-9]+|\\*)$"
+let re_fetch = Re_posix.compile_pat "^([^ ]+) fetch 1:([^ ]+)"
+let re_login = Re_posix.compile_pat "^([^ ]+) login"
+let re_select = Re_posix.compile_pat "^([^ ]+) select"
+
+let get_tag re str =
+  let subs = Re.exec re str in
+  (subs,Re.get subs 1)
+
+let imap str =
+  if Re.execp re_fetch str then (
+    let subs,tag = get_tag re_fetch str in
+    `Fetch (tag,Re.get subs 2)
+  ) else if Re.execp re_login str then (
+    let _,tag = get_tag re_login str in
+    `Login tag
+  ) else if Re.execp re_select str then (
+    let _,tag = get_tag re_select str in
+    `Select tag
+  ) else
+    raise InvalidCommand
 
 let opt_val = function
   | None -> raise InvalidCommand
@@ -71,18 +92,21 @@ let server addr port f =
   in
   connect f sock 
 
-let read_uidlst file =
+let read_uidlst file num =
   Lwt_io.with_file file ~mode:Lwt_io.Input (fun ic ->
     let rec read uids =
-      Lwt_io.read_line_opt ic >>= function
+      if num = "*" || (int_of_string num) > (List.length uids) then (
+        Lwt_io.read_line_opt ic >>= function
         | Some l ->
           let subs = Re.exec re l in
           let uid = int_of_string (Re.get subs 1) in
           let file = Re.get subs 2 in
           read ((uid,file) :: uids)
         | None -> return (List.rev uids)
+      ) else
+        return (List.rev uids)
     in
-    read []
+    read [] 
   )
 
 let readt = ref 0.
@@ -109,7 +133,7 @@ let write w buff =
   in
   write_ 0
 
-let read_write_message file w =
+let read_write_message file w cnt =
   Lwt_io.with_file file ~mode:Lwt_io.Input (fun ic ->
     let rec read () =
       catch (fun () ->
@@ -117,14 +141,10 @@ let read_write_message file w =
         Lwt_io.read ic >>= fun buff ->
         let t = timeit readt t in
         if buff <> "" then (
-          let l = ["*"; sp;"1"; sp; "FETCH"; sp; "("; "BODY[]"; sp; "{";string_of_int
+          let l = ["*"; sp;string_of_int cnt; sp; "FETCH"; sp; "("; "BODY[]"; sp; "{";string_of_int
           (String.length buff); "}";"\r\n";buff;")";"\r\n"] in
-          Lwt_io.write w "* 1 FETCH (BODY[] {123}" >>= fun () ->
-          write w buff >>= fun () ->
-          Lwt_io.write w ")\r\n" >>= fun () ->
-          (*Lwt_list.iter_s (fun v ->
-            Lwt_io.write w v
-          ) l >>= fun () ->*)
+          let buff = String.concat "" l in
+          Lwt_io.write w buff >>= fun () ->
           let _ = timeit writet t in
           read ()
         ) else
@@ -133,33 +153,58 @@ let read_write_message file w =
     in
     read ())
 
-let read_files repo w =
+exception Done
+
+let read_files repo w num =
   let uidlst_file = Filename.concat repo "imaplet.uidlst" in
-  read_uidlst uidlst_file >>= fun uids ->
-  Lwt_list.iter_s (fun (uid,file) ->
-    Printf.printf "%d\n%!" uid;
-    let file = Filename.concat (Filename.concat repo "cur") file in
-    read_write_message file w
-  ) uids
+  read_uidlst uidlst_file num >>= fun uids ->
+  let (strm,push_strm) = Lwt_stream.create() in
+  Lwt_list.iteri_p (fun i (uid,file) ->
+      let m = Lwt_mutex.create () in
+      Lwt_mutex.lock m;
+      push_strm (Some m);
+      Printf.printf "%d\n%!" uid;
+      let file = Filename.concat (Filename.concat repo "cur") file in
+      read_write_message file w i >>= fun () ->
+      Lwt_mutex.unlock m;
+      return ()
+  ) uids >>= fun () ->
+  let m's = Lwt_stream.get_available strm in
+  Printf.printf "number of elements %d\n%!" (List.length m's);
+  List.iter Lwt_mutex.unlock m's;
+  return ()
 
 let () =
   commands (fun repo port ->
     Lwt_main.run (
       server "0.0.0.0" port (fun r w ->
+        Lwt_io.write w "CAPABILITY\r\n" >>= fun () ->
         let rec loop () =
           Lwt_io.read_line_opt r >>= function
           | Some l ->
-            if l = "read" then (
-              readt := 0.;
-              writet := 0.;
-              let t = Unix.gettimeofday () in
-              read_files repo w >>= fun () ->
-              Printf.printf "total read: %.04f, write %.04f, time %.04f\n%!"
-              !readt !writet (Unix.gettimeofday() -. t);
+            begin
+            match (imap l) with
+            | `Fetch (tag,num) ->
+              begin
+              try
+                readt := 0.;
+                writet := 0.;
+                let t = Unix.gettimeofday () in
+                read_files repo w num >>= fun () ->
+                Lwt_io.write w (tag ^ " ok\r\n") >>= fun () ->
+                Printf.printf "total read: %.04f, write %.04f, time %.04f\n%!"
+                !readt !writet (Unix.gettimeofday() -. t);
+                loop ()
+              with Not_found ->
+                return ()
+              end
+            | `Login tag ->
+              Lwt_io.write w (tag ^ " ok\r\n") >>= fun () ->
               loop ()
-            ) else (
-              return ()
-            )
+            | `Select tag ->
+              Lwt_io.write w (tag ^ " ok\r\n") >>= fun () ->
+              loop ()
+            end
           | None -> return ()
         in
         loop ()
