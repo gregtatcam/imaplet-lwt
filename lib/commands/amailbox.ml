@@ -465,9 +465,15 @@ let fetch mailboxt resp_prefix resp_writer sequence fetchattr changedsince buid 
          by the iterator *)
         Interpreter.exec_fetch seq sequence message fetchattr changedsince buid >>= fun res ->
         match res with
-        | Some res -> resp_writer res >> return (`Ok acc)
+        | Some res -> 
+          let m = Lwt_mutex.create () in
+          Lwt_mutex.lock m;
+          async(fun()->resp_writer res >>= fun () -> Lwt_mutex.unlock m; return()); 
+          return (`Ok (m :: acc))
         | None -> return (`Ok acc)
-    ) () >>= fun _ -> return `Ok
+    ) [] >>= fun l -> 
+    Lwt_list.iter_p Lwt_mutex.lock l >>
+    return `Ok
 
 (* get mailbox_metadata flag status 
  * based on the original and updated flag value
