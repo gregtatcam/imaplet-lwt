@@ -141,7 +141,9 @@ let concat_postmark_email postmark email =
 
 (* add postmark to message if message doesn't have one *)
 let make_message_with_postmark message =
-  if Re.execp ~pos:0 ~len:1000 re_postmark message then (
+  let len = String.length message in
+  let len = if len > 1000 then 1000 else len in
+  if Re.execp ~pos:0 ~len re_postmark message then (
     message
   ) else (
     let postmark = make_postmark message in
