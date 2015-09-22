@@ -17,10 +17,10 @@ open Lwt
 open Imaplet
 open Commands
 
-exception InvalidCommand
+exception InvalidCommand of string
 
 let opt_val = function
-  | None -> raise InvalidCommand
+  | None -> raise (InvalidCommand "no value")
   | Some v -> v
 
 let rec args i archive addr port ehlo from rcptto =
@@ -31,10 +31,10 @@ let rec args i archive addr port ehlo from rcptto =
     | "-archive" -> args (i+2) (Some Sys.argv.(i+1)) addr port ehlo from rcptto
     | "-address" -> args (i+2) archive (Some Sys.argv.(i+1)) port ehlo from rcptto
     | "-port" -> args (i+2) archive addr (Some (int_of_string Sys.argv.(i+1))) ehlo from rcptto
-    | "-ehlo" -> args (i+1) archive addr port (bool_of_string (Sys.argv.(i+1))) from rcptto
+    | "-ehlo" -> args (i+1) archive addr port true from rcptto
     | "-from" -> args (i+2) archive addr port ehlo (Some Sys.argv.(i+1)) rcptto
     | "-rcptto" -> args (i+2) archive addr port ehlo from (Some Sys.argv.(i+1))
-    | _ -> raise InvalidCommand
+    | _ -> raise (InvalidCommand Sys.argv.(i))
 
 let usage () =
   Printf.fprintf stderr "usage: smtp_client -archive [path] -address [address] \
@@ -44,7 +44,7 @@ let commands f =
   try 
     let archive,addr,port,ehlo,from,rcptto = args 1 None None None false None None in
     f (opt_val archive) (opt_val addr) (opt_val port) ehlo (opt_val from) (opt_val rcptto)
-  with _ -> usage ()
+  with | InvalidCommand msg -> Printf.printf "%s\n%!" msg; usage ()
 
 let post archive from rcpt f =
   Utils.fold_email_with_file archive (fun cnt message ->
