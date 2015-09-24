@@ -38,29 +38,6 @@ let authenticate_user ?(b64=false) user ?password () =
     return ("",None,false)
   )
 
-(*
- From dovecot@localhost.local  Thu Jul 17 14:53:00 2014
-    for <dovecot@localhost>; Thu, 17 Jul 2014 14:53:00 +0100 (BST)
-*)
-let add_postmark from_ msg =
-  let size = String.length msg in
-  let headers = String.sub msg 0 (if size < 1024 * 5 then size else 1024 * 5) in
-  if Regex.match_regex headers ~regx:"^From " = true then
-    msg
-  else (
-    let from = "From " ^ from_ in 
-    let time = 
-      if Regex.match_regex headers ~regx:"^Date: \\([.]+\\)[\r\n]+" then
-        try
-          Dates.email_to_date_time_exn (Str.matched_group 1 headers)
-        with Dates.InvalidDate -> Dates.ImapTime.now()
-      else
-        Dates.ImapTime.now ()
-    in
-    let date = Dates.postmark_date_time ~time () in
-    from ^ " " ^ date ^ "\r\n" ^ msg
-  )
-
 (* sending "special" local append on unix socket
  * should it be SSL? TBD 
  *)
@@ -83,7 +60,6 @@ let send_to_imap addr context =
     | Some (_,pswd) -> (match pswd with |Some pswd -> " " ^ pswd|None->"")
     | None -> ""
   in
-  let msg = add_postmark _from msg in
   client_send addr (fun _ _ inchan outchan ->
     let write buff = Lwt_io.write outchan buff >>= fun () -> Lwt_io.flush outchan in
     let read () = Lwt_io.read_line inchan in
