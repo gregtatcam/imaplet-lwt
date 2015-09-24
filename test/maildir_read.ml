@@ -1,5 +1,7 @@
 open Lwt
 open Re
+open Imaplet
+open Commands
 
 exception InvalidCommand
 
@@ -30,23 +32,24 @@ let opt_val = function
   | None -> raise InvalidCommand
   | Some v -> v
 
-let rec args i repo port =
+let rec args i repo port inflate =
   if i >= Array.length Sys.argv then
-    repo, port
+    repo, port, inflate
   else
     match Sys.argv.(i) with 
-    | "-repo" -> args (i+2) (Some Sys.argv.(i+1)) port
-    | "-port" -> args (i+2) repo (Some (int_of_string Sys.argv.(i+1)))
+    | "-repo" -> args (i+2) (Some Sys.argv.(i+1)) port inflate
+    | "-port" -> args (i+2) repo (Some (int_of_string Sys.argv.(i+1))) inflate
+    | "-inflate" -> args (i+1) repo port true
     | _ -> raise InvalidCommand
 
 let commands f =
   try 
-    let repo,port = args 1 None None in
+    let repo,port,inflate = args 1 None None false in
     if repo = None || port = None then
       raise InvalidCommand;
-    f (opt_val repo) (opt_val port)
+    f (opt_val repo) (opt_val port) inflate
   with _ ->
-    Printf.printf "usage: maildir_read -repo [repo location] -port [port number]\n%!"
+    Printf.printf "usage: maildir_read -repo [repo location] -port [port number] -inflate\n%!"
 
 let try_close cio =
   catch (fun () -> Lwt_io.close cio)
@@ -119,63 +122,41 @@ let timeit acc t =
 
 let sp = " "
 
-let buff_size = 15_000_000
-
-let write w buff =
-  let len = String.length buff in
-  let rec write_ offset =
-    if offset + 2048 >= len then (
-      Lwt_io.write_from_string_exactly w buff offset (len - offset)
-    ) else (
-      Lwt_io.write_from_string_exactly w buff offset 2048 >>= fun () ->
-      write_ (offset + 2048)
-    )
-  in
-  write_ 0
-
-let read_write_message file w cnt =
+let read_write_message file w cnt uncompress mutex =
   Lwt_io.with_file file ~mode:Lwt_io.Input (fun ic ->
-    let rec read () =
-      catch (fun () ->
-        let t=Unix.gettimeofday() in
-        Lwt_io.read ic >>= fun buff ->
-        let t = timeit readt t in
-        if buff <> "" then (
-          let l = ["*"; sp;string_of_int cnt; sp; "FETCH"; sp; "("; "BODY[]"; sp; "{";string_of_int
-          (String.length buff); "}";"\r\n";buff;")";"\r\n"] in
-          let buff = String.concat "" l in
-          Lwt_io.write w buff >>= fun () ->
-          let _ = timeit writet t in
-          read ()
-        ) else
-          return ()
-      ) (fun ex -> Printf.printf "exc: %s" (Printexc.to_string ex); return ())
-    in
-    read ())
+    catch (fun () ->
+      let t=Unix.gettimeofday() in
+      Lwt_io.read ic >>= fun buff ->
+      let t = timeit readt t in
+      async (fun () ->
+      let buff = if uncompress then (Imap_crypto.do_uncompress buff) else buff in
+      let l = ["*"; sp;string_of_int cnt; sp; "FETCH"; sp; "("; "BODY[]"; sp; "{";string_of_int
+        (String.length buff); "}";"\r\n";buff;")";"\r\n"] in
+      let buff = String.concat "" l in
+      async(fun() -> let t = Unix.gettimeofday () in
+      Lwt_io.write w buff >>= fun () -> 
+      timeit writet t;
+      Lwt_mutex.unlock mutex; return());return());
+      return ()
+    ) (fun ex -> Printf.printf "exc: %s" (Printexc.to_string ex); return ())
+  )
 
-exception Done
-
-let read_files repo w num =
+let read_files repo w num inflate =
   let uidlst_file = Filename.concat repo "imaplet.uidlst" in
   read_uidlst uidlst_file num >>= fun uids ->
-  let (strm,push_strm) = Lwt_stream.create() in
-  Lwt_list.iteri_p (fun i (uid,file) ->
+  Lwt_list.fold_left_s (fun (i,acc) (uid,file) ->
       let m = Lwt_mutex.create () in
       Lwt_mutex.lock m;
-      push_strm (Some m);
       Printf.printf "%d\n%!" uid;
       let file = Filename.concat (Filename.concat repo "cur") file in
-      read_write_message file w i >>= fun () ->
-      Lwt_mutex.unlock m;
-      return ()
-  ) uids >>= fun () ->
-  let m's = Lwt_stream.get_available strm in
-  Printf.printf "number of elements %d\n%!" (List.length m's);
+      read_write_message file w i inflate m >>= fun () ->
+      return (i+1,m::acc)
+  ) (1,[]) uids >>= fun (_,m's) ->
   List.iter Lwt_mutex.unlock m's;
   return ()
 
 let () =
-  commands (fun repo port ->
+  commands (fun repo port inflate ->
     Lwt_main.run (
       server "0.0.0.0" port (fun r w ->
         Lwt_io.write w "CAPABILITY\r\n" >>= fun () ->
@@ -190,7 +171,7 @@ let () =
                 readt := 0.;
                 writet := 0.;
                 let t = Unix.gettimeofday () in
-                read_files repo w num >>= fun () ->
+                read_files repo w num inflate >>= fun () ->
                 Lwt_io.write w (tag ^ " ok\r\n") >>= fun () ->
                 Printf.printf "total read: %.04f, write %.04f, time %.04f\n%!"
                 !readt !writet (Unix.gettimeofday() -. t);
