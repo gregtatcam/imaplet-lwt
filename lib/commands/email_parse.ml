@@ -400,6 +400,17 @@ let message_to_blob config keys message =
   ) >>= fun hash ->
   return (hash,(Buffer.contents buffer_out))
 
+let message_unparsed_to_blob config keys message =
+  let hash = Imap_crypto.get_hash message in
+  let (pub_key,_) = keys in
+  do_encrypt pub_key config message >>= fun content ->
+  return (hash,content)
+
+let message_unparsed_from_blob config keys message =
+  let (_,priv) = keys in
+  let priv = Utils.option_value_exn ~ex:EmptyPrivateKey priv in
+  do_decrypt priv config message 
+
 (* lazy_read_message lazily reads the message from the storage
  * lazy_read_metadata - same for metadata
  *)

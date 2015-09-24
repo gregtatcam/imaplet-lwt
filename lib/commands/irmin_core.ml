@@ -22,6 +22,7 @@ open Storage_meta
 open Utils
 open Sexplib.Conv
 open Lazy_message
+open Lazy_maildir_message
 open Parsemail
 
 exception KeyDoesntExist
@@ -861,8 +862,16 @@ module GitMailboxMake
        * deduplication for attachments. this in a way is similar to maildir
        * storage 
        *)
-      ) else (
+      ) else if mbox.config.maildir_parse then (
         Email_parse.message_to_blob mbox.config mbox.pubpriv message >>= fun (msg_hash,message) ->
+        let key = get_key mbox.mbox_key (`Blob msg_hash) in
+        _update mbox key message >>
+        return msg_hash
+      (* this is basically a maildir file stored in irmin
+       * the only difference is the separate metadata file
+       *)
+      ) else (
+        Email_parse.message_unparsed_to_blob mbox.config mbox.pubpriv message >>= fun (msg_hash,message) ->
         let key = get_key mbox.mbox_key (`Blob msg_hash) in
         _update mbox key message >>
         return msg_hash
@@ -934,6 +943,24 @@ module GitMailboxMake
         )
       )
 
+    let read_unparsed_from_blob mbox hash =
+      let lazy_read = Lazy.from_fun (fun () -> 
+        Log_.log `Info1 (Printf.sprintf "lazy read %s\n" hash);
+        _read mbox (get_key mbox.mbox_key (`Blob hash)) >>= fun message ->
+        Email_parse.message_unparsed_from_blob mbox.config mbox.pubpriv message
+      ) in
+      let lazy_message = Lazy.from_fun (fun () ->
+        Log_.log `Info1 (Printf.sprintf "lazy message %s\n" hash);
+        Lazy.force lazy_read >>= fun buffer ->
+        let seq = Mailbox.With_seq.of_string buffer in
+        return (Utils.option_value_exn (Mailbox.With_seq.fold_message seq
+          ~f:(fun _ message -> Some message) ~init:None))) in
+      let lazy_metadata = Lazy.from_fun (fun () -> 
+        Log_.log `Info1 (Printf.sprintf "lazy metadata %s\n" hash);
+        get_message_metadata mbox hash) in
+      return (`Ok  (Lazy_message.build_lazy_message_inst (module LazyMaildirMessage) 
+        (lazy_read, lazy_message, lazy_metadata)))
+
     let read_from_single_store mbox hash =
       let (_,priv) = mbox.pubpriv in
         let priv = Utils.option_value_exn ~ex:EmptyPrivateKey priv in
@@ -967,8 +994,10 @@ module GitMailboxMake
       | `Ok (seq,hash,uid) -> 
         if mbox.config.single_store then
           read_from_single_store mbox hash
-        else
+        else if mbox.config.maildir_parse then
           read_from_blob mbox hash
+        else
+          read_unparsed_from_blob mbox hash
 
     let read_message_metadata mbox position =
       get_uid mbox position >>= function

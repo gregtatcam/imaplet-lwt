@@ -104,6 +104,7 @@ Library commands
                     Irmin_storage,
                     Install,
                     Interpreter,
+                    Lazy_maildir_message,
                     Lazy_message,
                     Lex,
                     Log_,

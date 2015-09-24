@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: 8837f0d221f45efc24db92575c0319a2)
+# DO NOT EDIT (digest: 9f4e0e26696d7d631feba9afa302f61c)
 Account
 Amailbox
 Configuration
@@ -17,6 +17,7 @@ Irmin_core
 Irmin_storage
 Install
 Interpreter
+Lazy_maildir_message
 Lazy_message
 Lex
 Log_
