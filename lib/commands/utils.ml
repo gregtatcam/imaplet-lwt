@@ -88,23 +88,28 @@ let message_of_string postmark email =
   {Mailbox.Message.postmark=Mailbox.Postmark.of_string postmark; 
    Mailbox.Message.email = Email.of_string email}
 
-let re_postmark = Re_posix.compile_pat ~opts:[`ICase] "^(From [^\r\n]+)[\r\n]+(.+)$"
-let re_from = Re_posix.compile_pat ~opts:[`ICase] "^From: ([^<]+)<([^>]+)"
-let re_date = Re_posix.compile_pat ~opts:[`ICase] "^Date: \\([.]+\\)[\r\n]+"
+let re_postmark = Re_posix.compile_pat ~opts:[`ICase] "^(From [^\r\n]+)[\r\n]+(.+)"
+let re_from = Re_posix.compile_pat ~opts:[`ICase] "From: ([^<]+)?<([^>]+)"
+let re_date = Re_posix.compile_pat ~opts:[`ICase] "Date: \\([.]+\\)[\r\n]+"
+
+let length message = 
+  let len = String.length message in
+  if len > 1000 then 1000 else len
 
 (* create postmark from email,
  * assume postmark is not included
  *)
 let make_postmark message =
+  let len = length message in
   let from buff =
-    let subs = Re.all ~pos:0 ~len:1000 re_from buff in
+    let subs = Re.all ~pos:0 ~len re_from buff in
     if List.length subs = 1 then
       Re.get (List.hd subs) 2
     else
       "daemon@localhost.local"
   in
   let date_time buff =
-    let subs = Re.all ~pos:0 ~len:1000 re_date buff in
+    let subs = Re.all ~pos:0 ~len re_date buff in
     let time =
       if List.length subs = 1 then (
         try 
@@ -141,8 +146,7 @@ let concat_postmark_email postmark email =
 
 (* add postmark to message if message doesn't have one *)
 let make_message_with_postmark message =
-  let len = String.length message in
-  let len = if len > 1000 then 1000 else len in
+  let len = length message in
   if Re.execp ~pos:0 ~len re_postmark message then (
     message
   ) else (
