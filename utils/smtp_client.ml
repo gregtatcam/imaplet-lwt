@@ -56,7 +56,7 @@ let post archive from rcpt f =
       | Some str -> if str = "." then return (Some "..") else return (Some str)
       | None -> return None
     in
-    feeder () >>= fun _ -> (* ignore the from postmark *)
+    (*feeder () >>= fun _ -> ignore the from postmark *)
     f ~from ~rcpt feeder >>= function
     | `Ok -> Lwt_io.close ic >> return (`Ok (cnt+1))
     | `Error err ->
