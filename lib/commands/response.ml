@@ -113,14 +113,10 @@ let write_resp_untagged compress id writer text =
   write_resp compress id writer (Resp_Untagged text)
 
 let write_resp_untagged_vector compress id w resp =
-  let l = List.concat [["*"];resp;[Regex.crlf]] in
-  let buff = String.concat "" l in
+  let l = List.concat [["* "];resp;[Regex.crlf]] in
   if compress <> None then (
-    (* need to do stream compression *)
+    let buff = String.concat "" l in
     write_resp_untagged compress id w buff
   ) else (
-    let t = Unix.gettimeofday () in
-    Lwt_io.write w buff >>= fun () ->
-    Stats.add_writet (Unix.gettimeofday() -. t);
-    return ()
+    Lwt_list.iter_s (Lwt_io.write w) l
   )
