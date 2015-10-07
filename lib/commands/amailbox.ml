@@ -291,6 +291,8 @@ let get_message_from_client reader writer compression literal =
   let message = String.create size in
   (* timeout and how long? what if the message fairly big? *)
   Lwt_io.read_into_exactly reader message 0 size >>= fun () ->
+  (* email parser expect \n, need to fix in the parser TBD *)
+  let message = Re.replace_string (Re_posix.compile_pat "\r\n") ~by:"\n" message in
   let message = Utils.make_message_with_postmark message in
   return (message,size)
 
@@ -447,6 +449,29 @@ let update_fetch_attr fetchattr changedsince buid =
       let att = if buid && is_uid = false then Fetch_Uid :: att else att in
       FetchAtt att
 
+let toscaleint f =
+  int_of_float (f *. 1000.)
+
+let dump_fetch strm resp_writer =
+  let rec dump acc ts i =
+  Lwt_stream.get strm >>= function
+  | Some resp -> 
+    let t = Unix.gettimeofday() in
+    let diff = t -. ts in
+    let acc = acc +. diff in
+    Log_.log `Info3 (Printf.sprintf "### wait data %d %d\n" i (toscaleint diff));
+    resp_writer resp >>= fun () ->
+    let diff = Unix.gettimeofday () -. t in
+    Log_.log `Info3 (Printf.sprintf "### time to write %d %d\n" i (toscaleint diff));
+    Stats.add_writet diff;
+    dump acc (Unix.gettimeofday()) (i+1)
+  | None -> return acc
+  in
+  let t = Unix.gettimeofday() in
+  dump 0. t 1 >>= fun acc ->
+  Log_.log `Info1 (Printf.sprintf "### dump time %.04f, wait time %.04f\n" (Unix.gettimeofday() -. t) acc);
+  return ()
+
 (* fetch data from mailbox *)
 let fetch mailboxt resp_prefix resp_writer sequence fetchattr changedsince buid =
   get_selected_mailbox mailboxt >>= function 
@@ -456,23 +481,40 @@ let fetch mailboxt resp_prefix resp_writer sequence fetchattr changedsince buid 
   | `Ok (_,(module Mailbox)) ->
     let fetchattr = update_fetch_attr fetchattr changedsince buid in
     resp_prefix () >>
+    let (strm,push_strm) = Lwt_stream.create () in
+    let mutex = Lwt_mutex.create () in
+    Lwt_mutex.lock mutex >>= fun () ->
+    lwt _ =
+    begin
+    let t = Unix.gettimeofday() in
     iter_selected_with_seq (module Mailbox) sequence buid (fun acc pos seq ->
       Mailbox.MailboxStorage.fetch Mailbox.this pos >>= function
       | `Eof -> return (`Eof acc)
       | `NotFound -> return (`Ok acc)
       | `Ok message -> 
         (* need more efficient exec_fetch since sequence is already tested
-         by the iterator *)
+         by the iterator *) 
+        let t = Unix.gettimeofday () in
         Interpreter.exec_fetch seq sequence message fetchattr changedsince buid >>= fun res ->
+        let diff = Unix.gettimeofday() -. t in
+        Stats.add_fetcht diff;
+        Log_.log `Info3 (Printf.sprintf "### fetch time %d\n" (toscaleint diff));
         match res with
-        | Some res -> 
-          let m = Lwt_mutex.create () in
-          Lwt_mutex.lock m;
-          async(fun()->resp_writer res >>= fun () -> Lwt_mutex.unlock m; return()); 
-          return (`Ok (m :: acc))
+        | Some res -> push_strm (Some res); Lwt_main.yield()>>return (`Ok acc)
         | None -> return (`Ok acc)
-    ) [] >>= fun l -> 
-    Lwt_list.iter_p Lwt_mutex.lock l >>
+    ) () >>= fun _ -> 
+    Log_.log `Info1 (Printf.sprintf "### iter except write %.04f\n" (Unix.gettimeofday() -. t));
+    push_strm None;
+    return ()
+    end
+    and
+    _ =  
+    begin
+    dump_fetch strm resp_writer >>= fun () ->
+    Lwt_mutex.unlock mutex;
+    return ()
+    end in
+    Lwt_mutex.lock mutex >>
     return `Ok
 
 (* get mailbox_metadata flag status 
