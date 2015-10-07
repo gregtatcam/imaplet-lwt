@@ -53,7 +53,7 @@ let input msg regx =
 
 let system cmd =
   Lwt_unix.system cmd >>= function
-  | WEXITED i -> return (if i = 0 then () else raise (SystemCallFailed cmd))
+  | Unix.WEXITED i -> return (if i = 0 then () else raise (SystemCallFailed cmd))
   | _ -> raise (SystemCallFailed cmd)
 
 let dir f =
@@ -75,7 +75,7 @@ let get_interfaces () =
   Lwt_unix.gethostbyname host >>= fun res ->
   let intfs =Array.fold_left (fun acc addr -> 
     (Unix.string_of_inet_addr addr) :: acc
-  ) ["127.0.0.1";"0.0.0.0"] res.h_addr_list in
+  ) ["127.0.0.1";"0.0.0.0"] res.Unix.h_addr_list in
   let (_,intfs_str,conf) = List.fold_right (fun addr (i,acc,conf) -> 
     (i+1,Printf.sprintf "%s%d(%s):" acc i addr,(string_of_int i, fun () ->
       return addr) :: conf)
@@ -238,8 +238,8 @@ space)\n%!";
   ) >>
   let echo_on on =
     Lwt_unix.tcgetattr Lwt_unix.stdin >>= fun io ->
-    let io = {io with c_echo = on} in
-    Lwt_unix.tcsetattr Lwt_unix.stdin TCSANOW io
+    let io = {io with Unix.c_echo = on} in
+    Lwt_unix.tcsetattr Lwt_unix.stdin Unix.TCSANOW io
   in
   system ("mv " ^ Install.config_path ^ " " ^ Install.config_path ^ ".back") >>
   system ("mv " ^ config_tmp ^ " " ^ Install.config_path) >>= fun () ->

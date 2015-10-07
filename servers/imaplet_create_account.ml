@@ -99,7 +99,7 @@ let commands f =
 
 let system cmd =
   Lwt_unix.system cmd >>= function
-  | WEXITED i -> return (if i = 0 then () else raise (SystemFailed cmd)) 
+  | Unix.WEXITED i -> return (if i = 0 then () else raise (SystemFailed cmd)) 
   | _ -> raise (SystemFailed cmd)
 
 let dir f =
@@ -175,7 +175,7 @@ let set_users user pswd mbox_type ~encrypt ~compress ~compressattch ~hybrid ~sin
   Lwt_io.lines_to_file srv_config.users_path strm
 
 let log msg =
-  Lwt_io.with_file ~flags:[O_WRONLY;O_APPEND;O_CREAT] ~mode:Lwt_io.output "/tmp/log/imaplet.log"
+  Lwt_io.with_file ~flags:[Unix.O_WRONLY;Unix.O_APPEND;Unix.O_CREAT] ~mode:Lwt_io.output "/tmp/log/imaplet.log"
   (fun oc -> Lwt_io.write_line oc msg)
 
 let genrsa user pswd priv_path =
@@ -194,7 +194,7 @@ let genrsa user pswd priv_path =
   return priv_key
 
 let reqcert priv pem =
-  Utils.exists (Filename.dirname pem) S_DIR >>= fun res ->
+  Utils.exists (Filename.dirname pem) Unix.S_DIR >>= fun res ->
   let (r,w) = Lwt_unix.pipe () in
   Lwt_process.pwrite ~stderr:`Dev_null ~stdout:(`FD_move (Lwt_unix.unix_file_descr w)) ("", 
   [|"openssl"; "req"; "-x509"; "-batch"; "-new"; "-key"; "/dev/stdin"|]) priv >>

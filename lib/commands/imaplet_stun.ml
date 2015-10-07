@@ -130,7 +130,6 @@ let stun_request ?interface addr port =
       | Some size ->
       let resp = (String.sub buff 0 size) in
       let rsp_type = field resp 0 2 in validate rsp_type [0x01;0x01] "failed type";
-      let rsp_length =  field resp 2 2 in 
       let rsp_cookie = field resp 4 4 in validate rsp_cookie magic_cookie "invalid cookie";
       let rsp_transid = field resp 8 12 in validate rsp_transid transid "invalid transid";
       return (get_attributes resp)

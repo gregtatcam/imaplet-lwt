@@ -354,7 +354,7 @@ module GitWorkdirIntf : GitIntf with type store = string
 
     let remove store key =
       let path = get_path store key in
-      exists path S_REG >>= fun res ->
+      exists path Unix.S_REG >>= fun res ->
       if res then
         Lwt_unix.unlink path
       else (
@@ -364,14 +364,14 @@ module GitWorkdirIntf : GitIntf with type store = string
 
     let read_exn store key =
       let path = get_path store key in
-      with_file ~lock:true path ~flags:[O_RDONLY] ~perms:0o664
+      with_file ~lock:true path ~flags:[Unix.O_RDONLY] ~perms:0o664
       ~mode:Lwt_io.Input ~f:(fun ch ->
         Lwt_io.read ch
       )
 
     let mem store key =
       let path = get_path store key in
-      exists path ~alt:S_DIR S_REG 
+      exists path ~alt:Unix.S_DIR Unix.S_REG 
 
     let list store key =
       let path = get_path store key in
@@ -385,7 +385,7 @@ module GitWorkdirIntf : GitIntf with type store = string
     let update store key data =
       let path = get_path store key in
       let base = Regex.replace ~regx:" " ~tmpl:"\\ " (Filename.dirname path) in
-      exists base S_DIR >>= fun res ->
+      exists base Unix.S_DIR >>= fun res ->
       begin
       if res = false then (
         Lwt_unix.system ("mkdir -p " ^ base) >>= fun _ ->
@@ -395,7 +395,7 @@ module GitWorkdirIntf : GitIntf with type store = string
         return ()
       )
       end >>
-      with_file ~lock:true path ~flags:[O_CREAT;O_TRUNC;O_WRONLY] ~perms:0o664
+      with_file ~lock:true path ~flags:[Unix.O_CREAT;Unix.O_TRUNC;Unix.O_WRONLY] ~perms:0o664
       ~mode:Lwt_io.Output ~f:(fun ch ->
         Lwt_io.write ch data
       )
@@ -967,7 +967,6 @@ module GitMailboxMake
     let read_from_single_store mbox hash =
       let (_,priv) = mbox.pubpriv in
         let priv = Utils.option_value_exn ~ex:EmptyPrivateKey priv in
-        let lazy_hashes = Lazy.from_fun (fun () -> get_hashes mbox hash) in
         return (`Ok (
           build_lazy_message_inst
             (module LazyIrminMessage)

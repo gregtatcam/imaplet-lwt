@@ -44,11 +44,14 @@ let get_bool v n =
   | 't' -> true
   | _ -> false
 
+exception InvalidStoreType
+
 let get_store = function
   | "irmin" -> `Irmin
   | "workdir" -> `Workdir
   | "maildir" -> `Maildir
   | "mailbox" -> `Mailbox
+  | _ -> raise InvalidStoreType
 
 let get_config buff =
  if Str.string_match (Str.regexp

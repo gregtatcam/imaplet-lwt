@@ -254,6 +254,7 @@ Delivery to the following recipient failed permanently:
 (* relay the message based on the priority list of available addresses until
  * success assume only one receipient for now TBD *)
 let rec relay try_stun context on_failure =
+  let open Stun_maint in
   Log_.log `Info3 "### relaying message\n";
   let (user, domain, relay_rec) = List.hd context.rcpt in
   let send relay_rec ip ports =
