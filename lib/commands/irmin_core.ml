@@ -945,19 +945,22 @@ module GitMailboxMake
 
     let read_unparsed_from_blob mbox hash =
       let lazy_read = Lazy.from_fun (fun () -> 
-        Log_.log `Info1 (Printf.sprintf "lazy read %s\n" hash);
+        let t = Unix.gettimeofday () in
         _read mbox (get_key mbox.mbox_key (`Blob hash)) >>= fun message ->
-        Email_parse.message_unparsed_from_blob mbox.config mbox.pubpriv message
+        Email_parse.message_unparsed_from_blob mbox.config mbox.pubpriv message >>= fun message ->
+        Stats.add_readt (Unix.gettimeofday() -. t);
+        return message
       ) in
       let lazy_message = Lazy.from_fun (fun () ->
-        Log_.log `Info1 (Printf.sprintf "lazy message %s\n" hash);
         Lazy.force lazy_read >>= fun buffer ->
         let seq = Mailbox.With_seq.of_string buffer in
         return (Utils.option_value_exn (Mailbox.With_seq.fold_message seq
           ~f:(fun _ message -> Some message) ~init:None))) in
       let lazy_metadata = Lazy.from_fun (fun () -> 
-        Log_.log `Info1 (Printf.sprintf "lazy metadata %s\n" hash);
-        get_message_metadata mbox hash) in
+        let t = Unix.gettimeofday() in
+        get_message_metadata mbox hash >>= fun meta ->
+        Stats.add_readmetat (Unix.gettimeofday() -. t);
+        return meta) in
       return (`Ok  (Lazy_message.build_lazy_message_inst (module LazyMaildirMessage) 
         (lazy_read, lazy_message, lazy_metadata)))
 
