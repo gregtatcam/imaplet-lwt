@@ -25,6 +25,7 @@ open Irmin_unix
 
 module Store = Irmin.Basic (Irmin_git.FS) (Irmin.Contents.String)
 module View = Irmin.View(Store)
+module Sync = Irmin.Sync(Store)
 
 let opt = function
   | None -> "nil"
@@ -60,21 +61,26 @@ module ImapContents =
       end
   end
 
-let store = Irmin.basic (module Irmin_git.FS) (module ImapContents)
+(*let store = Irmin.basic (module Irmin_git.FS) (module ImapContents)*)
+
+let task msg =
+  let date = Int64.of_float (Unix.gettimeofday ()) in
+  let owner = "imaplet <imaplet@openmirage.org>" in
+  Irmin.Task.create ~date ~owner msg
 
 let create local =
   let config = Irmin_git.config ~root:local ~bare:true () in
-  Irmin.create store config task
+  Store.create config task
 
 let pull_exn ?depth upstream local =
   let msg = "Synching with upstream store" in
   create local >>= fun t ->
-  Irmin.pull_exn (t msg) ?depth upstream `Merge
+  Sync.pull_exn (t msg) ?depth upstream `Merge
 
 let push_exn ?depth upstream local =
   let msg = "Pushing to upstream store" in
   create local >>= fun t ->
-  Irmin.push_exn (t msg) ?depth upstream
+  Sync.push_exn (t msg) ?depth upstream
 
 (* how is depth controlled ??? TBD *)
 let sync user mlogout config =
