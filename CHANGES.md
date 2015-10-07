@@ -73,3 +73,4 @@
 * move message parsing from append to email parser, user String.concat for efficiency, return Lwt type, return string list in fetch for efficiency
 * write fetch response as async thread
 * added option of storing in irmin unparsed as/is message - basically maildir in irmin FS (irmin storage + single_store-false + maildir_parse-false)
+* build the fetch message as vector to reduce string concat, write the vector if IMAP compression is not enabled
