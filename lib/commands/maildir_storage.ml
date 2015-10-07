@@ -494,8 +494,6 @@ struct
           Email_parse.message_to_blob t.config t.keys message >>= fun (msg_hash, message) ->
           return message
         ) else (
-          (* email parser expect \n, need to fix in the parser TBD *)
-          let message = Re.replace_string (Re_posix.compile_pat "\r\n") ~by:"\n" message in
           return (encrypt t message)
         )
       end >>= fun message ->
@@ -594,7 +592,7 @@ struct
       let lazy_read = Lazy.from_fun (fun () ->
         let t1 = Unix.gettimeofday () in
         let path = current t file in
-        Lwt_io.with_file path ~mode:Lwt_io.Input (fun ci ->
+        Lwt_io.with_file path ~flags:[Unix.O_NONBLOCK] ~mode:Lwt_io.Input (fun ci ->
           Lwt_io.read ci
         ) >>= fun msg ->
         let msg = decrypt t msg in
