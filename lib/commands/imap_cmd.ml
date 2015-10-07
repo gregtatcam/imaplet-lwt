@@ -499,8 +499,9 @@ let handle_fetch context sequence fetchattr changedsince buid =
   | `Error e -> response context None (Resp_No(None,e)) None
   | `Ok ->
     let d = Unix.gettimeofday () -. t in
-    Log_.log `Info1 (Printf.sprintf "time: read %.04f, write %.04f, total %.04f\n" 
-      (Stats.get_readt()) (Stats.get_writet()) d);
+    Log_.log `Info1 (Printf.sprintf "time: read msg %.04f, read meta %.04f, \
+    fetch %.04f, write %.04f, total %.04f\n" 
+      (Stats.get_readt()) (Stats.get_readmetat()) (Stats.get_fetcht()) (Stats.get_writet()) d);
     let resp = Printf.sprintf "FETCH completed %02fsec" d in
     response context None (Resp_Ok(None, resp)) None
 
