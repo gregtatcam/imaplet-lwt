@@ -185,7 +185,7 @@ let lock_from_open_flags flags =
     | Unix.O_RDONLY -> if l = Unix.F_LOCK then l else Unix.F_RLOCK
     | Unix.O_WRONLY|Unix.O_RDWR|Unix.O_APPEND -> Unix.F_LOCK
     | _ -> l
-  ) F_RLOCK flags
+  ) Unix.F_RLOCK flags
 
 let _lock lock fd flags = 
   let open Lwt in
@@ -197,7 +197,7 @@ let _lock lock fd flags =
 let _unlock lock fd = 
   let open Lwt in
   if lock then
-    Lwt_unix.lockf fd F_ULOCK 0
+    Lwt_unix.lockf fd Unix.F_ULOCK 0
   else
     return ()
 
@@ -328,7 +328,7 @@ let fold_email_with_file1 file f init =
 
 let files_of_directory path f init =
   let open Lwt in
-  exists path S_DIR >>= fun res ->
+  exists path Unix.S_DIR >>= fun res ->
   if res then (
     let strm = Lwt_unix.files_of_directory path in
     Lwt_stream.fold_s (fun file acc ->
@@ -368,4 +368,4 @@ let gethostbyname host =
       (addr :: acc)
     else
       acc
-  ) [] res.h_addr_list)
+  ) [] res.Unix.h_addr_list)

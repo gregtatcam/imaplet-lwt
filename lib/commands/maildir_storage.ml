@@ -22,6 +22,7 @@ open Imaplet_types
 open Lazy_message
 open Lazy_maildir_message
 open Parsemail
+open Server_config
 
 exception EmptyPrivateKey
 
@@ -674,11 +675,11 @@ struct
     
   let create_account t =
     let path = subscribe_path t.config.mail_path t.user in
-    Utils.exists path S_REG >>= fun res ->
+    Utils.exists path Unix.S_REG >>= fun res ->
     if res then
       return `Exists
     else (
-      Lwt_unix.openfile path [O_WRONLY;O_CREAT] 0o664 >>= fun fd ->
+      Lwt_unix.openfile path [Unix.O_WRONLY;Unix.O_CREAT] 0o664 >>= fun fd ->
       Lwt_unix.close fd >>
       write_subscribe path [] >>
       return `Ok

@@ -19,6 +19,7 @@ open Response
 open Regex
 open Context
 open Utils
+open Storage_meta
 
 exception SystemError of string
 exception ExpectedDone

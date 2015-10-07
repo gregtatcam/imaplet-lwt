@@ -142,7 +142,7 @@ let client_send_dgram ?interface addr f init =
   let recv msg =
     Lwt_unix.recvfrom socket msg 0 (String.length msg) [] >>= fun (size,sockaddr) ->
     match sockaddr with
-    | ADDR_INET (inetaddr,port) -> return (size,Unix.string_of_inet_addr inetaddr,port)
+    | Unix.ADDR_INET (inetaddr,port) -> return (size,Unix.string_of_inet_addr inetaddr,port)
     | _ -> assert(false)
   in
   f init recv send
