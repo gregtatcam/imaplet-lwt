@@ -101,7 +101,7 @@ let init () =
 let create_files config =
   Printf.printf "creating files\n%!";
   fold_i 1_000 (fun i acc ->
-    Printf.printf "file %d\n%!" i;
+    Printf.printf "file %d\r%!" i;
     let file = Printf.sprintf "./tmp_ir_fs/files/%d" i in
     Lwt_io.with_file ~flags:[Unix.O_WRONLY;Unix.O_CREAT;Unix.O_NONBLOCK] ~mode:Lwt_io.Output file (fun w ->
       let content = unique_content config.content i in
@@ -123,7 +123,7 @@ let create_irmin config =
   Printf.printf "creating irmin\n%!";
   create_store () >>= fun store ->
   fold_i 1_000 (fun i acc ->
-    Printf.printf "irmin %d\n%!" i;
+    Printf.printf "irmin %d\r%!" i;
     Store.update (store (Printf.sprintf "updating %d" i)) 
       ["root";string_of_int i] (unique_content config.content i)
   ) ()
@@ -172,6 +172,7 @@ let write_to_client ts strm w =
   let rec _write i =
     Lwt_stream.get strm >>= function
     | Some buff -> 
+      Printf.printf "writing %d\r%!" i;
       let t = Unix.gettimeofday () in
       if i = 1 then
         Printf.printf "### first write delay %.04f\n%!" (t -. ts);
