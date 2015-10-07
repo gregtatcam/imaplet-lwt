@@ -33,6 +33,7 @@ let init_socket addr port =
   let sockaddr = Unix.ADDR_INET (Unix.inet_addr_of_string addr, port) in
   let socket = Lwt_unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
   Lwt_unix.setsockopt socket Unix.SO_REUSEADDR true;
+  Lwt_unix.set_blocking socket false;
   Lwt_unix.bind socket sockaddr;
   return socket
 
