@@ -21,7 +21,8 @@ exception InvalidCommand of string
 module Store = Irmin.Basic (Irmin_git.FS) (Irmin.Contents.String)
 
 type config =
-  {serial:bool;init:bool;compress:bool;yield:bool;block:bool;server:bool;content:string;addr:string;port:int;number:int}
+  {serial:bool;init:bool;compress:bool;yield:bool;block:bool;server:bool;content:string;
+    addr:string;port:int;number:int;from:string option}
 
 let create_content size = 
   Random.init max_int;
@@ -30,48 +31,85 @@ let create_content size =
     char_of_int (if r >= 0 && r < 32 then r + 32 else r)
   ) 
 
+let re_from = Re_posix.compile_pat 
+  ~opts:[`ICase] "^from [^ ]+ (Sun|Mon|Tue|Wed|Thu|Fri|Sun) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
+
+let create_content_from_mbox file f =
+  let message = Buffer.create 100 in
+  Lwt_io.with_file ~flags:[Unix.O_NONBLOCK] ~mode:Lwt_io.Input file (fun ic ->
+    let rec get_message i =
+      Lwt_io.read_line_opt ic >>= function
+      | Some line ->
+        if Re.execp re_from line then (
+          begin
+          if Buffer.length message > 0 then (
+            f i (Buffer.contents message) >>= fun () ->
+            return (i+1)
+          ) else
+            return i
+          end >>= fun i ->
+          Buffer.clear message;
+          Buffer.add_string message line;
+          Buffer.add_string message "\n";
+          get_message i
+        ) else (
+          Buffer.add_string message line;
+          Buffer.add_string message "\n";
+          get_message i 
+        )
+      | None ->
+        if Buffer.length message > 0 then
+          f i (Buffer.contents message)
+        else
+          return ()
+    in
+    get_message 1
+  )
+
 let usage () =
   Printf.printf "usage: irvsfsio -i (create storage) -c \
   (compress files) -s (file size) -y (yield reading thread) \
   -b (blocking file read) -srl (serial read/write) \
-  -srv (server only) -a [server address] -p [server port] -n [repeat]\n"
+  -srv (server only) -a [server address] -p [server port] -n [repeat] \
+  -f [mailbox]\n"
 
 (* command line *)
 let rec args i _init _compr _size _yield _block _server _addr _port _serial
-_number =
+_number _from =
   if i >= Array.length Sys.argv then
-    _init,_compr,_size,_yield,_block,_server,_addr,_port,_serial,_number
+    _init,_compr,_size,_yield,_block,_server,_addr,_port,_serial,_number,_from
   else
     match Sys.argv.(i) with 
     | "-i" -> args (i+1) true _compr _size _yield _block _server _addr _port
-      _serial _number
+      _serial _number _from
     | "-c" -> args (i+1) _init true _size _yield _block _server _addr _port 
-      _serial _number
+      _serial _number _from
     | "-s" -> args (i+2) _init _compr (int_of_string Sys.argv.(i+1)) _yield
-      _block _server _addr _port _serial _number
+      _block _server _addr _port _serial _number _from
     | "-y" -> args (i+1) _init _compr _size true _block _server _addr _port 
-      _serial _number
+      _serial _number _from
     | "-b" -> args (i+1) _init _compr _size _yield true _server _addr _port
-      _serial _number
+      _serial _number _from
     | "-srv" -> args (i+1) _init _compr _size _yield _block true _addr _port 
-      _serial _number
+      _serial _number _from
     | "-a" -> args (i+2) _init _compr _size _yield _block _server Sys.argv.(i+1)
-      _port  _serial _number
+      _port  _serial _number _from
     | "-p" -> args (i+2) _init _compr _size _yield _block _server _addr 
-      (int_of_string Sys.argv.(i+1)) _serial _number
+      (int_of_string Sys.argv.(i+1)) _serial _number _from
     | "-srl" -> args (i+1) _init _compr _size _yield _block _server _addr _port 
-      true _number
+      true _number _from
     | "-n" -> args (i+2) _init _compr _size _yield _block _server _addr _port 
-      _serial (int_of_string Sys.argv.(i+1))
+      _serial (int_of_string Sys.argv.(i+1)) _from
+    | "-f" -> args (i+2) _init _compr _size _yield _block _server _addr _port 
+      _serial _number (Some Sys.argv.(i+1))
     | "-h" -> usage (); Pervasives.exit 1
     | s -> raise (InvalidCommand s)
 
 let commands f =
   try
-    let init,compress,size,yield,block,server,addr,port,serial,number = 
-      args 1 false false 100_000 false false false "0.0.0.0" 20001 false 5 in
-    f {init;compress;content=create_content
-    size;yield;block;server;addr;port;serial;number}
+    let init,compress,size,yield,block,server,addr,port,serial,number,from = 
+      args 1 false false 100_000 false false false "0.0.0.0" 20001 false 5 None in
+    f {init;compress;content=create_content size;yield;block;server;addr;port;serial;number;from}
   with InvalidCommand x -> usage (); raise (InvalidCommand x)
 (* done command line *)
 
@@ -107,6 +145,15 @@ let unique_content buff i =
   String.blit id 0 buff 0 7;
   buff
 
+let crt_cmd l cmd num = 
+  let rec crt i l =
+    if i > num then
+      l
+    else
+      crt (i+1) (cmd :: l)
+  in
+  crt 1 l
+
 let fold_i n f init =
   let rec _fold i acc =
     if i > n then
@@ -122,21 +169,10 @@ let root = "./tmp_ir_fs"
 let irmin_root = Filename.concat root "irmin"
 let files_root = Filename.concat root "files"
 
-let init () =
-  Lwt_unix.system (Printf.sprintf "rm -rf %s" root) >>= fun _ ->
-  Lwt_unix.mkdir root 0o777>>= fun () ->
-  Lwt_unix.mkdir files_root 0o777>>= fun () ->
-  Lwt_unix.mkdir irmin_root 0o777
-
-let create_files config =
-  Printf.printf "creating files\n%!";
-  fold_i 1_000 (fun i acc ->
-    Printf.printf "file %d\r%!" i;
-    let file = Printf.sprintf "./tmp_ir_fs/files/%d" i in
-    Lwt_io.with_file ~flags:[Unix.O_WRONLY;Unix.O_CREAT;Unix.O_NONBLOCK] ~mode:Lwt_io.Output file (fun w ->
-      let content = unique_content config.content i in
-      Lwt_io.write w (if config.compress then do_compress ~header:true content else content))
-  ) ()
+let create_file config file content =
+  let file = Filename.concat files_root file in
+  Lwt_io.with_file ~flags:[Unix.O_WRONLY;Unix.O_CREAT;Unix.O_NONBLOCK] ~mode:Lwt_io.Output file (fun w ->
+    Lwt_io.write w (if config.compress then do_compress ~header:true content else content))
 
 let task msg =
   let date = Int64.of_float (Unix.gettimeofday ()) in
@@ -147,14 +183,34 @@ let create_store () =
   let _config = Irmin_git.config ~root:"./tmp_ir_fs/irmin" ~bare:true ~level:0 () in
   Store.create _config task
 
-let create_irmin config =
-  Printf.printf "creating irmin\n%!";
-  create_store () >>= fun store ->
+let create_irmin config store file content =
+  Store.update (store (Printf.sprintf "updating %s" file)) ["root";file] content
+
+let content_generator config f =
   fold_i 1_000 (fun i acc ->
-    Printf.printf "irmin %d\r%!" i;
-    Store.update (store (Printf.sprintf "updating %d" i)) 
-      ["root";string_of_int i] (unique_content config.content i)
+    f i (unique_content config.content i)
   ) ()
+
+let init config =
+  Printf.printf "creating storage\n";
+  Lwt_unix.system (Printf.sprintf "rm -rf %s" root) >>= fun _ ->
+  Lwt_unix.mkdir root 0o777>>= fun () ->
+  Lwt_unix.mkdir files_root 0o777>>= fun () ->
+  Lwt_unix.mkdir irmin_root 0o777 >>= fun () ->
+  let generate =
+  match config.from with
+  | Some mbox ->
+    create_content_from_mbox mbox
+  | None ->
+    content_generator config
+  in
+  create_store () >>= fun store ->
+  generate (fun i content ->
+    Printf.printf "%d\r%!" i;
+    let file = string_of_int i in
+    create_file config file content >>= fun () ->
+    create_irmin config store file content 
+  )
 
 let inet_addr addr port = (Unix.ADDR_INET (Unix.inet_addr_of_string addr,port))
 
@@ -176,15 +232,6 @@ let command config cmd =
     Lwt_io.write_line w cmd >>= fun () ->
     read_response r
   )
-
-let crt_cmd l cmd num = 
-  let rec crt i l =
-    if i > num then
-      l
-    else
-      crt (i+1) (cmd :: l)
-  in
-  crt 1 l
 
 let client config =
   Printf.printf "started client\n%!";
@@ -217,6 +264,19 @@ let process_file config id =
   end >>= fun buff ->
   return (if config.compress then do_uncompress ~header:true buff else buff)
 
+let file_index config =
+  let strm = Lwt_unix.files_of_directory files_root in
+  let rec get acc =
+    Lwt_stream.get strm >>= function
+    | Some f -> get (if f <> "." && f <> ".." then f :: acc else acc)
+    | None -> return acc
+  in 
+  get []
+
+let irmin_index store config =
+  Store.list (store "indexing") ["root"] >>= fun l ->
+  Lwt_list.map_s (fun l -> return (List.nth l 1)) l
+
 let process_irmin store config id =
   Store.read_exn (store (Printf.sprintf "reading %s" id)) ["root"; id]
 
@@ -238,30 +298,30 @@ let write_to_client ts strm w =
   in
   _write 1
 
-let process config msg w store_reader =
+let process config msg w indexer store_reader =
   readt := 0.;
   writet := 0.;
   Printf.printf "processing %s\n%!" msg;
   let (strm,push_strm) = Lwt_stream.create () in
+  indexer config >>= fun index ->
   let t = Unix.gettimeofday () in
   let (f,tm) =
   if config.serial then (
-    Lwt_list.iter_s,(fun() -> Unix.gettimeofday())
+    Lwt_list.iter_s,(fun()->Unix.gettimeofday())
   ) else (
-    Lwt_list.iter_p,(fun() -> t)
+    Lwt_list.iter_p,(fun()->t)
   )
   in
   f (fun f -> f()) [
   (fun() ->
-  fold_i 1_000 (fun i acc ->
-    Printf.printf "reading %d\r%!" i;
+  Lwt_list.iter_s (fun file ->
+    Printf.printf "reading %s\r%!" file;
     let t = Unix.gettimeofday () in
-    store_reader config (string_of_int i) >>= fun buff ->
+    store_reader config file >>= fun buff ->
     readt := !readt +. (Unix.gettimeofday () -. t);
     push_strm (Some buff);
-    (if config.yield then Lwt_unix.yield () else return ()) >>= fun () ->
-    return acc
-  ) () >>= fun () -> push_strm None; return ()
+    if config.yield then Lwt_unix.yield () else return ()
+  ) index >>= fun () -> push_strm None; return ()
   )
   ;
   (fun() ->
@@ -276,10 +336,8 @@ let () =
 commands (fun config ->
   Lwt_main.run (
     begin
-    if config.init then (
-      init () >>= fun () ->
-      create_files config >>= fun () ->
-      create_irmin config 
+    if config.init || config.from <> None then (
+      init config
     ) else
       return ()
     end >>= fun () ->
@@ -298,11 +356,11 @@ commands (fun config ->
             begin
               match cmd with
               | "file" -> 
-                process config "file" w process_file >>= fun () ->
+                process config "file" w file_index process_file >>= fun () ->
                 Lwt_io.close r >>= fun () -> Lwt_io.close w
               | "irmin" -> 
                 create_store () >>= fun store ->
-                process config "irmin" w (process_irmin store) >>= fun () ->
+                process config "irmin" w (irmin_index store) (process_irmin store) >>= fun () ->
                 Lwt_io.close r >>= fun () -> Lwt_io.close w
               | _ -> Lwt_io.close w >>= fun () -> Lwt_mutex.unlock mutex; return ()
             end
