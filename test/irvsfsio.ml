@@ -20,36 +20,37 @@ exception InvalidCommand of string
 
 module Store = Irmin.Basic (Irmin_git.FS) (Irmin.Contents.String)
 
-let compress = ref false
-
-type config = {init:bool;compress:bool;yield:bool;block:bool;server:bool;content:string}
+type config =
+  {init:bool;compress:bool;yield:bool;block:bool;server:bool;content:string;addr:string;port:int}
 
 let create_content size = 
   Random.init max_int;
   String.init size (fun i -> char_of_int ((mod) (Random.int 1_000_000) 255)) 
 
 (* command line *)
-let rec args i _init _compr _size _yield _block _server =
+let rec args i _init _compr _size _yield _block _server _addr _port =
   if i >= Array.length Sys.argv then
-    _init,_compr,_size,_yield,_block,_server
+    _init,_compr,_size,_yield,_block,_server,_addr,_port
   else
     match Sys.argv.(i) with 
-    | "-i" -> args (i+1) true _compr _size _yield _block _server
-    | "-c" -> args (i+1) _init true _size _yield _block _server
-    | "-s" -> args (i+2) _init _compr (int_of_string Sys.argv.(i+1)) _yield _block _server
-    | "-y" -> args (i+1) _init _compr _size true _block _server
-    | "-b" -> args (i+1) _init _compr _size _yield true _server
-    | "-srv" -> args (i+1) _init _compr _size _yield _block true
+    | "-i" -> args (i+1) true _compr _size _yield _block _server _addr _port
+    | "-c" -> args (i+1) _init true _size _yield _block _server _addr _port
+    | "-s" -> args (i+2) _init _compr (int_of_string Sys.argv.(i+1)) _yield _block _server _addr _port
+    | "-y" -> args (i+1) _init _compr _size true _block _server _addr _port
+    | "-b" -> args (i+1) _init _compr _size _yield true _server _addr _port
+    | "-srv" -> args (i+1) _init _compr _size _yield _block true _addr _port
+    | "-a" -> args (i+1) _init _compr _size _yield _block true Sys.argv.(i+1) _port
+    | "-p" -> args (i+1) _init _compr _size _yield _block true _addr (int_of_string Sys.argv.(i+1))
     | s -> raise (InvalidCommand s)
 
 let commands f =
   try
-    let init,compress,size,yield,block,server = 
-      args 1 false false 100_000 false false false in
-    f {init;compress;content=create_content size;yield;block;server}
+    let init,compress,size,yield,block,server,addr,port = 
+      args 1 false false 100_000 false false false "0.0.0.0" 20001 in
+    f {init;compress;content=create_content size;yield;block;server;addr;port}
   with InvalidCommand x -> Printf.printf "usage: irvsfsio -i (create storage) -c \
   (compress files) -s (file size) -y (yield reading thread) -b (blocking file \
-  read) -srv (server only)\n";
+  read) -srv (server only) -a [server address] -p [server port]\n";
   raise (InvalidCommand x)
 (* done command line *)
 
@@ -136,7 +137,7 @@ let create_irmin config =
       ["root";string_of_int i] (unique_content config.content i)
   ) ()
 
-let addr = (Unix.ADDR_INET (Unix.inet_addr_of_string "127.0.0.1",20001))
+let inet_addr addr port = (Unix.ADDR_INET (Unix.inet_addr_of_string addr,port))
 
 let read_response r =
   let rec _read () =
@@ -149,19 +150,20 @@ let read_response r =
   in
   _read ()
 
-let command cmd =
+let command config cmd =
+  let addr = inet_addr config.addr config.port in
   Lwt_io.with_connection addr (fun (r,w) ->
     Printf.printf "connected to the server, requesting %s\n%!" cmd;
     Lwt_io.write_line w cmd >>= fun () ->
     read_response r
   )
 
-let client () =
+let client config =
   Printf.printf "started client\n%!";
   let cmds =
     ["file";"file";"file";"file";"file";"irmin";"irmin";"irmin";"irmin";"irmin";"quit"]
   in
-  Lwt_list.iter_s command cmds
+  Lwt_list.iter_s (command config) cmds
 
 let read_file_lwt file =
   Lwt_io.with_file ~flags:[Unix.O_NONBLOCK] ~mode:Lwt_io.Input file (fun ic ->
@@ -245,10 +247,11 @@ commands (fun config ->
     end >>= fun () ->
     if config.server = false && Lwt_unix.fork () = 0 then (
       Lwt_unix.sleep 1. >>= fun () ->
-      client ()
+      client config
     ) else (
       let mutex = Lwt_mutex.create () in
       Lwt_mutex.lock mutex >>= fun () ->
+      let addr = inet_addr config.addr config.port in
       let server = Lwt_io.establish_server ~backlog:10 addr (fun (r,w) ->
         let loop () =
           Lwt_io.read_line_opt r >>= function
