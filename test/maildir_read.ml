@@ -178,6 +178,14 @@ struct
     Lwt_io.with_file ~flags:[Unix.O_NONBLOCK] ~mode:Lwt_io.Input file (fun ic ->
       Lwt_io.read ic
     )
+
+  let read_message t ~id =
+    let file = Filename.concat (Filename.concat (get_dir t) "cur") id in
+    let st = Unix.stat file in
+    let ic = Pervasives.open_in file in
+    let buff = Pervasives.really_input_string ic st.Unix.st_size in
+    Pervasives.close_in ic;
+    return buff
 end
 
 module MaildirIrmin : Maildir_intf =
@@ -249,10 +257,8 @@ struct
     let (strm,push_strm) = Lwt_stream.create () in
     let maildir = M.create ~user ~repo ~mailbox in
     M.read_index maildir ~num >>= fun uids ->
-    (*
     Lwt.join 
     [
-    *)
       begin
       Lwt_list.iter_s (fun (_,file) ->
         let t = Unix.gettimeofday () in
@@ -263,11 +269,9 @@ struct
       ) uids >>= fun () ->
       push_strm None;
       return ()
-      end >>= fun () ->
+      end;
       write_messages strm writer inflate
-      (*
     ]
-    *)
 end
 
 let () =
