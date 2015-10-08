@@ -16,33 +16,41 @@
 open Lwt
 open Irmin_unix
 
-exception InvalidCommand
+exception InvalidCommand of string
 
 module Store = Irmin.Basic (Irmin_git.FS) (Irmin.Contents.String)
 
 let compress = ref false
 
-type config = {init:bool;compress:bool;yield:bool;content:string}
+type config = {init:bool;compress:bool;yield:bool;block:bool;server:bool;content:string}
 
 let create_content size = 
   Random.init max_int;
   String.init size (fun i -> char_of_int ((mod) (Random.int 1_000_000) 255)) 
 
 (* command line *)
-let rec args i _init _compr _size _yield =
+let rec args i _init _compr _size _yield _block _server =
   if i >= Array.length Sys.argv then
-    _init,_compr,_size,_yield
+    _init,_compr,_size,_yield,_block,_server
   else
     match Sys.argv.(i) with 
-    | "-i" -> args (i+1) true _compr _size _yield
-    | "-c" -> args (i+1) _init true _size _yield
-    | "-s" -> args (i+2) _init _compr (int_of_string Sys.argv.(i+1)) _yield
-    | "-y" -> args (i+1) _init _compr _size true
-    | _ -> raise InvalidCommand
+    | "-i" -> args (i+1) true _compr _size _yield _block _server
+    | "-c" -> args (i+1) _init true _size _yield _block _server
+    | "-s" -> args (i+2) _init _compr (int_of_string Sys.argv.(i+1)) _yield _block _server
+    | "-y" -> args (i+1) _init _compr _size true _block _server
+    | "-b" -> args (i+1) _init _compr _size _yield true _server
+    | "-srv" -> args (i+1) _init _compr _size _yield _block true
+    | s -> raise (InvalidCommand s)
 
 let commands f =
-  let init,compress,size,yield = args 1 false false 100_000 false in
-  f {init;compress;content=create_content size;yield}
+  try
+    let init,compress,size,yield,block,server = 
+      args 1 false false 100_000 false false false in
+    f {init;compress;content=create_content size;yield;block;server}
+  with InvalidCommand x -> Printf.printf "usage: irvsfsio -i (create storage) -c \
+  (compress files) -s (file size) -y (yield reading thread) -b (blocking file \
+  read) -srv (server only)\n";
+  raise (InvalidCommand x)
 (* done command line *)
 
 (* compression *)
@@ -155,12 +163,27 @@ let client () =
   in
   Lwt_list.iter_s command cmds
 
+let read_file_lwt file =
+  Lwt_io.with_file ~flags:[Unix.O_NONBLOCK] ~mode:Lwt_io.Input file (fun ic ->
+    Lwt_io.read ic
+  )
+
+let read_file file =
+  let st = Unix.stat file in
+  let ic = Pervasives.open_in file in
+  let buff = Pervasives.really_input_string ic st.Unix.st_size in
+  Pervasives.close_in ic;
+  buff
+
 let process_file config id =
   let file = Filename.concat files_root id in
-  Lwt_io.with_file ~flags:[Unix.O_NONBLOCK] ~mode:Lwt_io.Input file (fun ic ->
-    Lwt_io.read ic >>= fun buff ->
-    return (if config.compress then do_uncompress ~header:true buff else buff)
-  )
+  begin
+    if config.block then
+      return (read_file file)
+    else
+      read_file_lwt file
+  end >>= fun buff ->
+  return (if config.compress then do_uncompress ~header:true buff else buff)
 
 let process_irmin store config id =
   Store.read_exn (store (Printf.sprintf "reading %s" id)) ["root"; id]
@@ -220,7 +243,7 @@ commands (fun config ->
     ) else
       return ()
     end >>= fun () ->
-    if Lwt_unix.fork () = 0 then (
+    if config.server = false && Lwt_unix.fork () = 0 then (
       Lwt_unix.sleep 1. >>= fun () ->
       client ()
     ) else (

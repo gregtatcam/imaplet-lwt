@@ -9,3 +9,6 @@ maildir_read: maildir_read.ml
 
 irvsfsio: irvsfsio.ml
 	ocamlbuild -pkgs lwt,lwt.syntax,lwt.unix,re,re.posix,irmin.unix,zip irvsfsio.native
+
+irvsfsio_cl: irvsfsio_cl.ml
+	ocamlbuild -pkgs lwt,lwt.syntax,lwt.unix irvsfsio_cl.native
