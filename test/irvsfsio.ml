@@ -21,37 +21,58 @@ exception InvalidCommand of string
 module Store = Irmin.Basic (Irmin_git.FS) (Irmin.Contents.String)
 
 type config =
-  {init:bool;compress:bool;yield:bool;block:bool;server:bool;content:string;addr:string;port:int}
+  {serial:bool;init:bool;compress:bool;yield:bool;block:bool;server:bool;content:string;addr:string;port:int;number:int}
 
 let create_content size = 
   Random.init max_int;
-  String.init size (fun i -> char_of_int ((mod) (Random.int 1_000_000) 255)) 
+  String.init size (fun i -> 
+    let r = (mod) (Random.int 1_000_000) 127 in
+    char_of_int (if r >= 0 && r < 32 then r + 32 else r)
+  ) 
+
+let usage () =
+  Printf.printf "usage: irvsfsio -i (create storage) -c \
+  (compress files) -s (file size) -y (yield reading thread) \
+  -b (blocking file read) -srl (serial read/write) \
+  -srv (server only) -a [server address] -p [server port] -n [repeat]\n"
 
 (* command line *)
-let rec args i _init _compr _size _yield _block _server _addr _port =
+let rec args i _init _compr _size _yield _block _server _addr _port _serial
+_number =
   if i >= Array.length Sys.argv then
-    _init,_compr,_size,_yield,_block,_server,_addr,_port
+    _init,_compr,_size,_yield,_block,_server,_addr,_port,_serial,_number
   else
     match Sys.argv.(i) with 
     | "-i" -> args (i+1) true _compr _size _yield _block _server _addr _port
-    | "-c" -> args (i+1) _init true _size _yield _block _server _addr _port
-    | "-s" -> args (i+2) _init _compr (int_of_string Sys.argv.(i+1)) _yield _block _server _addr _port
-    | "-y" -> args (i+1) _init _compr _size true _block _server _addr _port
+      _serial _number
+    | "-c" -> args (i+1) _init true _size _yield _block _server _addr _port 
+      _serial _number
+    | "-s" -> args (i+2) _init _compr (int_of_string Sys.argv.(i+1)) _yield
+      _block _server _addr _port _serial _number
+    | "-y" -> args (i+1) _init _compr _size true _block _server _addr _port 
+      _serial _number
     | "-b" -> args (i+1) _init _compr _size _yield true _server _addr _port
-    | "-srv" -> args (i+1) _init _compr _size _yield _block true _addr _port
-    | "-a" -> args (i+1) _init _compr _size _yield _block true Sys.argv.(i+1) _port
-    | "-p" -> args (i+1) _init _compr _size _yield _block true _addr (int_of_string Sys.argv.(i+1))
+      _serial _number
+    | "-srv" -> args (i+1) _init _compr _size _yield _block true _addr _port 
+      _serial _number
+    | "-a" -> args (i+2) _init _compr _size _yield _block _server Sys.argv.(i+1)
+      _port  _serial _number
+    | "-p" -> args (i+2) _init _compr _size _yield _block _server _addr 
+      (int_of_string Sys.argv.(i+1)) _serial _number
+    | "-srl" -> args (i+1) _init _compr _size _yield _block _server _addr _port 
+      true _number
+    | "-n" -> args (i+2) _init _compr _size _yield _block _server _addr _port 
+      _serial (int_of_string Sys.argv.(i+1))
+    | "-h" -> usage (); Pervasives.exit 1
     | s -> raise (InvalidCommand s)
 
 let commands f =
   try
-    let init,compress,size,yield,block,server,addr,port = 
-      args 1 false false 100_000 false false false "0.0.0.0" 20001 in
-    f {init;compress;content=create_content size;yield;block;server;addr;port}
-  with InvalidCommand x -> Printf.printf "usage: irvsfsio -i (create storage) -c \
-  (compress files) -s (file size) -y (yield reading thread) -b (blocking file \
-  read) -srv (server only) -a [server address] -p [server port]\n";
-  raise (InvalidCommand x)
+    let init,compress,size,yield,block,server,addr,port,serial,number = 
+      args 1 false false 100_000 false false false "0.0.0.0" 20001 false 5 in
+    f {init;compress;content=create_content
+    size;yield;block;server;addr;port;serial;number}
+  with InvalidCommand x -> usage (); raise (InvalidCommand x)
 (* done command line *)
 
 (* compression *)
@@ -123,9 +144,7 @@ let task msg =
   Irmin.Task.create ~date ~owner msg
 
 let create_store () =
-  let _config = Irmin_git.config
-    ~root:"./tmp_ir_fs/irmin"
-    ~bare:true () in
+  let _config = Irmin_git.config ~root:"./tmp_ir_fs/irmin" ~bare:true ~level:0 () in
   Store.create _config task
 
 let create_irmin config =
@@ -158,11 +177,20 @@ let command config cmd =
     read_response r
   )
 
+let crt_cmd l cmd num = 
+  let rec crt i l =
+    if i > num then
+      l
+    else
+      crt (i+1) (cmd :: l)
+  in
+  crt 1 l
+
 let client config =
   Printf.printf "started client\n%!";
-  let cmds =
-    ["file";"file";"file";"file";"file";"irmin";"irmin";"irmin";"irmin";"irmin";"quit"]
-  in
+  let cmds = crt_cmd [] "file" config.number in
+  let cmds = crt_cmd cmds "irmin" config.number in
+  let cmds = List.rev ("quit" :: cmds) in
   Lwt_list.iter_s (command config) cmds
 
 let read_file_lwt file =
@@ -172,9 +200,11 @@ let read_file_lwt file =
 
 let read_file file =
   let st = Unix.stat file in
-  let ic = Pervasives.open_in file in
+  let fd = Unix.openfile file [Unix.O_RDONLY] 0o666 in
+  let ic = Unix.in_channel_of_descr fd in
+  Pervasives.set_binary_mode_in ic false;
   let buff = Pervasives.really_input_string ic st.Unix.st_size in
-  Pervasives.close_in ic;
+  Unix.close fd;
   buff
 
 let process_file config id =
@@ -214,9 +244,17 @@ let process config msg w store_reader =
   Printf.printf "processing %s\n%!" msg;
   let (strm,push_strm) = Lwt_stream.create () in
   let t = Unix.gettimeofday () in
-  Lwt.join [
-  begin
+  let (f,tm) =
+  if config.serial then (
+    Lwt_list.iter_s,(fun() -> Unix.gettimeofday())
+  ) else (
+    Lwt_list.iter_p,(fun() -> t)
+  )
+  in
+  f (fun f -> f()) [
+  (fun() ->
   fold_i 1_000 (fun i acc ->
+    Printf.printf "reading %d\r%!" i;
     let t = Unix.gettimeofday () in
     store_reader config (string_of_int i) >>= fun buff ->
     readt := !readt +. (Unix.gettimeofday () -. t);
@@ -224,11 +262,11 @@ let process config msg w store_reader =
     (if config.yield then Lwt_unix.yield () else return ()) >>= fun () ->
     return acc
   ) () >>= fun () -> push_strm None; return ()
-  end
+  )
   ;
-  begin
-  write_to_client (Unix.gettimeofday()) strm w
-  end
+  (fun() ->
+  write_to_client (tm()) strm w
+  )
   ] >>= fun () ->
   let total = Unix.gettimeofday () -. t in
   Printf.printf "%s total read %.04f, write %.04f, overall %.04f\n" msg !readt !writet total;
