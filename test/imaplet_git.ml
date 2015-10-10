@@ -1,8 +1,28 @@
 open Lwt
 
-module MapStr = Map.Make(String list)
+module MapStr = Map.Make(String)
 
 exception InvalidObject
+
+module Key :
+sig
+  type t = string list
+  val create : string list -> t
+  val of_unix : string -> t
+  val to_string : t -> string
+  val to_string_rev : t -> string
+end =
+struct
+  type t = string list
+  let re = Re_posix.compile_pat "/"
+  let create t = t
+  let of_unix str =
+    Re.split re str
+  let to_string t =
+    String.concat "/" t
+  let to_string_rev t =
+    to_string (List.rev t)
+end
 
 module Sha :
 sig
@@ -210,11 +230,52 @@ let create ~repo =
     return {root;head;commit}
   | _ -> raise InvalidObject
 
-let search_opt ?(cache=false) t key = return None
+let search_cache = ref (MapStr.empty)
 
-let read_opt t key = return None
+let clear_search_cache () =
+  search_cache := MapStr.empty;;
 
-let read t key = return ""
+let cache_exists k v =
+  MapStr.exists (fun _k _v ->
+    if k = _k then (
+      v := _v;
+      true
+    ) else
+      false
+  ) !search_cache
+
+(* find blob's content corresponding to the key *)
+let find_opt ?(cache=false) t key = 
+  catch (fun () ->
+    Lwt_list.fold_left_s (fun (key,sha) k ->
+      let obj's_sha = ref Sha.empty in
+      let key = k :: key in
+      let key_str = Key.to_string_rev key in
+      if cache && cache_exists key_str obj's_sha then (
+        return (key,!obj's_sha)
+      ) else (
+        read_object t.root sha >>= fun obj ->
+        match obj with
+        | `Tree t ->
+          let te = List.find (fun te -> te.name = k) t in
+          MapStr.add key_str te.sha !search_cache;
+          return (key,te.sha)
+        | _ -> raise InvalidObject
+        return (key,sha)
+      )
+    ) ([],t.commit.tree) key >>= fun (_,sha) ->
+    read_object t.root sha >>= function
+    | `Blob c -> return (Some c)
+    | _ -> return None
+  ) (function Not_found -> return None)
+
+let read_opt t key = 
+  find_opt t key
+
+let read_exn t key = 
+  find_opt t key >>= function
+  | Some v -> return v
+  | None -> raise Not_found
 
 let () =
   Lwt_main.run (
@@ -223,14 +284,27 @@ let () =
     Printf.printf "%s %s\n%!" (Sha.to_string t.head) (Sha.to_string t.commit.tree);
     let rec loop () =
       Lwt_io.read_line_opt Lwt_io.stdin >>= function
-      | Some hash ->
-        begin
-        read_object t.root (Sha.of_string hash) >>= function
-        |`Blob c -> Printf.printf "blob: %s\n%!" c; loop ()
-        |`Tree c -> Printf.printf "%s\n%!" (Tree.to_string c); loop ()
-        |`Commit c -> Printf.printf "%s\n%!" (Commit.to_string c); loop ()
-        |`Tag c -> Printf.printf "tag: %s\n%!" c; loop ()
-        end
+      | Some line ->
+        catch (fun () ->
+          let subs = Re.exec (Re_posix.compile_pat "^(read|find) (.+)$") line in
+          match Re.get subs 1 with
+          | "read" ->
+            begin
+            let sha = Sha.of_string (Re.get subs 2) in
+            read_object t.root sha >>= function
+            |`Blob c -> Printf.printf "blob: %s\n%!" c; loop ()
+            |`Tree c -> Printf.printf "%s\n%!" (Tree.to_string c); loop ()
+            |`Commit c -> Printf.printf "%s\n%!" (Commit.to_string c); loop ()
+            |`Tag c -> Printf.printf "tag: %s\n%!" c; loop ()
+            end
+          | "find" ->
+            begin
+            let key = Key.of_unix (Re.get subs 2) in
+            read_opt t key  >>= function
+            | Some v -> Printf.printf "%s\n%!" v; loop()
+            | None -> Printf.printf "not found\n%!"; loop()
+            end
+        ) (function Not_found -> Printf.printf "invalid command or sha\n%!";loop())
       | None -> return ()
     in
     loop ()
