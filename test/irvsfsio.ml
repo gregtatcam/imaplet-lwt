@@ -113,33 +113,6 @@ let commands f =
   with InvalidCommand x -> usage (); raise (InvalidCommand x)
 (* done command line *)
 
-(* compression *)
-let refill input =
-  let n = String.length input in
-  let toread = ref n in
-  fun buf ->
-    let m = min !toread (String.length buf) in
-    String.blit input (n - !toread) buf 0 m;
-    toread := !toread - m;
-    m
-
-let flush output buf len =
-  Buffer.add_substring output buf 0 len
-
-let flush output buf len =
-  Buffer.add_substring output buf 0 len
-
-let do_compress ?(header=false) input =
-  let output = Buffer.create (String.length input) in
-  Zlib.compress ~level:6 ~header (refill input) (flush output);
-  Buffer.contents output
-
-let do_uncompress ?(header=false) input =
-  let output = Buffer.create (String.length input) in
-  Zlib.uncompress ~header (refill input) (flush output);
-  Buffer.contents output
-(* done compression *)
-
 let unique_content buff i =
   let id = Printf.sprintf "%07d" i in
   String.blit id 0 buff 0 7;
@@ -172,7 +145,7 @@ let files_root = Filename.concat root "files"
 let create_file config file content =
   let file = Filename.concat files_root file in
   Lwt_io.with_file ~flags:[Unix.O_WRONLY;Unix.O_CREAT;Unix.O_NONBLOCK] ~mode:Lwt_io.Output file (fun w ->
-    Lwt_io.write w (if config.compress then do_compress ~header:true content else content))
+    Lwt_io.write w (if config.compress then Compress.do_compress ~header:true content else content))
 
 let task msg =
   let date = Int64.of_float (Unix.gettimeofday ()) in
@@ -262,7 +235,7 @@ let process_file config id =
     else
       read_file_lwt file
   end >>= fun buff ->
-  return (if config.compress then do_uncompress ~header:true buff else buff)
+  return (if config.compress then Compress.do_uncompress ~header:true buff else buff)
 
 let file_index config =
   let strm = Lwt_unix.files_of_directory files_root in
