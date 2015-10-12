@@ -182,12 +182,13 @@ end
 
 module MaildirIrmin : Maildir_intf =
 struct
-  module Store = Irmin.Basic (Irmin_git.FS) (Irmin.Contents.String)
-  module View = Irmin.View(Store)
+  (*module Store = Irmin.Basic (Irmin_git.FS) (Irmin.Contents.String)
+  module View = Irmin.View(Store)*)
 
-  type t = {user:string; repo:string; mailbox:string; store:(string -> View.db)}
+  (*type t_ = {user:string; repo:string; mailbox:string; store:(string -> * View.db)}*)
+  type t = {user:string; repo:string; mailbox:string; store:Imaplet_git.t}
 
-  let task msg =
+  (*let task msg =
     let date = Int64.of_float (Unix.gettimeofday ()) in
     let owner = "imaplet <imaplet@openmirage.org>" in
     Irmin.Task.create ~date ~owner msg
@@ -196,27 +197,34 @@ struct
     let _config = Irmin_git.config
       ~root:repo
       ~bare:true () in
-    Store.create _config task
+    Store.create _config task*)
+
+  let create_store repo =
+    Imaplet_git.create repo 
 
   let create ~user ~repo ~mailbox =
     create_store repo >>= fun store ->
     return {user;repo;mailbox;store}
 
   let read_index t ~num =
+    catch(fun() ->
     let mailbox = if (String.lowercase t.mailbox = "inbox") then "INBOX" else t.mailbox in
     let key = ["imaplet"; t.user; "mailboxes"; mailbox; "index"] in
-    Store.read_exn (t.store "reading") key >>= fun index_sexp_str ->
+    (*Store.read_exn (t.store "reading") key >>= fun index_sexp_str ->*)
+    Imaplet_git.read_exn t.store key >>= fun index_sexp_str ->
     return (list_of_sexp
     (fun i ->
       (* change to same as maildir *)
       let (file,uid) =
-      pair_of_sexp (fun a -> Sexp.to_string a) (fun b -> int_of_string (Sexp.to_string b)) i in
+        pair_of_sexp Sexp.to_string (fun b -> int_of_string (Sexp.to_string b)) i in
       (uid,file)
     ) (Sexp.of_string index_sexp_str))
+    )(fun ex -> Printf.printf "exception:%s\n%!" (Printexc.to_string ex);return[])
 
   let read_message t ~id =
     let key = ["imaplet"; t.user; "storage";id] in
-    Store.read_exn (t.store "reading") key
+    (*Store.read_exn (t.store "reading") key*)
+    Imaplet_git.read_exn t.store key
 end
 
 module type MaildirReader_intf =
@@ -227,28 +235,30 @@ end
 
 module MakeMaildirReader(M:Maildir_intf) : MaildirReader_intf =
 struct
-  let write_messages strm w uncompress =
+  let write_messages d strm w uncompress =
     let rec _write d uid = 
       Lwt_stream.get strm >>= function
       | Some message -> 
-        Printf.printf "writing data %d, delay %.04f\n%!" uid (Unix.gettimeofday () -. d);
+        let del = (Unix.gettimeofday() -. d) in
+        if uid = 1 then Printf.printf "initial write delay %.04f\n" del;
+        Printf.printf "writing data %d, delay %.04f\r%!" uid del;
         let t=Unix.gettimeofday() in
         let message = if uncompress then (Imap_crypto.do_uncompress message) else message in
         let l = ["*"; sp;string_of_int uid; sp; "FETCH"; sp; "("; "BODY[]"; sp; "{";string_of_int
           (String.length message); "}";"\r\n";message;")";"\r\n"] in
-        let buff = String.concat "" l in
         let t = timeit comprt t in
-        Lwt_io.write w buff >>= fun () -> 
+        Lwt_list.iter_s (Lwt_io.write w) l >>= fun () -> 
         let _ = timeit writet t in
         _write (Unix.gettimeofday()) (uid+1)
       | None -> return ()
     in
-    _write (Unix.gettimeofday()) 1
+    _write d 1
   
   let read_files ~user ~repo ~mailbox ~writer ~num ~inflate =
     let (strm,push_strm) = Lwt_stream.create () in
     M.create ~user ~repo ~mailbox >>= fun maildir ->
     M.read_index maildir ~num >>= fun uids ->
+    let t = Unix.gettimeofday() in
     Lwt_list.iter_p (fun f -> f()) 
     [
       (
@@ -258,7 +268,7 @@ struct
         M.read_message maildir ~id:file >>= fun message ->
         let _ = timeit readt t in
         push_strm (Some message);
-        Lwt_unix.yield ()
+        return()
       ) uids >>= fun () ->
       push_strm None;
       return ()
@@ -266,7 +276,7 @@ struct
       );
       (
       (fun () ->
-      write_messages strm writer inflate
+      write_messages t strm writer inflate
       )
       )
     ]
@@ -283,11 +293,14 @@ let () =
             begin
             imap l >>= function
             | `Fetch (tag,num) ->
+              let open Imaplet_git in
               begin
               try
                 readt := 0.;
                 writet := 0.;
                 comprt := 0.;
+                gitreadt := 0.;
+                gitcomprt := 0.;
                 let t = Unix.gettimeofday () in
                 begin
                 if store = "maildir" then (
@@ -300,7 +313,8 @@ let () =
                 end >>= fun () ->
                 Lwt_io.write w (tag ^ " ok\r\n") >>= fun () ->
                 Printf.printf "total read: %.04f, write %.04f, compress %.04f, time %.04f\n%!"
-                !readt !writet !comprt (Unix.gettimeofday() -. t);
+                  !readt !writet !comprt (Unix.gettimeofday() -. t);
+                Printf.printf "\tgit read: %.04f, compress %.04f\n%!" !gitreadt !gitcomprt;
                 loop ()
               with Not_found ->
                 return ()

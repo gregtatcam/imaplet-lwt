@@ -1,3 +1,5 @@
+open Lwt
+
 (* compression *)
 let refill input =
   let n = String.length input in
@@ -21,7 +23,8 @@ let do_compress ?(header=false) input =
 
 let do_uncompress ?(header=false) input =
   let output = Buffer.create (String.length input) in
-  Zlib.uncompress ~header (refill input) (flush output);
-  Buffer.contents output
+  return ( 
+    Zlib.uncompress ~header (refill input) (flush output);
+    Buffer.contents output)
 (* done compression *)
 

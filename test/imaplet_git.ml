@@ -4,6 +4,9 @@ module MapStr = Map.Make(String)
 
 exception InvalidObject
 
+let gitreadt = ref 0.
+let gitcomprt = ref 0.
+
 module Key :
 sig
   type t = string list
@@ -75,7 +78,6 @@ struct
     let rec get t data =
       Lwt_io.read_line_opt ic >>= function 
       | Some line ->
-        Printf.printf "%s\n%!" line;
         if data then (
           Buffer.add_string message line;
           Buffer.add_string message "\n";
@@ -179,8 +181,16 @@ let read_file file =
     Lwt_io.read ic)
 
 let read_file_inflate file =
+  let t = Unix.gettimeofday () in
   read_file file >>= fun content ->
-  return (Compress.do_uncompress ~header:true content)
+  let t1 = Unix.gettimeofday () in
+  gitreadt := !gitreadt +. (t1 -. t);
+  (* uncompress blocks, offload to preemptive thread *)
+  (*Lwt_preemptive.detach (fun() -> Compress.do_uncompress ~header:true content)
+   * () >>= fun content ->*)
+  Compress.do_uncompress ~header:true content >>= fun content ->
+  gitcomprt := !gitcomprt +. (Unix.gettimeofday() -. t1);
+  return content
 
 (* get head's SHA *)
 let read_head repo =
@@ -199,20 +209,16 @@ let file_from_sha root sha =
     )
   )
 
-(* get content part of the object *)
-let get_content obj obj_type size =
-  let offset = String.length obj_type + (String.length size) + 2 in
-  String.sub obj offset (int_of_string size)
-
 (* read object type/content *)
-let read_object root sha =
+let _read_object root sha =
   let file = file_from_sha root sha in
   read_file_inflate file >>= fun obj ->
   let subs = Re.exec 
       (Re_posix.compile_pat "^(blob|tree|commit|tag) ([0-9]+)\000") obj in
   let obj_type = Re.get subs 1 in
-  let size = Re.get subs 2 in
-  let content = get_content obj obj_type size in
+  let size = int_of_string (Re.get subs 2) in
+  let (_,offset) = Re.get_ofs subs 2 in
+  let content = String.sub obj (offset+1) size in
   match obj_type with 
   | "blob" -> return (`Blob content)
   | "tree" -> return (`Tree (Tree.create content))
@@ -222,10 +228,13 @@ let read_object root sha =
   | "tag" -> return (`Tag content)
   | _ -> raise InvalidObject
 
+let read_object t sha =
+  _read_object t.root sha
+
 let create ~repo = 
   let root = Filename.concat repo ".git" in
   read_head repo >>= fun head ->
-  read_object root head >>= function
+  _read_object root head >>= function
   | `Commit commit ->
     return {root;head;commit}
   | _ -> raise InvalidObject
@@ -248,64 +257,33 @@ let cache_exists k v =
 let find_opt ?(cache=false) t key = 
   catch (fun () ->
     Lwt_list.fold_left_s (fun (key,sha) k ->
-      let obj's_sha = ref Sha.empty in
-      let key = k :: key in
+      let obj's_tree = ref [] in
       let key_str = Key.to_string_rev key in
-      if cache && cache_exists key_str obj's_sha then (
-        return (key,!obj's_sha)
+      if cache && cache_exists key_str obj's_tree then (
+        let te = List.find (fun te -> te.name = k) !obj's_tree in
+        return (k::key,te.sha)
       ) else (
-        read_object t.root sha >>= fun obj ->
+        read_object t sha >>= fun obj ->
         match obj with
         | `Tree t ->
           let te = List.find (fun te -> te.name = k) t in
-          MapStr.add key_str te.sha !search_cache;
-          return (key,te.sha)
+          search_cache := MapStr.add key_str t !search_cache;
+          return (k::key,te.sha)
         | _ -> raise InvalidObject
-        return (key,sha)
       )
     ) ([],t.commit.tree) key >>= fun (_,sha) ->
-    read_object t.root sha >>= function
+    read_object t sha >>= function
     | `Blob c -> return (Some c)
     | _ -> return None
-  ) (function Not_found -> return None)
+  ) (function |Not_found -> return None|ex -> raise ex)
 
 let read_opt t key = 
-  find_opt t key
+  find_opt ~cache:true t key
 
 let read_exn t key = 
-  find_opt t key >>= function
+  find_opt ~cache:true t key >>= function
   | Some v -> return v
   | None -> raise Not_found
 
-let () =
-  Lwt_main.run (
-    let repo = Sys.argv.(1) in
-    create ~repo >>= fun t ->
-    Printf.printf "%s %s\n%!" (Sha.to_string t.head) (Sha.to_string t.commit.tree);
-    let rec loop () =
-      Lwt_io.read_line_opt Lwt_io.stdin >>= function
-      | Some line ->
-        catch (fun () ->
-          let subs = Re.exec (Re_posix.compile_pat "^(read|find) (.+)$") line in
-          match Re.get subs 1 with
-          | "read" ->
-            begin
-            let sha = Sha.of_string (Re.get subs 2) in
-            read_object t.root sha >>= function
-            |`Blob c -> Printf.printf "blob: %s\n%!" c; loop ()
-            |`Tree c -> Printf.printf "%s\n%!" (Tree.to_string c); loop ()
-            |`Commit c -> Printf.printf "%s\n%!" (Commit.to_string c); loop ()
-            |`Tag c -> Printf.printf "tag: %s\n%!" c; loop ()
-            end
-          | "find" ->
-            begin
-            let key = Key.of_unix (Re.get subs 2) in
-            read_opt t key  >>= function
-            | Some v -> Printf.printf "%s\n%!" v; loop()
-            | None -> Printf.printf "not found\n%!"; loop()
-            end
-        ) (function Not_found -> Printf.printf "invalid command or sha\n%!";loop())
-      | None -> return ()
-    in
-    loop ()
-  )
+let to_string t =
+  Printf.sprintf "head: %s\n%s\n" (Sha.to_string t.head) (Commit.to_string t.commit)
