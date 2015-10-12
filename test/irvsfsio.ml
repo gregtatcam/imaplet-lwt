@@ -250,6 +250,19 @@ let irmin_index store config =
   Store.list (store "indexing") ["root"] >>= fun l ->
   Lwt_list.map_s (fun l -> return (List.nth l 1)) l
 
+let file_index config =
+  let strm = Lwt_unix.files_of_directory files_root in
+  let rec get acc =
+    Lwt_stream.get strm >>= function
+    | Some f -> get (if f <> "." && f <> ".." then f :: acc else acc)
+    | None -> return acc
+  in 
+  get []
+
+let irmin_index store config =
+  Store.list (store "indexing") ["root"] >>= fun l ->
+  Lwt_list.map_s (fun l -> return (List.nth l 1)) l
+
 let process_irmin store config id =
   Store.read_exn (store (Printf.sprintf "reading %s" id)) ["root"; id]
 
