@@ -1,3 +1,7 @@
+### 0.1.16
+
+* git-like modules bundled into imaplet.commands library
+
 ### 0.1.15
 
 * add relay restrictions - required authenticaiton and list of users/domains

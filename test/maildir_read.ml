@@ -186,7 +186,7 @@ struct
   module View = Irmin.View(Store)*)
 
   (*type t_ = {user:string; repo:string; mailbox:string; store:(string -> * View.db)}*)
-  type t = {user:string; repo:string; mailbox:string; store:Imaplet_git.t}
+  type t = {user:string; repo:string; mailbox:string; store:Imaplet_gitl.t}
 
   (*let task msg =
     let date = Int64.of_float (Unix.gettimeofday ()) in
@@ -200,7 +200,7 @@ struct
     Store.create _config task*)
 
   let create_store repo =
-    Imaplet_git.create repo 
+    Imaplet_gitl.create repo 
 
   let create ~user ~repo ~mailbox =
     create_store repo >>= fun store ->
@@ -211,7 +211,7 @@ struct
     let mailbox = if (String.lowercase t.mailbox = "inbox") then "INBOX" else t.mailbox in
     let key = ["imaplet"; t.user; "mailboxes"; mailbox; "index"] in
     (*Store.read_exn (t.store "reading") key >>= fun index_sexp_str ->*)
-    Imaplet_git.read_exn t.store key >>= fun index_sexp_str ->
+    Imaplet_gitl.read_exn t.store key >>= fun index_sexp_str ->
     return (list_of_sexp
     (fun i ->
       (* change to same as maildir *)
@@ -224,7 +224,7 @@ struct
   let read_message t ~id =
     let key = ["imaplet"; t.user; "storage";id] in
     (*Store.read_exn (t.store "reading") key*)
-    Imaplet_git.read_exn t.store key
+    Imaplet_gitl.read_exn t.store key
 end
 
 module type MaildirReader_intf =
@@ -293,7 +293,7 @@ let () =
             begin
             imap l >>= function
             | `Fetch (tag,num) ->
-              let open Imaplet_git in
+              let open Imaplet_gitl in
               begin
               try
                 readt := 0.;
