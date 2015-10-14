@@ -31,7 +31,7 @@ exception InvalidKey of string
 exception EmptyPrivateKey
 exception InvalidUid of int
 
-module Store = Irmin.Basic (Irmin_git.FS) (Irmin.Contents.String)
+module Store = Irmin_git.FS(Irmin.Contents.String)(Irmin.Ref.String)(Irmin.Hash.SHA1)
 module View = Irmin.View(Store)
 module MapStr = Map.Make(String)
 
@@ -412,25 +412,25 @@ module GitWorkdirIntf : GitIntf with type store = string
 
   end
 
-module IrminIntf : GitIntf with type store = (string -> View.db) and 
+module IrminIntf : GitIntf with type store = (string -> Store.t) and 
   type view = View.t =
   struct
-    type store = (string -> View.db)
+    type store = (string -> Store.t)
     type view = View.t
 
     let fmt t x = Printf.ksprintf (fun str -> t str) x
     let path () = String.concat "/"
 
-    let task msg =
+    (*let task msg =
       let date = Int64.of_float (Unix.gettimeofday ()) in
       let owner = "imaplet <imaplet@openmirage.org>" in
-      Irmin.Task.create ~date ~owner msg
+      Irmin.Task.create ~date ~owner msg*)
 
     let create ?user config =
       let _config = Irmin_git.config 
         ~root:(get_irmin_path user config)
         ~bare:(config.irmin_expand=false) () in
-      Store.create _config task 
+      Store.Repo.create _config >>= Store.master task
 
     let remove store key =
       Key_.assert_key key;

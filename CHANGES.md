@@ -1,6 +1,7 @@
 ### 0.1.16
 
 * git-like modules bundled into imaplet.commands library
+* sync up with Irmin 0.10.0
 
 ### 0.1.15
 

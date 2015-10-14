@@ -23,7 +23,7 @@
 open Lwt
 open Irmin_unix
 
-module Store = Irmin.Basic (Irmin_git.FS) (Irmin.Contents.String)
+module Store = Irmin_git.FS(Irmin.Contents.String)(Irmin.Ref.String)(Irmin.Hash.SHA1)
 module View = Irmin.View(Store)
 module Sync = Irmin.Sync(Store)
 
@@ -61,16 +61,9 @@ module ImapContents =
       end
   end
 
-(*let store = Irmin.basic (module Irmin_git.FS) (module ImapContents)*)
-
-let task msg =
-  let date = Int64.of_float (Unix.gettimeofday ()) in
-  let owner = "imaplet <imaplet@openmirage.org>" in
-  Irmin.Task.create ~date ~owner msg
-
 let create local =
   let config = Irmin_git.config ~root:local ~bare:true () in
-  Store.create config task
+  Store.Repo.create config >>= Store.master task
 
 let pull_exn ?depth upstream local =
   let msg = "Synching with upstream store" in
