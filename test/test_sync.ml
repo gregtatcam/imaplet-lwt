@@ -36,6 +36,9 @@ module ImapContents =
       )
   end
 
+module Store = Irmin_git.FS(ImapContents)(Irmin.Ref.String)(Irmin.Hash.SHA1)
+module Sync = Irmin.Sync(Store)
+
 let rec args i remote local depth =
   if i >= Array.length Sys.argv then
     remote, local, depth
@@ -56,11 +59,10 @@ let commands f =
     Printf.printf "usage: sync -remote-repo [url] -local-repo [path] [-depth x] \n%!"
 
 let fetch remote local depth =
-  let store = Irmin.basic (module Irmin_git.FS) (module ImapContents) in
   let config = Irmin_git.config ~root:local ~bare:true () in
-  Irmin.create store config task >>= fun t ->
+  Store.Repo.create config >>= Store.master task >>= fun store ->
   let upstream = Irmin.remote_uri remote in
-  Irmin.pull_exn (t "Syncing with upstream store") ?depth upstream `Merge
+  Sync.pull_exn (store "Syncing with upstream store") ?depth upstream `Merge
 
 let () =
   commands (fun remote local depth ->

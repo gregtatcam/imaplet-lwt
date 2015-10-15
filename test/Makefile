@@ -1,5 +1,5 @@
-sync: sync.ml
-	ocamlbuild -pkgs lwt,lwt.syntax,lwt.unix,irmin.unix sync.native
+test_sync: test_sync.ml
+	ocamlbuild -pkgs lwt,lwt.syntax,lwt.unix,irmin.unix test_sync.native
 
 dedup: dedup.ml
 	ocamlbuild -pkgs imaplet,imaplet.commands,imaplet.parsemail,lwt,lwt.syntax,lwt.unix dedup.native
