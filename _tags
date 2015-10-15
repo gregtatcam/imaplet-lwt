@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: 00321024bb8e078778f90566aa63dbcf)
+# DO NOT EDIT (digest: 0df90aa485d13f3c3f035d71e60070b1)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -61,7 +61,7 @@ true: annot, bin_annot
 "lib/commands/imap_cmd.cmx": for-pack(Commands)
 "lib/commands/imap_crypto.cmx": for-pack(Commands)
 "lib/commands/imaplet_dns.cmx": for-pack(Commands)
-"lib/commands/imaplet_gitl.cmx": for-pack(Commands)
+"lib/commands/gitl.cmx": for-pack(Commands)
 "lib/commands/imaplet_stun.cmx": for-pack(Commands)
 "lib/commands/imaplet_types.cmx": for-pack(Commands)
 "lib/commands/irmin_core.cmx": for-pack(Commands)

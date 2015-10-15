@@ -16,8 +16,8 @@ irvsfsio: irvsfsio.ml compress.ml compress.mli
 irvsfsio_cl: irvsfsio_cl.ml
 	ocamlbuild -pkgs lwt,lwt.syntax,lwt.unix irvsfsio_cl.native
 
-gitl: gitl.ml
-	ocamlfind ocamlopt -thread -o gitl -linkpkg -package unix,threads,lwt,lwt.syntax,lwt.unix,lwt.preemptive,zip,re,re.posix,imaplet,imaplet.commands gitl.ml
+test_gitl: test_gitl.ml
+	ocamlfind ocamlopt -thread -o gitl -linkpkg -package unix,threads,lwt,lwt.syntax,lwt.unix,lwt.preemptive,zip,re,re.posix,imaplet,imaplet.commands test_gitl.ml
 
 clean:
 	rm -rf *.cmx *.cmi *.o *.native _build 

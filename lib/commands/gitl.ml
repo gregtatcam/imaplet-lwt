@@ -10,37 +10,6 @@ exception InvalidArgument
 let gitreadt = ref 0.
 let gitcomprt = ref 0.
 
-module Key :
-  sig
-    type t = string list
-    val create : string list -> t
-    val of_unix : string -> t
-    val to_string : t -> string
-    val to_string_rev : t -> string
-    val remove_last : t -> t
-  end =
-    struct
-      type t = string list
-      let re = Re_posix.compile_pat "/"
-      let create t = t
-      let of_unix str =
-        Re.split re str
-      let to_string t =
-        String.concat "/" t
-      let to_string_rev t =
-        to_string (List.rev t)
-      let remove_last t =
-        let (_,key) =
-          List.fold_right (fun k (first,acc) ->
-            if first then
-              (false,acc)
-      else
-        (false,k :: acc)
-    ) t (true,[])
-    in
-    key
-end
-
 module Sha :
 sig
   type t
@@ -93,6 +62,46 @@ struct
     (t = t1)
   let is_empty t =
     t = empty
+end
+
+module Key :
+sig
+  type t = string list
+  val create : string list -> t
+  val of_unix : string -> t
+  val to_string : t -> string
+  val to_string_rev : t -> string
+  val remove_last : t -> t
+  val replace_wild : t -> Sha.t -> t
+  val add : t -> string -> t
+end =
+struct
+  type t = string list
+  let re = Re_posix.compile_pat "/"
+  let create t = t
+  let of_unix str =
+    Re.split re str
+  let to_string t =
+    String.concat "/" t
+  let to_string_rev t =
+    to_string (List.rev t)
+  let remove_last t =
+    let (_,key) =
+      List.fold_right (fun k (first,acc) ->
+        if first then
+          (false,acc)
+        else
+          (false,k :: acc)
+      ) t (true,[])
+    in
+    key
+  let replace_wild t sha =
+    if List.nth t ((List.length t) - 1) = "*" then
+      List.concat [remove_last t; [Sha.to_string sha]]
+    else
+      t
+  let add t k =
+    List.concat [t;[k]]
 end
 
 type commit =
@@ -233,6 +242,7 @@ sig
   val to_string : t -> string
   val to_object_string : t -> string
   val update_tree_entry :t -> string -> perm -> Sha.t -> t
+  val delete_tree_entry :t -> string -> t
   val empty : t
 end =
 struct
@@ -294,8 +304,11 @@ struct
     in
     List.sort (fun te te1 -> String.compare te.name te1.name) (List.rev (get 0 []))
 
+  let delete_tree_entry t name =
+    List.filter (fun te -> te.name <> name) t
+
   let update_tree_entry t name perm sha =
-    let t = List.filter (fun te -> te.name <> name) t in
+    let t = delete_tree_entry t name in
     List.sort (fun te te1 -> String.compare te.name te1.name) (List.{name;perm;sha} :: t)
 
   let to_string tree =
@@ -596,7 +609,7 @@ let find_sha_opt t ?(cache=default_cache) key =
   ) (function |Not_found -> return None|ex -> raise ex)
 
 (* does the key exist *)
-let mem t ?(cache=default_cache) key =
+let mem t key =
   find_sha_opt t key >>= function
   | Some _ -> return true
   | None -> return false
@@ -627,17 +640,20 @@ let read_exn t key =
   | Some v -> return v
   | None -> raise Not_found
 
-(* update/create value in key, write out updated tree,
- * returns sha of updated object and the root's tree sha
- * ASSUME ONE WRITER FOR NOW TBD
+(* update/create trees in the path 
+ * walk backward to build Merkle tree with updated sha's
+ * if deleting then all trees in the path must exist
+ * only leaf needs to be added/deleted, the rest are updates
  *)
-let update_ t ?with_cache key v =
-  if key = [] then
-    raise InvalidArgument;
-  let obj = Object.create t.root in
-  let v'sha = Object.blob_sha v in
+let update_tree t ?with_cache key op =
   let cache = match with_cache with | Some c -> c | None -> default_cache in
-  let update_tree k t =
+  let obj = Object.create t.root in
+  let update_tree_object k t name op =
+    let t =
+    match op with
+    | `Add (perm,sha) -> Tree.update_tree_entry t name perm sha
+    | `Delete -> Tree.delete_tree_entry t name
+    in
     if with_cache = None then
       Object.write obj (`Tree t)
     else (
@@ -646,45 +662,44 @@ let update_ t ?with_cache key v =
       return sha
     )
   in
-  find_sha_opt t ~cache key >>= function
-  (* same value already exists *)
-  | Some sha when Sha.equal sha v'sha -> return (sha,t.commit.tree)
-  | _ ->
-    (* need to update/create trees in the path 
-     * walk backward to build Merkle tree with updated sha's
-     * finally write commit and update head
-     *)
-    Lwt_list.fold_right_s (fun k (key,name,perm,sha) ->
-      if Sha.is_empty sha then ( (* leaf *)
-        Object.write ~sha:v'sha obj (`Blob v) >>= fun _ ->
-        let name = if k = "*" then Sha.to_string v'sha else k in (* hook, use sha as the name *)
-        return (Key.remove_last key,name,`Normal,v'sha)
-      ) else (
-        find_opt t key >>= function
-        | `Tree t ->
-          let t = Tree.update_tree_entry t name perm sha in
-          update_tree key t >>= fun sha ->
-          return (Key.remove_last key,k,`Dir,sha)
-        | `None ->
-          let t = Tree.update_tree_entry Tree.empty name perm sha in
-          update_tree key t >>= fun sha ->
-          return (Key.remove_last key,k,`Dir,sha)
-        | x -> raise_inv_obj "update_ " x
-      )
-    ) key (key,"",`Normal,Sha.empty) >>= fun (_,name,perm,sha) ->
-    (* if key is at the root, need to get the tree referenced by commit 
-     * support multi writer goes here TBD
-     *)
-    begin
-    Object.read obj t.commit.tree >>= function
-    | `Tree t ->
-      let t = Tree.update_tree_entry t name perm sha in
-      update_tree key t
-    | _ ->
-      let t = Tree.update_tree_entry Tree.empty name perm sha in
-      update_tree key t
-    end >>= fun sha ->
-    return (v'sha,sha)
+  Lwt_list.fold_right_s (fun k (path,name,op) ->
+    if path = key then ( (* leaf *)
+      (*let name = if k = "*" then Sha.to_string leaf'sha else k in (* hook, use
+       * sha as the name *)*)
+      return (Key.remove_last path,k,op)
+    ) else (
+      find_opt t path >>= function
+      | `Tree t -> update_tree_object path t name op >>= fun sha ->
+        return (Key.remove_last path,k,`Add (`Dir,sha)) (* only leaf could be
+        deleted/added, others add only *)
+      | `None -> update_tree_object key Tree.empty name op >>= fun sha ->
+        return (Key.remove_last path,k,`Add (`Dir,sha))
+      | x -> raise_inv_obj "update_ " x
+    )
+  ) key (key,"",op) >>= fun (_,name,op) ->
+  begin
+  Object.read obj t.commit.tree >>= function
+  | `Tree t -> update_tree_object key t name op
+  | _ -> update_tree_object key Tree.empty name op
+  end
+
+(* update/create value in key, write out updated tree,
+ * returns sha of updated object and the root's tree sha
+ * ASSUME ONE WRITER FOR NOW TBD
+ *)
+let update_ t ?with_cache key v =
+  if key = [] then
+    raise InvalidArgument;
+  let v'sha = Object.blob_sha v in
+  let obj = Object.create t.root in
+  Object.write ~sha:v'sha obj (`Blob v) >>= fun _ ->
+  update_tree t ?with_cache (Key.replace_wild key v'sha) (`Add (`Normal,v'sha)) >>= fun sha ->
+  return (v'sha,sha)
+
+let remove t key =
+  if key = [] then
+    raise InvalidArgument;
+  update_tree t key `Delete
 
 let commit t sha ~author ~message =
  (* to support multiple writers need to lock the HEAD, compare this commit 
@@ -715,6 +730,12 @@ let update_with_commit t ~author ~message key v =
   commit t sha author message >>= fun t ->
   return (v'sha,t)
 
+let remove_with_commit t ~author ~message key v =
+  if key = [] || author = "" || message = "" then
+    raise InvalidArgument;
+  remove t key >>= fun sha ->
+  commit t sha author message
+
 let to_string t =
   Printf.sprintf "head: %s\n%s\n" (Sha.to_string t.head.sha) (Commit.to_string t.commit)
 
@@ -722,3 +743,10 @@ let pretty_log t =
   let log = Log.create t.root in
   Log.read log >>= fun l ->
   return (Log.to_string l)
+
+let list t key =
+  find_opt t key >>= function
+  | `Blob _ -> return [key]
+  | `Tree tree ->
+    return (List.map (fun te -> Key.add key te.name) tree)
+  | x -> raise_inv_obj "list " x

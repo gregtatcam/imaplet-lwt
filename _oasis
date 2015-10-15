@@ -98,7 +98,7 @@ Library commands
                     Imap_cmd,
                     Imap_crypto,
                     Imaplet_dns,
-                    Imaplet_gitl,
+                    Gitl,
                     Imaplet_stun,
                     Imaplet_types,
                     Irmin_core,

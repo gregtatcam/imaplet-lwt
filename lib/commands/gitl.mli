@@ -42,6 +42,7 @@ sig
   val create : string list -> t
   val of_unix : string -> t
   val to_string : t -> string
+  val add : t -> string -> t
 end
 
 module Tree :
@@ -56,7 +57,7 @@ end
 
 val create : repo:string -> t Lwt.t
 
-val mem : t -> ?cache:tree Map.Make(String).t ref -> Key.t -> bool Lwt.t
+val mem : t -> Key.t -> bool Lwt.t
 
 val read_object : t -> Sha.t -> [`Blob of string|`Tree of tree|`Commit of
 commit|`Tag of string|`None] Lwt.t
@@ -72,10 +73,16 @@ val to_string : t -> string
  *)
 val update : t -> Key.t -> string -> (Sha.t*Sha.t) Lwt.t
 
+val remove : t -> Key.t -> Sha.t Lwt.t
+
 (* commit root's tree sha, return updated gitl *)
 val commit : t -> Sha.t -> author:string -> message:string -> t Lwt.t
 
 (* combines update and commit, return sha of updated object and updated gitl *)
 val update_with_commit : t -> author:string -> message:string -> Key.t -> string -> (Sha.t*t) Lwt.t
+
+val remove_with_commit : t -> author:string -> message:string -> Key.t -> string -> t Lwt.t
+
+val list : t -> Key.t -> Key.t list Lwt.t
 
 val pretty_log : t -> string list Lwt.t
