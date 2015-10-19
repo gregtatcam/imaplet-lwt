@@ -2,6 +2,7 @@
 
 * git-like modules bundled into imaplet.commands library
 * sync up with Irmin 0.10.0
+* integrated gitl as another storage type
 
 ### 0.1.15
 
