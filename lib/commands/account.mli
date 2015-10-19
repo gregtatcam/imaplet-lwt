@@ -15,10 +15,11 @@
  *)
 
 type acct_config = {
-  acct_data_store : [`Irmin|`Workdir|`Mailbox|`Maildir]; (* type of storage, irmin/maildir/workdir supported *)
+  acct_data_store : [`Irmin|`Workdir|`Mailbox|`Maildir|`Gitl]; (* type of storage, irmin/maildir/workdir supported *)
   acct_encrypt : bool; (* encrypt messages, default true *)
   acct_compress : bool; (* compress messages, but not attachments, default true *)
   acct_compress_attach : bool; (* compress attachments, default false *)
+  acct_compress_repo : bool; (* compress repo, default false *)
   acct_auth_required: bool; (* require user authentication, priv key encrypted with password, default true *)
   acct_maildir_parse: bool; (* parse message into MIME parts when in maildir storage format, default true *)
   acct_single_store: bool; (* single-store attachments in irmin and workdir format, default true *)

@@ -99,6 +99,7 @@ Library commands
                     Imap_crypto,
                     Imaplet_dns,
                     Gitl,
+                    Gitl_storage,
                     Imaplet_stun,
                     Imaplet_types,
                     Irmin_core,
@@ -267,6 +268,22 @@ Executable smtp_client
   CompiledObject  : native
   MainIs	  : smtp_client.ml
   BuildDepends	  : lwt,lwt.unix,lwt.syntax,imaplet,imaplet.commands
+
+Executable test_gitl
+  Build$:           flag(test)
+  Install	  : false
+  Path		  : test
+  CompiledObject  : native
+  MainIs	  : test_gitl.ml
+  BuildDepends	  : unix,threads,lwt,lwt.unix,lwt.syntax,lwt.preemptive,re,re.posix,imaplet,imaplet.commands
+
+Executable maildir_read
+  Build$:           flag(test)
+  Install	  : false
+  Path		  : test
+  CompiledObject  : native
+  MainIs	  : maildir_read.ml
+  BuildDepends	  : unix,threads,lwt,lwt.unix,lwt.syntax,lwt.preemptive,re,re.posix,imaplet,imaplet.commands
 
 Executable stun
   Build		  : true

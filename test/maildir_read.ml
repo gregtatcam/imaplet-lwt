@@ -25,10 +25,11 @@ let login user =
       Lwt_io.read_line_opt ic >>= function
       | Some line ->
         begin
-        let re = String.concat "" ["^"; user; ":.+:([^:]+):(irmin|maildir):a[tf]:e[tf]:c([tf])[tf]:sf:hf:mf$"] in
+        let re = String.concat "" ["^"; user; ":.+:([^:]+):(gitl|irmin|maildir):a[tf]:e[tf]:c([tf]+):sf:hf:mf$"] in
         try
           let subs = Re.exec (Re_posix.compile_pat re) line in
-          return (Some (Re.get subs 1, Re.get subs 2, if (Re.get subs 3) = "t" then true else false))
+          let inflate = try String.get (Re.get subs 3) 2 = 't' with Invalid_argument x -> false in
+          return (Some (Re.get subs 1, Re.get subs 2, inflate))
         with Not_found -> read()
         end
       | None -> return None
@@ -135,7 +136,7 @@ module type Maildir_intf =
 sig
   type t
 
-  val create : user:string -> repo:string -> mailbox:string -> t Lwt.t
+  val create : user:string -> repo:string -> mailbox:string -> inflate:bool -> t Lwt.t
 
   val read_index: t -> num:string -> (int * string) list Lwt.t
 
@@ -144,7 +145,7 @@ end
 
 module MaildirFile : Maildir_intf =
 struct
-  type t = {user:string; repo:string; mailbox:string}
+  type t = {user:string; repo:string; mailbox:string; inflate:bool}
 
   let get_dir t =
     if String.lowercase t.mailbox = "inbox" then
@@ -152,8 +153,8 @@ struct
     else
       Filename.concat t.repo ("." ^ t.mailbox)
 
-  let create ~user ~repo ~mailbox =
-    return {user;repo;mailbox}
+  let create ~user ~repo ~mailbox ~inflate =
+    return {user;repo;mailbox;inflate}
 
   let read_index t ~num =
     let file = Filename.concat (get_dir t) "imaplet.uidlst" in
@@ -180,38 +181,58 @@ struct
     )
 end
 
+module MaildirGitl : Maildir_intf =
+struct
+  type t = {user:string; repo:string; mailbox:string;
+  store:Gitl.t;inflate:bool}
+
+  let create_store repo inflate =
+    Gitl.create ~repo ~compress:inflate ()
+
+  let create ~user ~repo ~mailbox ~inflate =
+    create_store repo inflate >>= fun store ->
+    return {user;repo;mailbox;store;inflate}
+
+  let read_index t ~num =
+    catch(fun() ->
+    let mailbox = if (String.lowercase t.mailbox = "inbox") then "INBOX" else t.mailbox in
+    let key = ["INBOX";".index"] in
+    Gitl.read_exn t.store key >>= fun index_sexp_str ->
+    return (list_of_sexp
+    (fun i ->
+      (* change to same as maildir *)
+      let (file,uid) =
+        pair_of_sexp Sexp.to_string (fun b -> int_of_string (Sexp.to_string b)) i in
+      (uid,file)
+    ) (Sexp.of_string index_sexp_str))
+    )(fun ex -> Printf.printf "exception:%s\n%!" (Printexc.to_string ex);return[])
+
+  let read_message t ~id =
+    let key = ["INBOX";id] in
+    Gitl.read_exn t.store key
+end
+
 module MaildirIrmin : Maildir_intf =
 struct
-  (*module Store = Irmin.Basic (Irmin_git.FS) (Irmin.Contents.String)
-  module View = Irmin.View(Store)*)
+  module Store = Irmin_git.FS(Irmin.Contents.String)(Irmin.Ref.String)(Irmin.Hash.SHA1)
 
-  (*type t_ = {user:string; repo:string; mailbox:string; store:(string -> * View.db)}*)
-  type t = {user:string; repo:string; mailbox:string; store:Imaplet_gitl.t}
-
-  (*let task msg =
-    let date = Int64.of_float (Unix.gettimeofday ()) in
-    let owner = "imaplet <imaplet@openmirage.org>" in
-    Irmin.Task.create ~date ~owner msg
+  type t = {user:string; repo:string; mailbox:string; store:(string -> Store.t);inflate:bool}
 
   let create_store repo =
     let _config = Irmin_git.config
       ~root:repo
       ~bare:true () in
-    Store.create _config task*)
+    Store.Repo.create _config >>= Store.master task
 
-  let create_store repo =
-    Imaplet_gitl.create repo 
-
-  let create ~user ~repo ~mailbox =
+  let create ~user ~repo ~mailbox ~inflate =
     create_store repo >>= fun store ->
-    return {user;repo;mailbox;store}
+    return {user;repo;mailbox;store;inflate}
 
   let read_index t ~num =
     catch(fun() ->
     let mailbox = if (String.lowercase t.mailbox = "inbox") then "INBOX" else t.mailbox in
     let key = ["imaplet"; t.user; "mailboxes"; mailbox; "index"] in
-    (*Store.read_exn (t.store "reading") key >>= fun index_sexp_str ->*)
-    Imaplet_gitl.read_exn t.store key >>= fun index_sexp_str ->
+    Store.read_exn (t.store "reading") key >>= fun index_sexp_str ->
     return (list_of_sexp
     (fun i ->
       (* change to same as maildir *)
@@ -223,8 +244,7 @@ struct
 
   let read_message t ~id =
     let key = ["imaplet"; t.user; "storage";id] in
-    (*Store.read_exn (t.store "reading") key*)
-    Imaplet_gitl.read_exn t.store key
+    Store.read_exn (t.store "reading") key
 end
 
 module type MaildirReader_intf =
@@ -256,7 +276,7 @@ struct
   
   let read_files ~user ~repo ~mailbox ~writer ~num ~inflate =
     let (strm,push_strm) = Lwt_stream.create () in
-    M.create ~user ~repo ~mailbox >>= fun maildir ->
+    M.create ~user ~repo ~mailbox ~inflate >>= fun maildir ->
     M.read_index maildir ~num >>= fun uids ->
     let t = Unix.gettimeofday() in
     Lwt_list.iter_p (fun f -> f()) 
@@ -293,7 +313,7 @@ let () =
             begin
             imap l >>= function
             | `Fetch (tag,num) ->
-              let open Imaplet_gitl in
+              let open Gitl in
               begin
               try
                 readt := 0.;
@@ -305,6 +325,9 @@ let () =
                 begin
                 if store = "maildir" then (
                   let module MaildirReader = MakeMaildirReader(MaildirFile) in
+                  MaildirReader.read_files ~user ~repo ~mailbox ~writer:w ~num ~inflate
+                ) else if store = "gitl" then (
+                  let module MaildirReader = MakeMaildirReader(MaildirGitl) in
                   MaildirReader.read_files ~user ~repo ~mailbox ~writer:w ~num ~inflate
                 ) else (
                   let module MaildirReader = MakeMaildirReader(MaildirIrmin) in

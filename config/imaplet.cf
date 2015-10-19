@@ -74,7 +74,7 @@ pub_name server.pub
 # users path default datadir/imaplet
 #users_path ""
  
-# type of data storage like mailbox,mbox,irmin,workdir
+# type of data storage like mailbox,mbox,irmin,workdir,gitl
 data_store irmin
 
 # encrypt message
@@ -82,6 +82,10 @@ encrypt true
 
 # compress message, but not attachment
 compress true
+
+# compress repository, this is compression built into the repo, like git, 
+# for gitl it means no compression at all, for irmin means compression 0 (Irmin not implemented yet)
+compress_repo false
 
 # include mapped address in the Received email header
 stun_header false

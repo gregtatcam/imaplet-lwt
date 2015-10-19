@@ -15,6 +15,8 @@
  *)
 open Lwt
 
+type store_type = [`Irmin|`Mailbox|`Maildir|`Workdir|`Gitl]
+
 type imapConfig = {
   rebuild_irmin : bool; (* rebuild irminsule database on start up, default false *)
   inbox_path : string; (* inbox location, default /var/mail *)
@@ -36,10 +38,13 @@ type imapConfig = {
   key_name : string; (* private key file name, default server.key *)
   pub_name : string; (* public key file name, default server.pub *)
   users_path : string; (* users file path, default datadir/imaplet *)
-  data_store : [`Irmin|`Workdir|`Mailbox|`Maildir]; (* type of storage, irmin/maildir/workdir supported *)
+  data_store : store_type; (* type of storage,
+  irmin/maildir/workdir/gitl supported *)
   encrypt : bool; (* encrypt messages, default true *)
   compress : bool; (* compress messages, but not attachments, default true *)
   compress_attach : bool; (* compress attachments, default false *)
+  compress_repo : bool; (* repository compress, gitl only so far, should use
+  level 0 for irmin, default false *)
   user_cert_path : string; (* user's certificate/key location *)
   log : string; (* log location, default /var/log *)
   log_level:[`Error|`Info1|`Info2|`Info3|`Debug|`None]; (* log level, default error *)
@@ -88,6 +93,7 @@ let default_config = {
   encrypt = true;
   compress = true;
   compress_attach = false;
+  compress_repo = false;
   user_cert_path = "/var/mail/accounts/%user%/cert";
   log = "/var/log";
   log_level = `Error;
@@ -123,6 +129,10 @@ let validate_config config =
     let path = Regex.replace ~regx:"%user%.*$" ~tmpl:"" config.irmin_path in
     Utils.exists path Unix.S_DIR >>= fun res ->
     err res "Invalid Irminsule path in"
+  | `Gitl -> 
+    let path = Regex.replace ~regx:"%user%.*$" ~tmpl:"" config.irmin_path in
+    Utils.exists path Unix.S_DIR >>= fun res ->
+    err res "Invalid Gitl path in"
   | `Mailbox ->
     let path = Regex.replace ~regx:"%user%.*$" ~tmpl:"" config.inbox_path in
     Utils.exists path Unix.S_REG >>= fun res ->
@@ -217,7 +227,8 @@ let config_of_lines lines =
           let bval n v default = try bool_of_string v with _ -> log n v; default in
           let fval n v default = try float_of_string v with _ -> log n v; default in
           let stval n = function
-            |"irmin"->`Irmin|"mbox"->`Mailbox|"maildir"->`Maildir|"workdir"->`Workdir|_->log n v; `Irmin in
+            |"irmin"->`Irmin|"gitl"->`Gitl|"mbox"->`Mailbox|"maildir"->`Maildir|"workdir"->`Workdir
+            |_->log n v; `Irmin in
           match n with 
           | "imap_name" -> {acc with imap_name = v }
           | "rebuild_irmin" -> {acc with rebuild_irmin = bval n v false}
@@ -249,6 +260,7 @@ let config_of_lines lines =
           | "encrypt" -> {acc with encrypt = (bval n v true)}
           | "compress" -> {acc with compress = (bval n v true)}
           | "compress_attach" -> {acc with compress_attach = (bval n v true)}
+          | "compress_repo" -> {acc with compress_repo = (bval n v false)}
           | "auth_required" -> {acc with auth_required = (bval n v true)}
           | "user_cert_path" -> {acc with user_cert_path = v}
           | "idle_interval" -> {acc with idle_interval = fval n v 120.}
@@ -302,5 +314,5 @@ let srv_config =
   let config = config_of_lines lines in
   assert ((config.data_store = `Mailbox && config.inbox_path <> "" ||
   config.data_store = `Maildir) && config.mail_path <> "" ||
-  config.data_store = `Irmin || config.data_store = `Workdir);
+  config.data_store = `Irmin || config.data_store = `Gitl || config.data_store = `Workdir);
   config

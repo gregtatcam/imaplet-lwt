@@ -32,6 +32,7 @@ let factory (mailboxt:amailboxt) ?mailbox2 mailbox =
   let open Storage in
   let open Mailbox_storage in
   let open Maildir_storage in
+  let open Gitl_storage in
   Utils.option_value_exn mailboxt.keys >>= fun keys ->
   match mailboxt.config.data_store with
   | `Irmin -> 
@@ -45,6 +46,9 @@ let factory (mailboxt:amailboxt) ?mailbox2 mailbox =
     ?mailbox2 mailbox keys
   | `Maildir ->
     build_strg_inst (module MaildirStorage) mailboxt.config (Utils.option_value_exn mailboxt.user)
+    ?mailbox2 mailbox keys
+  | `Gitl ->
+    build_strg_inst (module GitlStorage) mailboxt.config (Utils.option_value_exn mailboxt.user)
     ?mailbox2 mailbox keys
 
 (* inbox location * all mailboxes location * user * type of selected mailbox *)
@@ -68,7 +72,7 @@ let create config user pswd =
   let user = Regex.replace ~regx:"@.+$" ~tmpl:"" user in
   let (inbox_path,mail_path) = 
   match config.data_store with
-  | `Irmin|`Workdir -> "",""
+  | `Irmin|`Workdir|`Gitl -> "",""
   | `Mailbox|`Maildir -> (inbox_path, Configuration.mailboxes mail_path user)
   in
   {inbox_path;mail_path;user=Some user;user_with_domain;selected=`None;config; keys=Some (Ssl_.get_user_keys ~user ?pswd config)}

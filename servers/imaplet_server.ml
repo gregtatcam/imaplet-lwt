@@ -32,6 +32,8 @@ let rec args i net port ssl tls store encrypt compress compress_attach =
   let sval str = 
     if str = "irmin" then
       (`Irmin,"","")
+    else if str = "gitl" then
+      (`Gitl,"","")
     else if str = "workdir" then
       (`Workdir,"","")
     else if Regex.match_regex ~regx:"^mbox\\(:\\([^,]+\\),\\(.+\\)\\)?$" str then (
@@ -85,6 +87,7 @@ let log config =
   | `Workdir -> Log_.log `Info1 (Printf.sprintf "storage: workdir:%s\n" config.irmin_path)
   | `Maildir -> Log_.log `Info1 (Printf.sprintf "storage: maildir:%s\n" config.mail_path)
   | `Mailbox -> Log_.log `Info1 (Printf.sprintf "storage: mailbox:%s:%s\n" config.inbox_path config.mail_path)
+  | `Gitl -> Log_.log `Info1 (Printf.sprintf "storage: gitl:%s\n" config.irmin_path)
 
 (**
  * start the server

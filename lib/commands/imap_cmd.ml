@@ -215,7 +215,8 @@ let get_user_config config =
       {config with data_store = c.acct_data_store; encrypt = c.acct_encrypt;
       compress = c.acct_compress; compress_attach = c.acct_compress_attach;
       auth_required = c.acct_auth_required; maildir_parse = c.acct_maildir_parse; 
-      single_store = c.acct_single_store; hybrid = c.acct_hybrid;}
+      single_store = c.acct_single_store; hybrid = c.acct_hybrid;
+      compress_repo = c.acct_compress_repo}
   | None -> config
 
 (**

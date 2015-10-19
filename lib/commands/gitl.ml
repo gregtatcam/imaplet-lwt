@@ -1,3 +1,18 @@
+(*
+ * Copyright (c) 2013-2016 Gregory Tsipenyuk <gregtsip@cam.ac.uk>
+ * 
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ *)
 open Lwt
 open Nocrypto.Hash
 
@@ -71,9 +86,13 @@ sig
   val of_unix : string -> t
   val to_string : t -> string
   val to_string_rev : t -> string
-  val remove_last : t -> t
+  val parent : t -> t
   val replace_wild : t -> Sha.t -> t
   val add : t -> string -> t
+  val last : t -> string
+  val empty : t
+  val is_empty : t -> bool
+  val equal : t -> t -> bool
 end =
 struct
   type t = string list
@@ -82,10 +101,10 @@ struct
   let of_unix str =
     Re.split re str
   let to_string t =
-    String.concat "/" t
+    ("/" ^ String.concat "/" t)
   let to_string_rev t =
     to_string (List.rev t)
-  let remove_last t =
+  let parent t =
     let (_,key) =
       List.fold_right (fun k (first,acc) ->
         if first then
@@ -97,11 +116,18 @@ struct
     key
   let replace_wild t sha =
     if List.nth t ((List.length t) - 1) = "*" then
-      List.concat [remove_last t; [Sha.to_string sha]]
+      List.concat [parent t; [Sha.to_string sha]]
     else
       t
   let add t k =
     List.concat [t;[k]]
+  let last t =
+    List.nth t (List.length t - 1)
+  let empty = []
+  let is_empty t =
+    t = []
+  let equal t1 t2 =
+    t1 = t2
 end
 
 type commit =
@@ -113,7 +139,44 @@ type head = {repo:string;sha:Sha.t}
 type obj_type = [`Tree of tree|`Blob of string|`Commit of commit|`Tag of string|`None]
 type log =
 {parent:Sha.t;commit:Sha.t;author:string;message:string;postfix:string;date:string;utc:string}
-type t = {root:string;head:head;commit:commit}
+type cache_type = ([`Read |`Write] * tree) Map.Make(String).t ref
+type t = {root:string;head:head;commit:commit;compress:bool;
+  cache:cache_type option}
+
+let default_cache = ref (MapStr.empty)
+
+let clear_default_cache () =
+  default_cache := MapStr.empty;;
+
+let cache_exists cache k =
+  let cache = match cache with Some c->c|None->default_cache in
+  try
+    let (rw,v) = MapStr.find k !cache in
+      (List.fold_left (fun acc te -> acc ^ ":" ^ te.name) "" v);
+    Some v
+  with Not_found -> None
+
+let cache_content msg cache =
+  Printf.printf "%s%!" msg;
+  MapStr.iter (fun k v -> 
+    let (_,v) = v in
+    Printf.printf "-- cache content %s %s\n%!" k
+      (List.fold_left (fun acc te-> acc ^ ":" ^ te.name) "" v)
+  ) !cache
+
+(* read can only update read
+ * write can update read and write
+ *)
+let add_cache cache k v =
+  let cache = match cache with Some c->c|None->default_cache in
+  let (rw,_) = v in
+  try 
+    let (_rw,_) = MapStr.find k !cache in
+    if rw = `Write || rw = _rw then
+      cache := MapStr.add k v !cache
+    else
+      ()
+  with Not_found -> cache := MapStr.add k v !cache
 
 let raise_inv_obj msg = function
   | `Blob _ -> raise (InvalidObject (msg ^ "blob"))
@@ -151,6 +214,12 @@ let read_file_inflate ?(preempt=false) file =
   gitcomprt := !gitcomprt +. (Unix.gettimeofday() -. t1);
   return content
 
+let read_ ?(compress=false) ?(preempt=false) file =
+  if compress then
+    read_file_inflate ~preempt file
+  else
+    read_file file
+
 let write_file ?(append=false) file content=
   let open Unix in
   let flags =
@@ -162,10 +231,16 @@ let write_file ?(append=false) file content=
   Lwt_io.with_file ~flags ~mode:Lwt_io.Output file (fun oc ->
     Lwt_io.write oc content)
 
-let write_file_deflate ?(preempt=false) file content =
+let write_file_deflate ?(append=false) ?(preempt=false) file content =
   let compress ()= Imap_crypto.do_compress ~header:true content in
   preemptive ~preempt compress >>= fun content ->
-  write_file file content
+  write_file ~append file content
+
+let write_ ?(append=false) ?(preempt=false) ?(compress=false) file content =
+  if compress then
+    write_file_deflate ~append ~preempt file content
+  else
+    write_file ~append file content
 
 module Commit :
 sig
@@ -243,6 +318,7 @@ sig
   val to_object_string : t -> string
   val update_tree_entry :t -> string -> perm -> Sha.t -> t
   val delete_tree_entry :t -> string -> t
+  val rename_tree_entry :t -> src:string -> dest:string -> t
   val empty : t
 end =
 struct
@@ -288,6 +364,9 @@ struct
 
   let empty = []
 
+  let trsort te te1 =
+    String.compare te.name te1.name
+
   let create content =
     let len = String.length content in
     let rec get pos entries =
@@ -302,14 +381,19 @@ struct
         get (pos + 20) ({perm=perm_of_string perm;name;sha} :: entries)
       )
     in
-    List.sort (fun te te1 -> String.compare te.name te1.name) (List.rev (get 0 []))
+    List.sort trsort (List.rev (get 0 []))
 
   let delete_tree_entry t name =
     List.filter (fun te -> te.name <> name) t
 
   let update_tree_entry t name perm sha =
     let t = delete_tree_entry t name in
-    List.sort (fun te te1 -> String.compare te.name te1.name) (List.{name;perm;sha} :: t)
+    List.sort trsort ({name;perm;sha} :: t)
+
+  let rename_tree_entry t ~src ~dest =
+    if List.exists (fun te -> te.name = src) t = false then raise InvalidArgument;
+    if List.exists (fun te -> te.name = dest) t then raise InvalidArgument;
+    List.sort trsort (List.map (fun te -> if te.name = src then {te with name=dest} else te) t)
 
   let to_string tree =
     String.concat "\n" (List.map (fun e -> 
@@ -326,21 +410,22 @@ end
 module Object :
 sig
   type t
-  val create : string -> t
+  val create : ?compress:bool -> string -> t
   val read : t -> Sha.t -> obj_type Lwt.t
-  val write : t -> ?sha:Sha.t -> [`Blob of string|`Tree of Tree.t|
+  val write : t -> [`Blob of string|`Tree of Tree.t|
     `Commit of Commit.t|`Tag of string] -> Sha.t Lwt.t
   val blob_sha : string -> Sha.t
   val tree_sha : tree -> Sha.t
   val exists : t -> Sha.t -> bool Lwt.t
 end =
 struct
-  type t = string
+  type t = {root:string;compress:bool}
 
-  let create root = root
+  let create ?(compress=false) root = 
+    {root;compress}
 
   let file_from_sha t sha =
-    fconcat t ["objects"; Sha.prefix sha; Sha.postfix sha]
+    fconcat t.root ["objects"; Sha.prefix sha; Sha.postfix sha]
 
 (* read object type/content *)
   let read t sha =
@@ -349,7 +434,7 @@ struct
     else
     catch (fun () ->
       let file = file_from_sha t sha in
-      read_file_inflate file >>= fun obj ->
+      read_ ~compress:t.compress file >>= fun obj ->
       let subs = Re.exec 
         (Re_posix.compile_pat "^(blob|tree|commit|tag) ([0-9]+)\000") obj in
       let obj_type = Re.get subs 1 in
@@ -364,7 +449,10 @@ struct
         return (`Commit commit)
       | "tag" -> return (`Tag content)
       | x -> raise (InvalidObject x)
-    ) (fun ex -> Printf.printf "exception: %s:\n%!" (Printexc.to_string ex); return `None)
+    ) (function
+        | Unix.Unix_error (e,f,a) when e = Unix.ENOENT -> return `None
+        | ex -> Printf.printf "exception read sha: %s %s:\n%!" (Sha.to_string sha) 
+          (Printexc.to_string ex); return `None)
 
   let make_obj obj =
     match obj with
@@ -386,23 +474,19 @@ struct
 
   let tree_sha t = obj_sha (`Tree t)
 
-  let write t ?sha obj =
+  let write t obj =
     let str = make_obj obj in
-    let sha = 
-      match sha with
-      | Some sha -> sha
-      | None -> Sha.of_string str
-    in
+    let sha = Sha.of_string str in
     let file = file_from_sha t sha in
     catch (fun () ->
-      write_file_deflate file str 
+      write_ ~compress:t.compress file str 
     ) (function |Unix.Unix_error (e,f,a) when e = Unix.ENOENT ->
       let dir = Filename.dirname file in
       Lwt_unix.mkdir dir 0o751 >>= fun () ->
-      write_file_deflate file str 
+      write_ ~compress:t.compress file str 
       | e -> raise e
     ) >>= fun () ->
-    return (Sha.of_string str)
+    return sha
 
   let exists t sha =
     let file = file_from_sha t sha in
@@ -481,7 +565,7 @@ struct
       ) l
     )
     ) (function |Unix.Unix_error (e,f,a) when e = Unix.ENOENT -> return [] | ex -> 
-      Printf.printf "exception: %s\n%!" (Printexc.to_string ex); raise ex)
+      Printf.printf "exception read log: %s\n%!" (Printexc.to_string ex); raise ex)
 
   let to_string l =
     let open Unix in
@@ -513,11 +597,11 @@ struct
 end
 
 let read_object t sha =
-  let obj = Object.create t.root in
+  let obj = Object.create ~compress:t.compress t.root in
   Object.read obj sha
 
 let write_object t obj =
-  let t = Object.create t.root in
+  let t = Object.create ~compress:t.compress t.root in
   Object.write t obj
 
 let init root =
@@ -549,89 +633,89 @@ let init root =
   ) else 
     return false
 
-let create ~repo = 
+(* if cache is provided then updated tree objects are written to cache, commit
+ * has to be explicitly called to write the objects to the FS
+ * should only write updated tree (i.e. read but not updated should not be
+ * written), also need sha of the tree so that it is not calcuted again
+ * TBD
+ *)
+let create ?cache ?(compress=false) ~repo () = 
   let root = Filename.concat repo ".git" in
   init root >>= fun inited ->
   if inited then (
-    return {root;head=Head.empty repo;commit=Commit.empty}
+    return {root;head=Head.empty repo;commit=Commit.empty;compress;cache}
   ) else (
     Head.create repo >>= fun head ->
     if Sha.is_empty head.sha then (
-      return {root;head;commit=Commit.empty}
+      return {root;head;commit=Commit.empty;compress;cache}
     ) else (
-      let o = Object.create root in
+      let o = Object.create ~compress root in
       Object.read o head.sha >>= function
       | `Commit commit ->
-        return {root;head;commit}
+        return {root;head;commit;compress;cache}
       | x -> raise_inv_obj "create " x
     )
   )
 
-let default_cache = ref (MapStr.empty)
-
-let clear_default_cache () =
-  default_cache := MapStr.empty;;
-
-let cache_exists cache k v =
-  MapStr.exists (fun _k _v ->
-    if k = _k then (
-      v := _v;
-      true
-    ) else
-      false
-  ) !cache
-
-let add_cache cache k v =
-  cache := MapStr.add k v !cache
-
-(* find tree/blob's object corresponding to the key *)
-let find_sha_opt t ?(cache=default_cache) key = 
+(* find tree/blob's sha corresponding to the key 
+ * traverse the tree starting with the root
+ * search for child in parent, try the cache first.
+ * if found then go to the next level down
+ * add to cache if needed
+ * if not found then raise
+ *)
+let find_sha_opt t key = 
+  (* start with the root *)
+  let parent = Key.empty in
+  let sha = t.commit.tree in 
   catch (fun () ->
-    Lwt_list.fold_left_s (fun (key,sha) k ->
-      let obj's_tree = ref [] in
-      let key_str = Key.to_string_rev key in
-      if Sha.is_empty sha then (
+    Lwt_list.fold_left_s (fun (parent,sha) child ->
+      let parent_path = Key.to_string_rev parent in (* parent is built in reverse order *)
+      match cache_exists t.cache parent_path with
+      | Some obj's_tree ->
+        let te = List.find (fun te -> te.name = child) obj's_tree in
+        return (child::parent,te.sha)
+      | None when Sha.is_empty sha ->
         raise Not_found
-      ) else if cache_exists cache key_str obj's_tree then (
-        let te = List.find (fun te -> te.name = k) !obj's_tree in
-        return (k::key,te.sha)
-      ) else (
+      | _ ->
         read_object t sha >>= fun obj ->
         match obj with
-        | `Tree t -> (* only tree could be in the path *)
-          let te = List.find (fun te -> te.name = k) t in
-          add_cache cache key_str t;
-          return (k::key,te.sha)
+        | `Tree tr -> (* only tree could be in the path *)
+          let te = List.find (fun te -> te.name = child) tr in
+          add_cache t.cache parent_path (`Read,tr);
+          return (child::parent,te.sha)
         | x -> raise_inv_obj "find_sha_opt " x
-      )
-    ) ([],t.commit.tree) key >>= fun (_,sha) ->
-      return (Some sha)
+    ) (parent,sha) key >>= fun (_,sha) ->
+    return (Some sha)
   ) (function |Not_found -> return None|ex -> raise ex)
 
-(* does the key exist *)
-let mem t key =
+let find_sha_exn t key =
   find_sha_opt t key >>= function
-  | Some _ -> return true
-  | None -> return false
+  | Some sha -> return sha
+  | None -> raise InvalidKey
 
 (* find tree/blob's object corresponding to the key *)
-let find_opt t ?(cache=default_cache) key = 
+let find_obj_opt t key = 
   catch (fun () ->
-    find_sha_opt t ~cache key >>= function
-    | Some sha ->
-      begin
-      read_object t sha >>= function
-      | `Blob c -> return (`Blob c)
-      | `Tree t -> 
-        add_cache cache (Key.to_string key) t;
-        return (`Tree t)
-      | _ -> return `None
-      end
+    (* check the cache first *)
+    match cache_exists t.cache (Key.to_string key) with
+    | Some obj's_tree -> return (`Tree obj's_tree)
+    | None ->
+      find_sha_opt t key >>= function
+      | Some sha ->
+        begin
+        read_object t sha >>= function
+        | `Blob c -> return (`Blob c)
+        | `Tree tr -> 
+          add_cache t.cache (Key.to_string key) (`Read,tr);
+          return (`Tree tr)
+        | _ -> return `None
+        end
     | None -> return `None
   ) (function |Not_found -> return `None|ex -> raise ex)
 
 let read_opt t key = 
-  find_opt t key >>= function
+  find_obj_opt t key >>= function
   | `Blob c -> return (Some c)
   | _ -> return None
 
@@ -640,66 +724,73 @@ let read_exn t key =
   | Some v -> return v
   | None -> raise Not_found
 
+(* does the key exist *)
+let mem t key =
+  find_sha_opt t key >>= function
+  | Some _ -> return true
+  | None -> return false
+
 (* update/create trees in the path 
  * walk backward to build Merkle tree with updated sha's
- * if deleting then all trees in the path must exist
+ * if deleting/renaming then all sub-trees in the path must exist
  * only leaf needs to be added/deleted, the rest are updates
  *)
-let update_tree t ?with_cache key op =
-  let cache = match with_cache with | Some c -> c | None -> default_cache in
-  let obj = Object.create t.root in
-  let update_tree_object k t name op =
-    let t =
+let update_tree t key op =
+  let obj = Object.create ~compress:t.compress t.root in
+  let update_tree_object parent tr op =
+    let tr =
     match op with
-    | `Add (perm,sha) -> Tree.update_tree_entry t name perm sha
-    | `Delete -> Tree.delete_tree_entry t name
+    | `Add (name,perm,sha) -> Tree.update_tree_entry tr name perm sha
+    | `Rename (name,dest) -> Tree.rename_tree_entry tr ~src:name ~dest
+    | `Delete name -> Tree.delete_tree_entry tr name
     in
-    if with_cache = None then
-      Object.write obj (`Tree t)
-    else (
-      let sha = Object.tree_sha t in
-      add_cache cache (Key.to_string k) t;
+    if t.cache = None then (
+      Object.write obj (`Tree tr)
+    ) else (
+      let sha = Object.tree_sha tr in
+      add_cache t.cache (Key.to_string parent) (`Write,tr);
       return sha
     )
   in
-  Lwt_list.fold_right_s (fun k (path,name,op) ->
-    if path = key then ( (* leaf *)
-      (*let name = if k = "*" then Sha.to_string leaf'sha else k in (* hook, use
-       * sha as the name *)*)
-      return (Key.remove_last path,k,op)
-    ) else (
-      find_opt t path >>= function
-      | `Tree t -> update_tree_object path t name op >>= fun sha ->
-        return (Key.remove_last path,k,`Add (`Dir,sha)) (* only leaf could be
+  Lwt_list.fold_right_s (fun child (parent,op) ->
+    find_obj_opt t parent >>= function
+    | `Tree tr -> update_tree_object parent tr op >>= fun sha ->
+      return (Key.parent parent,`Add (child,`Dir,sha)) (* only leaf could be
         deleted/added, others add only *)
-      | `None -> update_tree_object key Tree.empty name op >>= fun sha ->
-        return (Key.remove_last path,k,`Add (`Dir,sha))
-      | x -> raise_inv_obj "update_ " x
-    )
-  ) key (key,"",op) >>= fun (_,name,op) ->
-  begin
-  Object.read obj t.commit.tree >>= function
-  | `Tree t -> update_tree_object key t name op
-  | _ -> update_tree_object key Tree.empty name op
-  end
+    | `None -> update_tree_object parent Tree.empty op >>= fun sha ->
+      return (Key.parent parent,`Add (child,`Dir,sha))
+    | x -> raise_inv_obj "update_ " x
+  ) key (key,op) >>= fun (root,op) ->
+  find_obj_opt t root >>= function (* update root *)
+  | `Tree tr -> update_tree_object root tr op
+  | _ -> update_tree_object root Tree.empty op
 
 (* update/create value in key, write out updated tree,
  * returns sha of updated object and the root's tree sha
  * ASSUME ONE WRITER FOR NOW TBD
  *)
-let update_ t ?with_cache key v =
-  if key = [] then
+let update_ t key v =
+  if Key.is_empty key then
     raise InvalidArgument;
-  let v'sha = Object.blob_sha v in
-  let obj = Object.create t.root in
-  Object.write ~sha:v'sha obj (`Blob v) >>= fun _ ->
-  update_tree t ?with_cache (Key.replace_wild key v'sha) (`Add (`Normal,v'sha)) >>= fun sha ->
+  let obj = Object.create ~compress:t.compress t.root in
+  Object.write obj (`Blob v) >>= fun v'sha ->
+  let child = if Key.last key = "*" then Sha.to_string v'sha else Key.last key in
+  update_tree t (Key.parent key) (`Add (child,`Normal,v'sha)) >>= fun sha ->
   return (v'sha,sha)
 
 let remove t key =
-  if key = [] then
+  if Key.is_empty key then
     raise InvalidArgument;
-  update_tree t key `Delete
+  update_tree t (Key.parent key) (`Delete (Key.last key))
+
+let rename t ~src ~dest =
+  if Key.is_empty src || Key.is_empty dest || Key.equal src dest then
+    raise InvalidArgument;
+  find_obj_opt t (Key.parent src) >>= function 
+  | `Tree tr ->
+    let te = List.find (fun te -> te.name = (Key.last src)) tr in
+    update_tree t (Key.parent dest) (`Add (Key.last dest,te.perm,te.sha))
+  | _ -> raise Not_found
 
 let commit t sha ~author ~message =
  (* to support multiple writers need to lock the HEAD, compare this commit 
@@ -711,7 +802,21 @@ let commit t sha ~author ~message =
   (* multiple parents? *)
   let commit = Commit.of_values ~tree:sha ~parent:[t.head.sha] ~author:""
       ~committer:"" ~message:"" in
-  let obj = Object.create t.root in
+  let obj = Object.create ~compress:t.compress t.root in
+  begin
+  match t.cache with
+  | Some cache ->
+    let tocommit = MapStr.fold (fun path (rw,tr) acc -> 
+      if rw = `Write then (
+        (path,tr)::acc 
+      ) else 
+        acc
+    ) !cache [] in
+    Lwt_list.iter_p (fun (path,tr) -> 
+      add_cache t.cache path (`Read,tr);
+      Object.write obj (`Tree tr) >>= fun _ -> return ()) tocommit
+  | None -> return ()
+  end >>= fun () ->
   Object.write obj (`Commit commit) >>= fun sha ->
   Head.update t.head sha >>= fun head ->
   let log = Log.create t.root in
@@ -724,16 +829,22 @@ let update t key v =
   update_ t key v
 
 let update_with_commit t ~author ~message key v =
-  if key = [] || author = "" || message = "" then
+  if author = "" || message = "" then
     raise InvalidArgument;
   update t key v >>= fun (v'sha,sha) ->
   commit t sha author message >>= fun t ->
   return (v'sha,t)
 
 let remove_with_commit t ~author ~message key v =
-  if key = [] || author = "" || message = "" then
+  if author = "" || message = "" then
     raise InvalidArgument;
   remove t key >>= fun sha ->
+  commit t sha author message
+
+let rename_with_commit t ~author ~message ~src ~dest v =
+  if author = "" || message = "" then
+    raise InvalidArgument;
+  rename t ~src ~dest >>= fun sha ->
   commit t sha author message
 
 let to_string t =
@@ -744,9 +855,14 @@ let pretty_log t =
   Log.read log >>= fun l ->
   return (Log.to_string l)
 
-let list t key =
-  find_opt t key >>= function
-  | `Blob _ -> return [key]
+let list t ?(filter_blob=true) key =
+  find_obj_opt t key >>= function
+  | `Blob _ -> if filter_blob then return [] else return [key]
   | `Tree tree ->
-    return (List.map (fun te -> Key.add key te.name) tree)
+    return (List.fold_right (fun te acc -> 
+      if filter_blob && te.perm = `Dir then 
+        (Key.add key te.name) :: acc
+      else
+        acc
+      ) tree [])
   | x -> raise_inv_obj "list " x

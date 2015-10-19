@@ -15,6 +15,8 @@
  *)
 open Lwt
 
+type store_type = [`Irmin|`Mailbox|`Maildir|`Workdir|`Gitl]
+
 type imapConfig = {
   rebuild_irmin : bool; (* rebuild irminsule database on start up, default false *)
   inbox_path : string; (* inbox location, default /var/mail *)
@@ -36,10 +38,12 @@ type imapConfig = {
   key_name : string; (* private key file name, default server.key *)
   pub_name : string; (* public key file name, default server.pub *)
   users_path : string; (* users file path, default datadir/imaplet *)
-  data_store : [`Irmin|`Mailbox|`Maildir|`Workdir]; (* type of storage, irmin,maildir,workdir supported *)
+  data_store : store_type; (* type of storage, irmin,maildir,workdir supported *)
   encrypt : bool; (* encrypt messages, default true *)
   compress : bool; (* compress messages, but not attachments, default true *)
   compress_attach : bool; (* compress attachments, default false *)
+  compress_repo : bool; (* repository compress, gitl only so far, should use
+  level 0 for irmin, default false *)
   user_cert_path : string; (* user's certificate/key location *)
   log : string; (* log location, default /var/log *)
   log_level:[`Error|`Info1|`Info2|`Info3|`Debug|`None]; (* log level, default error *)
@@ -67,7 +71,7 @@ val default_config : imapConfig
 val validate_config : imapConfig -> [`Ok|`Error of string] Lwt.t
 
 val update_config : imapConfig -> string option -> int option -> bool option ->
-  bool option -> ([`Irmin|`Mailbox|`Maildir|`Workdir] * string * string)
+  bool option -> (store_type * string * string)
   option -> bool option -> bool option -> bool option -> imapConfig
 
 val srv_config : imapConfig

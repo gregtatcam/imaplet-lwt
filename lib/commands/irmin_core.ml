@@ -1108,7 +1108,7 @@ module GitMailboxMake
       ) (init,0) listing
 
     (* assuming that "reference" and "mailbox" arguments in list command
-     * are converted into initial mailbox and regular expression to match
+     * are converted into initial mailbox and regular expression to match.
      * final mailbox to list is concat of the reference and mailbox minus wild
      * cards starting with the first delimeter followed by the wild card
      *)
