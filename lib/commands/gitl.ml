@@ -151,10 +151,10 @@ let clear_default_cache () =
 let cache_exists cache k =
   let cache = match cache with Some c->c|None->default_cache in
   try
-    let (rw,v) = MapStr.find k !cache in
-      (List.fold_left (fun acc te -> acc ^ ":" ^ te.name) "" v);
+    let (_,v) = MapStr.find k !cache in
     Some v
-  with Not_found -> None
+  with Not_found -> 
+    None
 
 let cache_content msg cache =
   Printf.printf "%s%!" msg;
