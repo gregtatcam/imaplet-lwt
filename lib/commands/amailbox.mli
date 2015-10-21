@@ -64,7 +64,10 @@ val subscribe : t -> string -> [`Error of string|`Ok] Lwt.t
 val unsubscribe : t -> string -> [`Error of string|`Ok] Lwt.t
 
 (** append message to the mailbox **)
+type append_strm_type = (t * string * string * int * mailboxFlags list option * Dates.ImapTime.t option) 
+val async_append : append_strm_type Lwt_stream.t -> unit Lwt.t
 val append : t -> string -> Lwt_io.input_channel -> Lwt_io.output_channel ->
+  (append_strm_type option -> unit) ->
   compressionAlgrthm option -> mailboxFlags list option -> Dates.ImapTime.t option ->
   literal -> ([`NotExists|`NotSelectable|`Eof of int|`Error of string|`Ok] Lwt.t)
 

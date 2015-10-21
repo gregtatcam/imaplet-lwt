@@ -139,6 +139,8 @@ let create config =
   validate_config config >>= function
   | `Ok ->
     begin
+    let (strm,push_append_strm) = Lwt_stream.create () in
+    async (fun () -> Amailbox.async_append strm);
     async (fun () -> Imap_cmd.maintenance config);
     init_all config >>= fun (cert,sock,unix_sock) ->
     let rec connect f msgt sock cert =
@@ -151,7 +153,7 @@ let create config =
           fun () ->
             init_connection msgt netw >>= fun() ->
             let ctx =
-              {id;client_id=ref [];commands=ref (Stack.create());
+              {id;client_id=ref [];commands=ref (Stack.create()); push_append_strm;
                 netr=ref netr;netw=ref netw;state=ref
                 Imaplet_types.State_Notauthenticated;mailbox=ref (Amailbox.empty());
                 starttls=starttls config sock_c;highestmodseq=ref `None;

@@ -31,4 +31,5 @@ type context = {
   client_timed_out: Lwt_mutex.t;
   user_logout: Lwt_mutex.t;
   compression: Imaplet_types.compressionAlgrthm option ref;
+  push_append_strm: (Amailbox.append_strm_type option -> unit)
 }

@@ -430,7 +430,7 @@ let handle_append context mailbox flags date literal =
     response context None (Resp_No(None,"Max message size")) None
   else (
     Amailbox.append context.!mailbox mailbox context.!netr context.!netw
-    context.!compression flags date literal >>= function
+    context.push_append_strm context.!compression flags date literal >>= function
       | `NotExists -> response context None (Resp_No(Some RespCode_Trycreate,"")) None
       | `NotSelectable -> response context None (Resp_No(Some RespCode_Trycreate,"Noselect")) None
       | `Error e -> response context None (Resp_No(None,e)) None

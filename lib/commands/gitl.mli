@@ -46,7 +46,7 @@ type perm = [`Normal|`Exec|`Link|`Dir|`Commit]
 type tree_entry = {perm:perm;name:string;sha:Sha.t}
 type tree = tree_entry list
 type obj_type = [`Tree of tree|`Blob of string|`Commit of commit|`Tag of string|`None]
-type cache_type = ([`Read |`Write] * tree) Map.Make(String).t ref
+type cache_type = ([`Read |`Write] * string * tree) Map.Make(String).t ref
 
 module Commit :
 sig
@@ -126,3 +126,8 @@ val update_tree : t -> Key.t ->
 val find_sha_opt : t -> Key.t -> Sha.t option Lwt.t
 
 val find_sha_exn : t -> Key.t -> Sha.t Lwt.t
+
+val write_ : ?append:bool -> ?preempt:bool -> ?compress:bool -> file:string ->
+  string -> unit Lwt.t
+
+val read_ : ?compress:bool -> ?preempt:bool -> string -> string Lwt.t

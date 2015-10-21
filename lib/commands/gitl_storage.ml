@@ -48,6 +48,13 @@ module GitlStorage : Storage_intf with type t = storage_ =
 struct
   type t = storage_
 
+  let get_key t = function
+    | `Index -> Key.add t.mailbox ".index"
+    | `Metamessage id -> Key.add t.mailbox ("/.metamessage/" ^ id)
+    | `Metamailbox -> Key.add t.mailbox ".metamailbox"
+    | `Message id -> Key.add t.mailbox ("/.message/" ^ id)
+    | `Subscription -> Key.of_unix ".subscription"
+
   (* user,mailbox,keys *)
   let create config user mailbox keys =
     let cache = ref MapStr.empty in
@@ -55,14 +62,13 @@ struct
     return {store=ref store;user;mailbox=Key.of_unix mailbox;config;keys;
     index=ref [];gitl_cache=cache;root_tree=ref Sha.empty}
 
-  let update_with_sha t ?(root=false) k v =
-    let key = if root then [k] else Key.add t.mailbox k in
-    Gitl.update t.!store key v >>= fun (v'sha,sha) ->
+  let update_with_sha t k v =
+    Gitl.update t.!store k v >>= fun (v'sha,sha) ->
     t.root_tree := sha;
     return (v'sha,sha)
 
-  let update t ?(root=false) k v =
-    update_with_sha t ~root k v >>= fun (_,_) ->
+  let update t k v =
+    update_with_sha t k v >>= fun (_,_) ->
     return ()
 
   let remove ?key t =
@@ -77,7 +83,7 @@ struct
   (* read message's index *)
   let read_index t =
     if t.!index = [] then (
-      Gitl.read_exn t.!store (Key.add t.mailbox ".index") >>= fun sexp_str ->
+      Gitl.read_exn t.!store (get_key t `Index) >>= fun sexp_str ->
       let uids = list_of_sexp
         (fun i ->
           pair_of_sexp (fun a -> Sexp.to_string a) (fun b -> int_of_string (Sexp.to_string b)) i
@@ -91,7 +97,7 @@ struct
   (* update message's index *)
   let update_index t uids =
     t.index := uids;
-    update t ".index"
+    update t (get_key t `Index)
       (Sexp.to_string (
         sexp_of_list (
           fun i -> sexp_of_pair 
@@ -108,7 +114,7 @@ struct
 
   (* status *)
   let status t =
-    Gitl.read_exn t.!store (Key.add t.mailbox ".meta") >>= fun sexp_str ->
+    Gitl.read_exn t.!store (get_key t `Metamailbox) >>= fun sexp_str ->
     let sexp = Sexp.of_string sexp_str in
     return (mailbox_metadata_of_sexp sexp)
 
@@ -125,13 +131,11 @@ struct
     let metadata = empty_mailbox_metadata ~uidvalidity:(new_uidvalidity())()
       ~selectable:true in
     let sexp = sexp_of_mailbox_metadata metadata in
-    update t ".meta" (Sexp.to_string sexp) >>= fun _ ->
+    update t (get_key t `Metamailbox) (Sexp.to_string sexp) >>= fun _ ->
     update_index t []
 
   (* delete mailbox *)
   let delete t =
-    remove ~key:".meta" t >>
-    remove ~key:".index" t >>
     remove t
 
   (* rename mailbox1 mailbox2 *)
@@ -141,7 +145,7 @@ struct
     return ()
 
   let read_subscription t =
-    Gitl.read_opt t.!store [".subscription"] >>= function
+    Gitl.read_opt t.!store (get_key t `Subscription) >>= function
     | Some sexp_str -> return (Utils.list_of_str_sexp sexp_str)
     | None -> return []
 
@@ -149,14 +153,14 @@ struct
   let subscribe t =
     read_subscription t >>= fun l ->
     let mailbox = Key.to_string t.mailbox in
-    update t ~root:true ".subscription" (Utils.str_sexp_of_list (
+    update t (get_key t `Subscription) (Utils.str_sexp_of_list (
       mailbox :: (List.filter (fun e -> e <> mailbox) l)))
 
   (* unsubscribe mailbox *)
   let unsubscribe t =
     read_subscription t >>= fun l ->
     let mailbox = Key.to_string t.mailbox in
-    update t ~root:true ".subscription" (Utils.str_sexp_of_list (
+    update t (get_key t `Subscription) (Utils.str_sexp_of_list (
       (List.filter (fun e -> e <> mailbox) l)))
 
   (* list reference mailbox 
@@ -191,9 +195,9 @@ struct
   let append t message message_metadata =
     let (pub_key,_) = t.keys in
     Email_parse.do_encrypt pub_key t.config message >>= fun message ->
-    update_with_sha t "*" message >>= fun (v'sha,_) ->
+    update_with_sha t (get_key t (`Message "*")) message >>= fun (v'sha,_) ->
     let sha_str = Sha.to_string v'sha in
-    update t (".meta." ^ sha_str)
+    update t (get_key t (`Metamessage sha_str))
       (Sexp.to_string (sexp_of_mailbox_message_metadata message_metadata)) >>
     read_index t >>= fun index ->
     update_index t ((sha_str,message_metadata.uid) :: index)
@@ -226,7 +230,7 @@ struct
         return (`Ok ((List.length uids) - seq,uid,sha))
 
   let delete_ t k =
-    Gitl.remove t.!store (Key.add t.mailbox k) >>= fun sha ->
+    Gitl.remove t.!store k >>= fun sha ->
     t.root_tree := sha;
     return ()
 
@@ -235,14 +239,14 @@ struct
   let delete_message t pos =
     get_uid t pos >>= function
     | `Ok (_,uid,sha) ->
-      delete_ t sha >>
-      delete_ t (".meta." ^ sha) >>
+      delete_ t (get_key t (`Message sha)) >>
+      delete_ t (get_key t (`Metamessage sha)) >>
       read_index t >>= fun uids ->
       update_index t (List.filter (fun (_,u) -> u <> uid) uids)
     | _ -> return ()
 
   let get_message_metadata t sha =
-    Gitl.read_exn t.!store (Key.add t.mailbox (".meta." ^ sha)) >>= fun sexp_str ->
+    Gitl.read_exn t.!store (get_key t (`Metamessage sha)) >>= fun sexp_str ->
     return (mailbox_message_metadata_of_sexp (Sexp.of_string sexp_str))
 
   (* fetch messages from selected mailbox
@@ -254,7 +258,7 @@ struct
       let open Parsemail in
       let lazy_read = Lazy.from_fun (fun () -> 
         let tm = Unix.gettimeofday () in
-        Gitl.read_exn t.!store (Key.add t.mailbox sha)  >>= fun message ->
+        Gitl.read_exn t.!store (get_key t (`Message sha))  >>= fun message ->
         Email_parse.message_unparsed_from_blob t.config t.keys message >>= fun message ->
         Stats.add_readt (Unix.gettimeofday() -. tm);
         return message
@@ -288,13 +292,13 @@ struct
   let store t pos message_metadata =
     get_uid t pos >>= function
     | `Ok (_,_,sha) -> 
-      update t (".meta." ^ sha)
+      update t (get_key t (`Metamessage sha))
         (Sexp.to_string (sexp_of_mailbox_message_metadata message_metadata))
     | _ -> return ()
 
   (* store mailbox metadata *)
   let store_mailbox_metadata t metadata =
-    update t ".meta" (Sexp.to_string (sexp_of_mailbox_metadata metadata))
+    update t (get_key t `Metamailbox) (Sexp.to_string (sexp_of_mailbox_metadata metadata))
 
   (* copy message from the source mailbox at the given position 
    * to the destination mailbox
@@ -302,11 +306,12 @@ struct
   let copy t pos t2 message_metadata =
     get_uid t pos >>= function
     | `Ok (_,_,sha) -> (* message's sha *)
-      Gitl.find_sha_exn t.!store (Key.add t.mailbox (".meta." ^ sha)) >>= fun meta_sha ->
-      Gitl.update_tree t.!store t2.mailbox (`Add (".meta",`Normal,meta_sha)) >>= fun _ -> 
-      Gitl.update_tree t.!store t2.mailbox (`Add (sha,`Normal,Sha.of_hex_string sha)) >>= fun sha -> 
-      t.root_tree := sha;
-      return ()
+      update t2 (get_key t2 (`Metamessage sha))
+        (Sexp.to_string (sexp_of_mailbox_message_metadata message_metadata)) >>
+      update_tree t2.!store (Key.add t2.mailbox "metamessage") 
+        (`Add (sha,`Dir,Sha.of_hex_string sha)) >>= fun _ ->
+      read_index t2 >>= fun index ->
+      update_index t2 ((sha,message_metadata.uid) :: index)
     | _ -> return ()
 
   (* all operations that update the mailbox have to be completed with commit

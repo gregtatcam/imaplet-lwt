@@ -20,6 +20,7 @@ open Irmin_storage
 
 exception InvalidStorageType
 
+
 type selection = [`Select of string | `Examine of string | `None]
 
 type amailboxt = 
@@ -34,25 +35,24 @@ let factory (mailboxt:amailboxt) ?mailbox2 mailbox =
   let open Maildir_storage in
   let open Gitl_storage in
   Utils.option_value_exn mailboxt.keys >>= fun keys ->
+  let config = mailboxt.config in
+  let user = Utils.option_value_exn mailboxt.user in
   match mailboxt.config.data_store with
   | `Irmin -> 
-    build_strg_inst (module IrminStorage) mailboxt.config (Utils.option_value_exn mailboxt.user)
-    ?mailbox2 mailbox keys
+    build_strg_inst (module IrminStorage) config user ?mailbox2 mailbox keys
   | `Workdir -> 
-    build_strg_inst (module GitWorkdirStorage) mailboxt.config (Utils.option_value_exn mailboxt.user)
-    ?mailbox2 mailbox keys
+    build_strg_inst (module GitWorkdirStorage) config user ?mailbox2 mailbox keys
   | `Mailbox ->
-    build_strg_inst (module MailboxStorage) mailboxt.config (Utils.option_value_exn mailboxt.user)
-    ?mailbox2 mailbox keys
+    build_strg_inst (module MailboxStorage) config user ?mailbox2 mailbox keys
   | `Maildir ->
-    build_strg_inst (module MaildirStorage) mailboxt.config (Utils.option_value_exn mailboxt.user)
-    ?mailbox2 mailbox keys
+    build_strg_inst (module MaildirStorage) config user ?mailbox2 mailbox keys
   | `Gitl ->
-    build_strg_inst (module GitlStorage) mailboxt.config (Utils.option_value_exn mailboxt.user)
-    ?mailbox2 mailbox keys
+    build_strg_inst (module GitlStorage) config user ?mailbox2 mailbox keys
 
 (* inbox location * all mailboxes location * user * type of selected mailbox *)
 type t = amailboxt
+
+type append_strm_type = (t * string * string * int * mailboxFlags list option * Dates.ImapTime.t option) 
 
 let selected_mbox mailboxt =
   match mailboxt.selected with
@@ -303,50 +303,66 @@ let get_message_from_client reader writer compression literal =
 let find_fl flags fl =
   Utils.list_find flags (fun f -> f = fl)
 
+let async_append strm =
+  let rec append () =
+    Lwt_stream.get strm >>= function
+    | Some (mailboxt,mailbox,message,size,flags,date) ->
+    begin
+    factory mailboxt mailbox >>= fun (module Mailbox) ->
+    Mailbox.MailboxStorage.exists Mailbox.this >>= function
+    | `Mailbox -> 
+    let flags = 
+    match flags with
+    | None -> [Flags_Recent]
+    | Some flags -> (Flags_Recent :: flags)
+    in
+    Mailbox.MailboxStorage.status Mailbox.this >>= fun mailbox_metadata ->
+    let modseq = Int64.add mailbox_metadata.modseq Int64.one in
+    let message_metadata = {
+      uid = mailbox_metadata.uidnext;
+      modseq;
+      size;
+      internal_date = Utils.option_value date ~default:(Dates.ImapTime.now());
+      flags;
+    } in
+    let seen = find_fl flags Flags_Seen in
+    let mailbox_metadata = { mailbox_metadata with
+      uidnext = mailbox_metadata.uidnext + 1;
+      count = mailbox_metadata.count + 1;
+      recent = mailbox_metadata.recent + 1;
+      unseen = 
+        if seen = false && mailbox_metadata.unseen = 0 then
+          mailbox_metadata.count + 1  
+        else
+          mailbox_metadata.unseen
+      ;
+      nunseen = 
+        if seen = false then
+          mailbox_metadata.nunseen + 1
+        else
+          mailbox_metadata.unseen
+      ;
+      modseq
+    } in
+    Mailbox.MailboxStorage.store_mailbox_metadata Mailbox.this mailbox_metadata >>
+    Mailbox.MailboxStorage.append Mailbox.this message message_metadata >>
+    Mailbox.MailboxStorage.commit Mailbox.this >>
+    append ()
+    | _ -> append ()
+    end
+    | None -> return ()
+  in
+  append ()
+
 (* append message to mailbox *)
-let append mailboxt mailbox reader writer compression flags date literal =
+let append mailboxt mailbox reader writer push_append_strm compression flags date literal =
   factory mailboxt mailbox >>= fun (module Mailbox) ->
   Mailbox.MailboxStorage.exists Mailbox.this >>= function
     | `No -> return (`NotExists)
     | `Folder -> return (`NotSelectable)
     | `Mailbox -> 
       get_message_from_client reader writer compression literal >>= fun (message,size) ->
-      let flags = 
-      match flags with
-      | None -> [Flags_Recent]
-      | Some flags -> (Flags_Recent :: flags)
-      in
-      Mailbox.MailboxStorage.status Mailbox.this >>= fun mailbox_metadata ->
-      let modseq = Int64.add mailbox_metadata.modseq Int64.one in
-      let message_metadata = {
-        uid = mailbox_metadata.uidnext;
-        modseq;
-        size;
-        internal_date = Utils.option_value date ~default:(Dates.ImapTime.now());
-        flags;
-      } in
-      let seen = find_fl flags Flags_Seen in
-      let mailbox_metadata = { mailbox_metadata with
-        uidnext = mailbox_metadata.uidnext + 1;
-        count = mailbox_metadata.count + 1;
-        recent = mailbox_metadata.recent + 1;
-        unseen = 
-          if seen = false && mailbox_metadata.unseen = 0 then
-            mailbox_metadata.count + 1  
-          else
-            mailbox_metadata.unseen
-        ;
-        nunseen = 
-          if seen = false then
-            mailbox_metadata.nunseen + 1
-          else
-            mailbox_metadata.unseen
-        ;
-        modseq
-      } in
-      Mailbox.MailboxStorage.store_mailbox_metadata Mailbox.this mailbox_metadata >>
-      Mailbox.MailboxStorage.append Mailbox.this message message_metadata >>
-      Mailbox.MailboxStorage.commit Mailbox.this >>
+      push_append_strm (Some (mailboxt,mailbox,message,size,flags,date));
       return `Ok
 
 (* close selected mailbox *)

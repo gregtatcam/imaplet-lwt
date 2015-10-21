@@ -94,7 +94,7 @@ let main repo compress =
             remove t key >>= fun sha ->
             tree_sha := sha;
             loop t
-          | "update" ->
+          | "rename" ->
             let args = Re.get subs 3 in
             let subs = Re.exec (Re_posix.compile_pat "^([^ ]+) (.+)$") args in
             let src = Key.of_unix (Re.get subs 1) in
