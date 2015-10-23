@@ -170,11 +170,11 @@ let clear_default_cache () =
 let cache_exists cache ?sha k =
   let cache = match cache with Some c->c|None->default_cache in
   if MapStr.mem k !cache then (
-    Log_.log `Info3 (Printf.sprintf "cache exists %s\n%!" k);
+    Log_.log `Info3 (Printf.sprintf "cache exists %s\n" k);
     let (_,_,v) = MapStr.find k !cache in
      Some v
   ) else (
-    Log_.log `Info3 (Printf.sprintf "cache doesn't exist %s\n%!" k);
+    Log_.log `Info3 (Printf.sprintf "cache doesn't exist %s\n" k);
     None
   )
 
@@ -184,7 +184,7 @@ let cache_exists cache ?sha k =
 let add_cache cache k v =
   let cache = match cache with Some c->c|None->default_cache in
   let (rw,s,_) = v in
-  Log_.log `Info3 (Printf.sprintf "adding cache %s, %s\n%!" k s);
+  Log_.log `Info3 (Printf.sprintf "adding cache %s, %s\n" k s);
   if MapStr.mem k !cache then ( 
     let (_rw,_,_) = MapStr.find k !cache in
     if rw = `Write || rw = _rw then
@@ -805,7 +805,7 @@ let update_tree t key op =
  * ASSUME ONE WRITER FOR NOW TBD
  *)
 let update_ t key v =
-  Log_.log `Info3 (Printf.sprintf "updating %s, %d\n%!" (Key.to_string key) (String.length v));
+  Log_.log `Info3 (Printf.sprintf "updating %s, %d\n" (Key.to_string key) (String.length v));
   if Key.is_empty key then
     raise InvalidArgument;
   let obj = Object.create ~compress:t.compress t.root in
@@ -833,7 +833,7 @@ let commit t sha ~author ~message =
   * with the latest commit, if different then load the latest commit, merge,
   * write new commit with update parent, update HEAD, unlock HEAD TBD
   *)
-  Log_.log `Info3 "### Committing\n%!";
+  Log_.log `Info3 "### Committing\n";
   if author = "" || message = "" then
     raise InvalidArgument;
   (* multiple parents? *)
