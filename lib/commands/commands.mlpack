@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: 2cdfecbcf41cef3e9341ab0ae2a93242)
+# DO NOT EDIT (digest: aff8ec5df4395d5b326e98467a034943)
 Account
 Amailbox
 Configuration
@@ -10,6 +10,7 @@ Email_parse
 Fetchregex
 Imap_cmd
 Imap_crypto
+Imap_lock
 Imaplet_dns
 Gitl
 Gitl_storage
