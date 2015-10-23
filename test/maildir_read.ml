@@ -288,7 +288,7 @@ struct
         M.read_message maildir ~id:file >>= fun message ->
         let _ = timeit readt t in
         push_strm (Some message);
-        return()
+        Lwt_main.yield ()
       ) uids >>= fun () ->
       push_strm None;
       return ()
