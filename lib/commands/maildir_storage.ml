@@ -26,6 +26,10 @@ open Server_config
 
 exception EmptyPrivateKey
 
+let acct_lock_pool = ref MapStr.empty
+
+let pool_mutex = Lwt_mutex.create ()
+
 module MapStr = Map.Make(String)
 module MapFlag = Map.Make(
   struct
@@ -243,26 +247,34 @@ let update_message_file_name mailbox file metadata =
   Printf.sprintf "%s,S=%d,M=%s:2,%s" immute size 
     (Int64.to_string metadata.modseq) (flags_to_map_str mailbox metadata.flags)
 
+let with_lock path f =
+  let lock = Imap_lock.create pool_mutex acct_lock_pool in
+  Imap_lock.with_lock lock path f
+
 (* read mailbox metadata *)
 let read_mailbox_metadata path =
-  Utils.with_file ~lock:true path ~flags:[Unix.O_RDONLY] ~perms:0o660 ~mode:Lwt_io.Input 
-  ~f:(fun ci ->
-    Lwt_io.read ci >>= fun sexp_str ->
+  let open Unix in
+  with_lock path (fun () ->
+    Lwt_io.with_file path ~flags:[O_NONBLOCK;O_RDONLY] ~mode:Lwt_io.Input 
+    (fun ci -> Lwt_io.read ci) >>= fun sexp_str ->
     return (mailbox_metadata_of_sexp (Sexp.of_string sexp_str))
-  ) 
+  )
 
 (* write mailbox metadata *)
 let write_mailbox_metadata path metadata =
-  Utils.with_file ~lock:true path ~flags:[Unix.O_WRONLY;Unix.O_TRUNC] ~perms:0o660 ~mode:Lwt_io.Output 
-  ~f:(fun co ->
-    Lwt_io.write co (Sexp.to_string (sexp_of_mailbox_metadata metadata)) >>
-    Lwt_io.flush co
-  ) 
+  let open Unix in
+  with_lock path (fun () ->
+    Lwt_io.with_file path ~flags:[O_NONBLOCK;O_WRONLY;O_TRUNC] ~mode:Lwt_io.Output 
+    (fun co ->
+      Lwt_io.write co (Sexp.to_string (sexp_of_mailbox_metadata metadata)) >>
+      Lwt_io.flush co)
+  )
 
 (* read mailbox uidlist: uid filename *)
 let read_uidlist path =
-  Utils.with_file ~lock:true path ~flags:[Unix.O_RDONLY] ~perms:0o660 ~mode:Lwt_io.Input 
-  ~f:(fun ci ->
+  let open Unix in
+  Lwt_io.with_file path ~flags:[O_NONBLOCK;O_RDONLY] ~mode:Lwt_io.Input 
+  (fun ci ->
     let rec read_line cnt acc =
       Lwt_io.read_line_opt ci >>= function
       | Some line ->
@@ -272,44 +284,52 @@ let read_uidlist path =
         read_line (cnt + 1) ((cnt,uid,file) :: acc)
       | None -> return acc
     in
-    read_line 1 []
+    with_lock path (fun() ->  read_line 1 [])
   ) >>= fun l ->
   return (List.rev l)
 
 (* write mailbox uidlist *)
 let write_uidlist path l =
-  Utils.with_file ~lock:true path ~flags:[Unix.O_WRONLY;Unix.O_TRUNC] ~perms:0o660 ~mode:Lwt_io.Output 
-  ~f:(fun co ->
-    Lwt_list.iter_s (fun (_,uid,file) ->
-      Lwt_io.write_line co (String.concat " " [string_of_int uid ; file])
-    ) l
+  let open Unix in
+  with_lock path (fun() ->
+    Lwt_io.with_file path ~flags:[O_NONBLOCK;O_WRONLY;O_TRUNC] ~mode:Lwt_io.Output 
+    (fun co ->
+      Lwt_list.iter_s (fun (_,uid,file) ->
+        Lwt_io.write_line co (String.concat " " [string_of_int uid ; file])
+      ) l
+    )
   ) 
 
 (* append to uidlist *)
 let append_uidlist path uid file =
-  Utils.with_file ~lock:true path ~flags:[Unix.O_WRONLY;Unix.O_APPEND] ~perms:0o660 ~mode:Lwt_io.Output 
-  ~f:(fun co ->
-    Lwt_io.write_line co (String.concat " " [string_of_int uid ; file])
-  ) 
+  let open Unix in
+  with_lock path (fun() ->
+    Lwt_io.with_file path ~flags:[O_NONBLOCK;O_WRONLY;O_APPEND] ~mode:Lwt_io.Output 
+    (fun co -> Lwt_io.write_line co (String.concat " " [string_of_int uid ; file])) 
+  )
 
 let subscribe_path mail_path user =
   Filename.concat (Configuration.mailboxes (Utils.user_path ~path:mail_path ~user ()) user) "imaplet.subscribe"
   
 (* read subscribe *)
 let read_subscribe path =
-  Utils.with_file ~lock:true path ~flags:[Unix.O_RDONLY] ~perms:0o660 ~mode:Lwt_io.Input 
-  ~f:(fun ci ->
-    Lwt_io.read ci >>= fun sexp_str ->
-    return (list_of_sexp (fun s -> string_of_sexp s) (Sexp.of_string sexp_str))
-  ) 
+  let open Unix in
+  with_lock path (fun () ->
+    Lwt_io.with_file path ~flags:[O_NONBLOCK;O_RDONLY] ~mode:Lwt_io.Input 
+    (fun ci -> Lwt_io.read ci)
+  ) >>= fun sexp_str ->
+  return (list_of_sexp (fun s -> string_of_sexp s) (Sexp.of_string sexp_str))
 
 (* write subscribe *)
 let write_subscribe path l =
-  Utils.with_file ~lock:true path ~flags:[Unix.O_WRONLY;Unix.O_TRUNC] ~perms:0o660 ~mode:Lwt_io.Output 
-  ~f:(fun co ->
-    Lwt_io.write co (Sexp.to_string (sexp_of_list (fun s -> sexp_of_string s) l)) >>
-    Lwt_io.flush co
-  ) 
+  let open Unix in
+  with_lock path (fun() ->
+  Lwt_io.with_file path ~flags:[O_NONBLOCK;O_WRONLY;O_TRUNC] ~mode:Lwt_io.Output 
+    (fun co ->
+      Lwt_io.write co (Sexp.to_string (sexp_of_list (fun s -> sexp_of_string s) l)) >>
+      Lwt_io.flush co
+    )
+  )
 
 (* maildir storage type *)
 type storage_ = {user: string; mailbox:
