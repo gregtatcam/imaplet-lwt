@@ -15,13 +15,15 @@
  *)
 open Lwt
 open Irmin_unix
+open Imaplet
+open Commands
 
 exception InvalidCommand of string
 
-module Store = Irmin.Basic (Irmin_git.FS) (Irmin.Contents.String)
+module Store = Irmin_git.FS(Irmin.Contents.String)(Irmin.Ref.String)(Irmin.Hash.SHA1)
 
 type config =
-  {serial:bool;init:bool;compress:bool;yield:bool;block:bool;server:bool;content:string;
+  {serial:bool;init:bool;compress:int option;yield:bool;block:bool;server:bool;content:string;
     addr:string;port:int;number:int;from:string option}
 
 let create_content size = 
@@ -67,7 +69,7 @@ let create_content_from_mbox file f =
   )
 
 let usage () =
-  Printf.printf "usage: irvsfsio -i (create storage) -c \
+  Printf.printf "usage: irvsfsio -i (create storage) -c [level]\
   (compress files) -s (file size) -y (yield reading thread) \
   -b (blocking file read) -srl (serial read/write) \
   -srv (server only) -a [server address] -p [server port] -n [repeat] \
@@ -82,7 +84,7 @@ _number _from =
     match Sys.argv.(i) with 
     | "-i" -> args (i+1) true _compr _size _yield _block _server _addr _port
       _serial _number _from
-    | "-c" -> args (i+1) _init true _size _yield _block _server _addr _port 
+    | "-c" -> args (i+2) _init (Some (int_of_string Sys.argv.(i+1))) _size _yield _block _server _addr _port 
       _serial _number _from
     | "-s" -> args (i+2) _init _compr (int_of_string Sys.argv.(i+1)) _yield
       _block _server _addr _port _serial _number _from
@@ -108,7 +110,7 @@ _number _from =
 let commands f =
   try
     let init,compress,size,yield,block,server,addr,port,serial,number,from = 
-      args 1 false false 100_000 false false false "0.0.0.0" 20001 false 5 None in
+      args 1 false None 100_000 false false false "0.0.0.0" 20001 false 5 None in
     f {init;compress;content=create_content size;yield;block;server;addr;port;serial;number;from}
   with InvalidCommand x -> usage (); raise (InvalidCommand x)
 (* done command line *)
@@ -145,16 +147,12 @@ let files_root = Filename.concat root "files"
 let create_file config file content =
   let file = Filename.concat files_root file in
   Lwt_io.with_file ~flags:[Unix.O_WRONLY;Unix.O_CREAT;Unix.O_NONBLOCK] ~mode:Lwt_io.Output file (fun w ->
-    Lwt_io.write w (if config.compress then Compress.do_compress ~header:true content else content))
-
-let task msg =
-  let date = Int64.of_float (Unix.gettimeofday ()) in
-  let owner = "imaplet <imaplet@openmirage.org>" in
-  Irmin.Task.create ~date ~owner msg
+    Lwt_io.write w (match config.compress with Some level -> 
+        Imap_crypto.do_compress ~header:true ~level content | None -> content))
 
 let create_store () =
   let _config = Irmin_git.config ~root:"./tmp_ir_fs/irmin" ~bare:true ~level:0 () in
-  Store.create _config task
+  Store.Repo.create _config >>= Store.master task
 
 let create_irmin config store file content =
   Store.update (store (Printf.sprintf "updating %s" file)) ["root";file] content
@@ -235,7 +233,7 @@ let process_file config id =
     else
       read_file_lwt file
   end >>= fun buff ->
-  return (if config.compress then Compress.do_uncompress ~header:true buff else buff)
+  return (if config.compress <> None then Imap_crypto.do_uncompress ~header:true buff else buff)
 
 let file_index config =
   let strm = Lwt_unix.files_of_directory files_root in
