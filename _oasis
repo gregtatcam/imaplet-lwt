@@ -97,6 +97,7 @@ Library commands
                     Fetchregex,
                     Imap_cmd,
                     Imap_crypto,
+                    Imap_lock,
                     Imaplet_dns,
                     Gitl,
                     Gitl_storage,
@@ -284,6 +285,22 @@ Executable maildir_read
   CompiledObject  : native
   MainIs	  : maildir_read.ml
   BuildDepends	  : unix,threads,lwt,lwt.unix,lwt.syntax,lwt.preemptive,re,re.posix,imaplet,imaplet.commands
+
+Executable irvsfsio
+  Build$:           flag(test)
+  Install	  : false
+  Path		  : test
+  CompiledObject  : native
+  MainIs	  : irvsfsio.ml
+  BuildDepends	  : unix,threads,lwt,lwt.unix,lwt.syntax,re,re.posix,imaplet,imaplet.commands
+
+Executable irvsfsio_cl
+  Build$:           flag(test)
+  Install	  : false
+  Path		  : test
+  CompiledObject  : native
+  MainIs	  : irvsfsio_cl.ml
+  BuildDepends	  : unix,threads,lwt,lwt.unix,lwt.syntax
 
 Executable stun
   Build		  : true
