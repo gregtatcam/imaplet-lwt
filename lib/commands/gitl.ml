@@ -18,41 +18,9 @@ open Nocrypto.Hash
 
 module MapStr = Map.Make(String)
 
-(* need per account lock TBD *)
 let acct_lock_pool = ref MapStr.empty
 
 let pool_mutex = Lwt_mutex.create ()
-
-let get_acct_lock name =
-  Lwt_mutex.with_lock pool_mutex (fun() ->
-    if MapStr.mem name !acct_lock_pool then (
-      let (refcnt,mutex) = MapStr.find name !acct_lock_pool in
-      acct_lock_pool := MapStr.add name (refcnt+1,mutex) !acct_lock_pool;
-      return mutex
-    ) else (
-      let mutex = Lwt_mutex.create () in
-      acct_lock_pool := MapStr.add name (1,mutex) !acct_lock_pool;
-      return mutex
-    )
-  )
-
-let rem_acct_lock name =
-  Lwt_mutex.with_lock pool_mutex (fun() ->
-    if MapStr.mem name !acct_lock_pool then (
-      let (refcnt,mutex) = MapStr.find name !acct_lock_pool in
-      let refcnt = refcnt - 1 in
-      if refcnt = 0 then
-        acct_lock_pool := MapStr.remove name !acct_lock_pool
-    );
-    return ()
-  )
-
-let with_lock name f =
-  Lwt.finalize (fun() ->
-    get_acct_lock name >>= fun mutex ->
-    Lwt_mutex.with_lock mutex f >>= fun res ->
-    return res)
-  (fun () -> rem_acct_lock name)
 
 exception InvalidObject of string
 exception InvalidKey
@@ -708,7 +676,8 @@ let create ?cache ?(compress=false) ~repo () =
   if inited then (
     return {root;head=Head.empty repo;commit=Commit.empty;compress;cache}
   ) else (
-    with_lock root (fun () ->
+    let lock = Imap_lock.create pool_mutex acct_lock_pool in
+    Imap_lock.with_lock lock root (fun () ->
       Head.create repo) >>= fun head ->
     if Sha.is_empty head.sha then (
       return {root;head;commit=Commit.empty;compress;cache}
@@ -887,7 +856,8 @@ let commit t sha ~author ~message =
   | None -> return ()
   end >>= fun () ->
   Object.write obj (`Commit commit) >>= fun sha ->
-  with_lock t.root (fun () ->
+  let lock = Imap_lock.create pool_mutex acct_lock_pool in
+  Imap_lock.with_lock lock t.root (fun () ->
     Head.update t.head sha ) >>= fun head ->
   let log = Log.create t.root in
   let date = Printf.sprintf "%d" (int_of_float (Unix.time ())) in
