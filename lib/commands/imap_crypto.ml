@@ -47,9 +47,9 @@ let refill input =
 let flush output buf len =
   Buffer.add_substring output buf 0 len
 
-let do_compress ?(header=false) input =
+let do_compress ?(header=false) ?(level=6) input =
   let output = Buffer.create (String.length input) in
-  Zlib.compress ~level:6 ~header (refill input) (flush output);
+  Zlib.compress ~level ~header (refill input) (flush output);
   Buffer.contents output
 
 let do_uncompress ?(header=false) input =
