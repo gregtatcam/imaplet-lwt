@@ -44,4 +44,8 @@ type cmd_context = {
   (* user * domain * relay *)
   rcpt:(string*string*relayRecord) list; 
   (* data content *)
-  buff:Buffer.t} 
+  buff:Buffer.t;
+  (* connection to imap server *)
+  lmtp:Lwt_io.input_channel*Lwt_io.output_channel;
+  (* push to imap async write thread: user*pswd*message *)
+  push_strm:((string*string*string) option -> unit)}
