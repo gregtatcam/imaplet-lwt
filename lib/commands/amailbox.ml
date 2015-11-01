@@ -303,53 +303,51 @@ let get_message_from_client reader writer compression literal =
 let find_fl flags fl =
   Utils.list_find flags (fun f -> f = fl)
 
+let append_message mailboxt mailbox message size flags date =
+  factory mailboxt mailbox >>= fun (module Mailbox) ->
+  let flags = 
+  match flags with
+  | None -> [Flags_Recent]
+  | Some flags -> (Flags_Recent :: flags)
+  in
+  Mailbox.MailboxStorage.status Mailbox.this >>= fun mailbox_metadata ->
+  let modseq = Int64.add mailbox_metadata.modseq Int64.one in
+  let message_metadata = {
+    uid = mailbox_metadata.uidnext;
+    modseq;
+    size;
+    internal_date = Utils.option_value date ~default:(Dates.ImapTime.now());
+    flags;
+  } in
+  let seen = find_fl flags Flags_Seen in
+  let mailbox_metadata = { mailbox_metadata with
+    uidnext = mailbox_metadata.uidnext + 1;
+    count = mailbox_metadata.count + 1;
+    recent = mailbox_metadata.recent + 1;
+    unseen = 
+      if seen = false && mailbox_metadata.unseen = 0 then
+        mailbox_metadata.count + 1  
+      else
+        mailbox_metadata.unseen
+    ;
+    nunseen = 
+      if seen = false then
+        mailbox_metadata.nunseen + 1
+      else
+        mailbox_metadata.unseen
+    ;
+    modseq
+  } in
+  Mailbox.MailboxStorage.store_mailbox_metadata Mailbox.this mailbox_metadata >>
+  Mailbox.MailboxStorage.append Mailbox.this message message_metadata >>
+  Mailbox.MailboxStorage.commit Mailbox.this
+
 let async_append strm =
   let rec append () =
     Lwt_stream.get strm >>= function
     | Some (mailboxt,mailbox,message,size,flags,date) ->
-    begin
-    factory mailboxt mailbox >>= fun (module Mailbox) ->
-    Mailbox.MailboxStorage.exists Mailbox.this >>= function
-    | `Mailbox -> 
-    let flags = 
-    match flags with
-    | None -> [Flags_Recent]
-    | Some flags -> (Flags_Recent :: flags)
-    in
-    Mailbox.MailboxStorage.status Mailbox.this >>= fun mailbox_metadata ->
-    let modseq = Int64.add mailbox_metadata.modseq Int64.one in
-    let message_metadata = {
-      uid = mailbox_metadata.uidnext;
-      modseq;
-      size;
-      internal_date = Utils.option_value date ~default:(Dates.ImapTime.now());
-      flags;
-    } in
-    let seen = find_fl flags Flags_Seen in
-    let mailbox_metadata = { mailbox_metadata with
-      uidnext = mailbox_metadata.uidnext + 1;
-      count = mailbox_metadata.count + 1;
-      recent = mailbox_metadata.recent + 1;
-      unseen = 
-        if seen = false && mailbox_metadata.unseen = 0 then
-          mailbox_metadata.count + 1  
-        else
-          mailbox_metadata.unseen
-      ;
-      nunseen = 
-        if seen = false then
-          mailbox_metadata.nunseen + 1
-        else
-          mailbox_metadata.unseen
-      ;
-      modseq
-    } in
-    Mailbox.MailboxStorage.store_mailbox_metadata Mailbox.this mailbox_metadata >>
-    Mailbox.MailboxStorage.append Mailbox.this message message_metadata >>
-    Mailbox.MailboxStorage.commit Mailbox.this >>
-    append ()
-    | _ -> append ()
-    end
+      append_message mailboxt mailbox message size flags date >>
+      append ()
     | None -> return ()
   in
   append ()
@@ -358,12 +356,13 @@ let async_append strm =
 let append mailboxt mailbox reader writer push_append_strm compression flags date literal =
   factory mailboxt mailbox >>= fun (module Mailbox) ->
   Mailbox.MailboxStorage.exists Mailbox.this >>= function
-    | `No -> return (`NotExists)
-    | `Folder -> return (`NotSelectable)
-    | `Mailbox -> 
-      get_message_from_client reader writer compression literal >>= fun (message,size) ->
-      push_append_strm (Some (mailboxt,mailbox,message,size,flags,date));
-      return `Ok
+  | `No -> return `NotExists
+  | `Folder -> return `NotSelectable
+  | `Mailbox -> 
+  get_message_from_client reader writer compression literal >>= fun (message,size) ->
+  (*push_append_strm (Some (mailboxt,mailbox,message,size,flags,date));*)
+  append_message mailboxt mailbox message size flags date >>
+  return `Ok
 
 (* close selected mailbox *)
 let close mailboxt =
