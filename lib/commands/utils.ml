@@ -258,6 +258,16 @@ let with_timeout t f g =
     Lwt_unix.with_timeout t f
   ) (fun ex -> g ex)
 
+let with_timeout_cancel t f =
+  let open Lwt in
+  let waiter, wakener = Lwt.task () in
+  let rd = (f() >>= fun res -> wakeup wakener res; waiter) in
+  let timer = Lwt_timeout.create t (fun () -> Lwt.cancel rd) in
+  Lwt_timeout.start timer;
+  rd >>= fun res ->
+  Lwt_timeout.stop timer;
+  return res
+
 (* how to get all interfaces w/out system call?
  * gethostbyname on rasppi returns only hosts content
  *)

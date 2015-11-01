@@ -62,6 +62,8 @@ val lines_of_file : ?g:(exn -> 'a Lwt.t) -> string -> init:'a -> f:(string -> 'a
 
 val with_timeout : float -> (unit -> 'a Lwt.t) -> (exn -> 'a Lwt.t) -> 'a Lwt.t
 
+val with_timeout_cancel : int -> (unit -> 'a Lwt.t) -> 'a Lwt.t
+
 val get_interfaces : unit -> string list Lwt.t
 
 val fold_email_with_file : string -> ('a -> string -> [`Ok of 'a|`Done of 'a] Lwt.t) -> 'a -> 'a Lwt.t
