@@ -28,21 +28,20 @@ let rec args i repo compress =
   else
     match Sys.argv.(i) with 
     | "-repo" -> args (i+2) Sys.argv.(i+1) compress
-    | "-compress" -> args (i+1) repo true
+    | "-compress" -> 
+      args (i+2) repo (if Sys.argv.(i+1)="-" then None else Some (int_of_string Sys.argv.(i+1)))
     | _ -> raise InvalidCommand
 
 let commands f =
   try 
-    let repo,compress = args 1 "" false in
+    let repo,compress = args 1 "" None in
     f repo compress
   with _ ->
-    Printf.printf "usage: test_gitl -repo [repo] [-compress]\n%!"
+    Printf.printf "usage: test_gitl -repo [repo] [-compress [-0-9]]\n%!"
 
 let main repo compress =
   Lwt_main.run (
-    let cache = ref MapStr.empty in
-    let tree_sha = ref Sha.empty in
-    Gitl.create ~repo ~compress ~cache () >>= fun t ->
+    Gitl.create ~repo ?compress () >>= fun t ->
       Printf.printf "%s\n%!" (Gitl.to_string t);
     let rec loop t =
       Lwt_io.read_line_opt Lwt_io.stdin >>= function
@@ -80,19 +79,17 @@ let main repo compress =
             let key = Key.of_unix (Re.get subs 1) in
             let v = Re.get subs 2 in
             update t key v >>= fun (_,sha) ->
-            tree_sha := sha;
             loop t
           | "commit" ->
             let args = Re.get subs 3 in
             let subs = Re.exec (Re_posix.compile_pat "^([^ ]+) (.+)$") args in
             let author = Re.get subs 1 in
             let message = Re.get subs 2 in
-            commit t !tree_sha ~author ~message >>= fun t ->
+            commit t ~author ~message >>= fun t ->
             loop t
           | "remove" ->
             let key = Key.of_unix (Re.get subs 3) in
             remove t key >>= fun sha ->
-            tree_sha := sha;
             loop t
           | "rename" ->
             let args = Re.get subs 3 in
@@ -100,7 +97,6 @@ let main repo compress =
             let src = Key.of_unix (Re.get subs 1) in
             let dest = Key.of_unix (Re.get subs 2) in
             rename t ~src ~dest >>= fun sha ->
-            tree_sha := sha;
             loop t
           | "log" ->
             pretty_log t >>= fun l ->

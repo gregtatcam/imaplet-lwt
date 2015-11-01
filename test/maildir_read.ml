@@ -25,10 +25,16 @@ let login user =
       Lwt_io.read_line_opt ic >>= function
       | Some line ->
         begin
-        let re = String.concat "" ["^"; user; ":.+:([^:]+):(gitl|irmin|maildir):a[tf]:e[tf]:c([tf]+):sf:hf:mf$"] in
+        let re = String.concat "" ["^"; user;
+        ":.+:([^:]+):(gitl|irmin|maildir):a[tf]:e[tf]:c([tf][tf][-0-9]?):sf:hf:mf$"] in
         try
           let subs = Re.exec (Re_posix.compile_pat re) line in
-          let inflate = try String.get (Re.get subs 3) 2 = 't' with Invalid_argument x -> false in
+          let inflate = 
+          try 
+            match String.get (Re.get subs 3) 2 with
+            | '-' -> None
+            | c -> Some (int_of_char c - 48)
+          with Invalid_argument c -> None in
           return (Some (Re.get subs 1, Re.get subs 2, inflate))
         with Not_found -> read()
         end
@@ -136,7 +142,7 @@ module type Maildir_intf =
 sig
   type t
 
-  val create : user:string -> repo:string -> mailbox:string -> inflate:bool -> t Lwt.t
+  val create : user:string -> repo:string -> mailbox:string -> inflate:int option -> t Lwt.t
 
   val read_index: t -> num:string -> (int * string) list Lwt.t
 
@@ -145,7 +151,7 @@ end
 
 module MaildirFile : Maildir_intf =
 struct
-  type t = {user:string; repo:string; mailbox:string; inflate:bool}
+  type t = {user:string; repo:string; mailbox:string; inflate:int option}
 
   let get_dir t =
     if String.lowercase t.mailbox = "inbox" then
@@ -184,10 +190,10 @@ end
 module MaildirGitl : Maildir_intf =
 struct
   type t = {user:string; repo:string; mailbox:string;
-  store:Gitl.t;inflate:bool}
+  store:Gitl.t;inflate:int option}
 
   let create_store repo inflate =
-    Gitl.create ~repo ~compress:inflate ()
+    Gitl.create ~repo ?compress:inflate ()
 
   let create ~user ~repo ~mailbox ~inflate =
     create_store repo inflate >>= fun store ->
@@ -216,7 +222,8 @@ module MaildirIrmin : Maildir_intf =
 struct
   module Store = Irmin_git.FS(Irmin.Contents.String)(Irmin.Ref.String)(Irmin.Hash.SHA1)
 
-  type t = {user:string; repo:string; mailbox:string; store:(string -> Store.t);inflate:bool}
+  type t = {user:string; repo:string; mailbox:string; store:(string ->
+    Store.t);inflate:int option}
 
   let create_store repo =
     let _config = Irmin_git.config
@@ -250,7 +257,7 @@ end
 module type MaildirReader_intf =
 sig
   val read_files : user:string -> repo:string -> mailbox:string -> writer:Lwt_io.output_channel -> num:string ->
-    inflate:bool -> unit Lwt.t
+    inflate:int option -> unit Lwt.t
 end
 
 module MakeMaildirReader(M:Maildir_intf) : MaildirReader_intf =
@@ -263,7 +270,7 @@ struct
         if uid = 1 then Printf.printf "initial write delay %.04f\n" del;
         Printf.printf "writing data %d, delay %.04f\r%!" uid del;
         let t=Unix.gettimeofday() in
-        let message = if uncompress then (Imap_crypto.do_uncompress message) else message in
+        let message = if uncompress <> None then (Imap_crypto.do_uncompress message) else message in
         let l = ["*"; sp;string_of_int uid; sp; "FETCH"; sp; "("; "BODY[]"; sp; "{";string_of_int
           (String.length message); "}";"\r\n";message;")";"\r\n"] in
         let t = timeit comprt t in
@@ -307,7 +314,7 @@ let () =
     Lwt_main.run (
       server "0.0.0.0" port (fun r w ->
         Lwt_io.write w "CAPABILITY\r\n" >>= fun () ->
-        let rec loop ?(user="") ?(repo="") ?(store="") ?(mailbox="") ?(inflate=false) () =
+        let rec loop ?(user="") ?(repo="") ?(store="") ?(mailbox="") ?inflate () =
           Lwt_io.read_line_opt r >>= function
           | Some l ->
             begin
@@ -344,10 +351,10 @@ let () =
               end
             | `Login (tag,user,repo,store,inflate) ->
               Lwt_io.write w (tag ^ " ok\r\n") >>= fun () ->
-              loop ~user ~repo ~store ~inflate ()
+              loop ~user ~repo ~store ?inflate ()
             | `Select (tag,mailbox) ->
               Lwt_io.write w (tag ^ " ok\r\n") >>= fun () ->
-              loop ~user ~repo ~store ~mailbox ~inflate ()
+              loop ~user ~repo ~store ~mailbox ?inflate ()
             | `Error tag ->
               Lwt_io.write w (tag ^ " bad\r\n") >>= fun () ->
               loop ()
