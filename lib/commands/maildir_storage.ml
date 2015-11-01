@@ -23,6 +23,7 @@ open Lazy_message
 open Lazy_maildir_message
 open Parsemail
 open Server_config
+open Mail_file_name
 
 exception EmptyPrivateKey
 
@@ -31,11 +32,6 @@ let acct_lock_pool = ref MapStr.empty
 let pool_mutex = Lwt_mutex.create ()
 
 module MapStr = Map.Make(String)
-module MapFlag = Map.Make(
-  struct
-    type t = mailboxFlags
-    let compare f1 f2 = Pervasives.compare f1 f2
-  end)
 
 let _mail_path config user =
   Utils.user_path ~path:config.Server_config.mail_path ~user ()
@@ -160,92 +156,17 @@ end = struct
     Regex.replace ~regx ~tmpl:"" file
 end
 
-(* initial file name secs.rand.host *)
-let init_message_file_name internal_date =
-  let t = Int64.of_float ((Unix.gettimeofday())*.1000.) in
-  let internal_date = 
-    Int64.of_float (Dates.ImapTime.to_float internal_date) in
-  let host = Unix.gethostname() in
-  Random.init (Int64.to_int t);
-  let r = Int64.to_string (Random.int64 t) in
-  Printf.sprintf "%Ld.%0Lx.%s.%s" internal_date t r host
-
-let mail_flags : (string*mailboxFlags) list =
-  [ "a", Flags_Keyword "$NotJunk";
-  "b", Flags_Keyword "NotJunk";
-  "P", Flags_Answered;
-  "T", Flags_Deleted;
-  "D", Flags_Draft;
-  "F", Flags_Flagged;
-  "S", Flags_Seen;
-  "R", Flags_Recent;]
-   
-(* get the keyword mapping, hardcoded for now TBD *)
-let get_map_to_flag mailbox =
-  (*let (>>) map (data,key) = MapStr.add data key map in*)
-  List.fold_left (fun acc (m,f) -> MapStr.add m f acc) (MapStr.empty) mail_flags
-
-let get_flag_to_map mailbox =
-  List.fold_left (fun acc (m,f) -> MapFlag.add f m acc) (MapFlag.empty) mail_flags
-
-let flags_to_map_str mailbox flags =
-  let map = get_flag_to_map mailbox in
-  let flags = List.sort Pervasives.compare (List.fold_right (fun f acc -> 
-    try (MapFlag.find f map) :: acc with Not_found -> acc
-  ) flags []) in 
-  String.concat "" flags
-
-let flags_of_map_str mailbox flags =
-  let map = get_map_to_flag mailbox in
-  let rec fold_right i acc =
-    if i = String.length flags then
-      acc
-    else (
-      let acc = try (MapStr.find (String.sub flags i 1) map) :: acc with Not_found -> acc in
-      fold_right (i + 1) acc
-    )
-  in
-  fold_right 0 []
-
 (* create an empty file *)
 let create_file ?(overwrite=false) ?(perms=0o666) path =
   let open Unix in
   let flags =
   if overwrite then
-    [O_WRONLY;O_CREAT;O_TRUNC]
+    [O_NONBLOCK;O_WRONLY;O_CREAT;O_TRUNC]
   else
-    [O_WRONLY;O_EXCL;O_CREAT]
+    [O_NONBLOCK;O_WRONLY;O_EXCL;O_CREAT]
   in
   Lwt_unix.openfile path flags perms >>= fun fd ->
   Lwt_unix.close fd
-
-(* get the filename containing the message *)
-let make_message_file_name mailbox metadata =
-  let file = init_message_file_name metadata.internal_date in
-  (* need to get the keyword mapping from imaplet.keywords *)
-  Printf.sprintf "%s,S=%d,M=%s:2,%s" file metadata.size 
-    (Int64.to_string metadata.modseq) (flags_to_map_str mailbox metadata.flags)
-
-(* time.internal_date.rand.host,S(size)=..,M(modseq)=..:2,[flags] *)
-(* 1415570721.20f64da12ed.129054952358.dhcp-172-17-153-93.eduroam.wireless.private.cam.ac.uk,S=2514,M=0:2,Sa *)
-let message_file_name_to_data mailbox file =
-  let _ = Regex.match_regex
-    ~regx:"^\\([^\\.]+\\)\\.\\([^,]+\\),S=\\([0-9]+\\),M=\\([0-9]+\\):2,\\(.*\\)$"
-    file 
-  in
-  let internal = Dates.ImapTime.of_float (float_of_string (Str.matched_group 1 file) ) in
-  let size = int_of_string (Str.matched_group 3 file) in
-  let modseq = Int64.of_string (Str.matched_group 4 file) in
-  let flags = flags_of_map_str mailbox (Str.matched_group 5 file) in
-  (internal,size,modseq,flags)
-
-(* update modeseq and flags *)
-let update_message_file_name mailbox file metadata =
-  let (_,size,modseq,flags) = message_file_name_to_data mailbox file in
-  let _ = Regex.match_regex ~regx:"^\\([^,]+\\)" file in
-  let immute = Str.matched_group 1 file in
-  Printf.sprintf "%s,S=%d,M=%s:2,%s" immute size 
-    (Int64.to_string metadata.modseq) (flags_to_map_str mailbox metadata.flags)
 
 let with_lock path f =
   let lock = Imap_lock.create pool_mutex acct_lock_pool in
@@ -507,9 +428,10 @@ struct
 
   (* write message to the file *)
   let write_message t file message =
+    let open Unix in
     let tmp_file = MaildirPath.file_path t.mailbox (`Tmp file) in
-    Utils.with_file tmp_file ~flags:[Unix.O_CREAT;Unix.O_WRONLY] ~perms:0o660 ~mode:Lwt_io.Output
-    ~f:(fun oc ->
+    Lwt_io.with_file tmp_file ~flags:[O_NONBLOCK;O_CREAT;O_WRONLY] ~mode:Lwt_io.Output
+    (fun oc ->
       begin
         if t.config.maildir_parse then (
           Email_parse.message_to_blob t.config t.keys message >>= fun (msg_hash, message) ->
@@ -608,12 +530,13 @@ struct
     in
     get_file t position uids >>= function
     | `Ok (_,uid,size,file) ->
-      let (internal_date,_,modseq,flags) = message_file_name_to_data t.mailbox file in
+      let (internal_date,size,modseq,flags) = message_file_name_to_data t.mailbox file in
       let metadata = {uid;modseq;internal_date;size;flags} in
       let lazy_read = Lazy.from_fun (fun () ->
         let t1 = Unix.gettimeofday () in
         let path = current t file in
-        Lwt_io.with_file path ~flags:[Unix.O_NONBLOCK] ~mode:Lwt_io.Input (fun ci ->
+        let open Unix in
+        Lwt_io.with_file path ~flags:[O_NONBLOCK;O_RDONLY] ~mode:Lwt_io.Input (fun ci ->
           Lwt_io.read ci
         ) >>= fun msg ->
         let msg = decrypt t msg in
@@ -697,7 +620,8 @@ struct
     if res then
       return `Exists
     else (
-      Lwt_unix.openfile path [Unix.O_WRONLY;Unix.O_CREAT] 0o664 >>= fun fd ->
+      let open Unix in
+      Lwt_unix.openfile path [O_NONBLOCK;O_WRONLY;O_CREAT] 0o664 >>= fun fd ->
       Lwt_unix.close fd >>
       write_subscribe path [] >>
       return `Ok
