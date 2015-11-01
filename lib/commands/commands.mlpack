@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: aff8ec5df4395d5b326e98467a034943)
+# DO NOT EDIT (digest: 5b4e28cb6c2bb130f7aaea14203add9b)
 Account
 Amailbox
 Configuration
@@ -26,6 +26,7 @@ Lex
 Log_
 Mailbox_storage
 Maildir_storage
+Mail_file_name
 Parser
 Regex
 Replica_maint
