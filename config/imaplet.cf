@@ -85,7 +85,7 @@ compress true
 
 # compress repository, this is compression built into the repo, like git, 
 # for gitl it means no compression at all, for irmin means compression 0 (Irmin not implemented yet)
-compress_repo false
+compress_repo -
 
 # include mapped address in the Received email header
 stun_header false
