@@ -23,7 +23,7 @@ type acct_config = {
   acct_encrypt : bool; (* encrypt messages, default true *)
   acct_compress : bool; (* compress messages, but not attachments, default true *)
   acct_compress_attach : bool; (* compress attachments, default false *)
-  acct_compress_repo : bool; (* compress repo, default false *)
+  acct_compress_repo : int option; (* compress repo, default None *)
   acct_auth_required: bool; (* require user authentication, priv key encrypted with password, default true *)
   acct_maildir_parse: bool; (* parse message into MIME parts when in maildir storage format, default true *)
   acct_single_store: bool; (* single-store attachments in irmin and workdir format, default true *)
@@ -49,6 +49,14 @@ let get_bool v n =
     | 't' -> true
     | _ -> false
 
+let get_level v =
+  if String.length v = 3 then (
+    match String.get v 2 with
+    | '-' -> None
+    | x -> Some (int_of_char x - 48)
+  ) else
+    None
+
 exception InvalidStoreType
 
 let get_store = function
@@ -61,13 +69,13 @@ let get_store = function
 
 let get_config buff =
  if Str.string_match (Str.regexp
- ".*:\\(gitl\\|irmin\\|workdir\\|maildir\\|mailbox\\):\\(a[tf]\\):\\(e[tf]\\):\\(c[tf]+\\):\\(s[tf]\\):\\(h[tf]\\):\\(m[tf]\\)$") buff 0 then (
+ ".*:\\(gitl\\|irmin\\|workdir\\|maildir\\|mailbox\\):\\(a[tf]\\):\\(e[tf]\\):\\(c[tf][tf][-0-9]?\\):\\(s[tf]\\):\\(h[tf]\\):\\(m[tf]\\)$") buff 0 then (
    Some {acct_data_store = get_store (Str.matched_group 1 buff);
    acct_auth_required = get_bool (Str.matched_group 2 buff) 1;
    acct_encrypt = get_bool (Str.matched_group 3 buff) 1;
    acct_compress = get_bool (Str.matched_group 4 buff) 1;
    acct_compress_attach = get_bool (Str.matched_group 4 buff) 2;
-   acct_compress_repo = get_bool (Str.matched_group 4 buff) 3;
+   acct_compress_repo = get_level (Str.matched_group 4 buff);
    acct_single_store = get_bool (Str.matched_group 5 buff) 1;
    acct_hybrid = get_bool (Str.matched_group 6 buff) 1;
    acct_maildir_parse = get_bool (Str.matched_group 7 buff) 1;}
