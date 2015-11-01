@@ -19,6 +19,7 @@ open Maildir_storage
 open Storage_meta
 open Imaplet_types
 open Parsemail
+open Mail_file_name
 
 exception InvalidCommand
 
