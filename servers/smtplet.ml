@@ -24,26 +24,66 @@ open Smtplet_context
 exception InvalidCmd
 exception Valid
 
+module MapStr = Map.Make(String)
+
+(* interfaces on this server, need to reload if interfaces change, or
+ * have a maintenance process to get it periodically *)
+let lazy_interfaces = Lazy.from_fun (fun () -> Utils.get_interfaces ())
+
+let lazy_hostname = Lazy.from_fun (fun () -> Lwt_unix.gethostname())
+
 let _ = Log_.set_log "smtplet.log"
 
-let imap_addr = `Unix (Filename.concat Install.data_path "sock/smtp")
+let send_stats = ref 0.
+
+(* if user changes then the server has to reload, or can age it or 
+ * have maintenance task
+ *)
+let auth_cache = ref MapStr.empty
 
 let authenticate_user ?(b64=false) user ?password () =
   catch (fun () ->
-    Account.authenticate_user ~b64 user ?password () >>= fun (u,p,r,_) ->
-    return (u,p,r)
+    if MapStr.mem user !auth_cache then (
+      return (MapStr.find user !auth_cache)
+    ) else (
+      Account.authenticate_user ~b64 user ?password () >>= fun (u,p,r,_) ->
+      auth_cache := MapStr.add user (u,p,r) !auth_cache;
+      return (u,p,r)
+    )
   )
   (fun ex ->
     Log_.log `Error (Printf.sprintf "### authentication error: %s" (Printexc.to_string ex));
     return ("",None,false)
   )
 
+let imap_write (ic,oc) _to pswd msg =
+  Lwt_io.write oc (Printf.sprintf "a lappend %s%s INBOX {%d+}\r\n" _to pswd (String.length msg)) >>
+  Lwt_io.write oc msg >>
+  Lwt_io.read_line ic >>= fun _ ->
+  return ()
+
+(* write messages to IMAP on an async thread, to improve
+ * context switch between read/write 
+ *)
+let imap_async_write (ic,oc) strm =
+  let rec loop () =
+    Lwt_stream.get strm >>= function
+    | Some (_to,pswd,msg) ->
+      imap_write (ic,oc) _to pswd msg >>
+      loop ()
+    | None -> return ()
+  in
+  loop ()
+
 (* sending "special" local append on unix socket
  * should it be SSL? TBD 
  *)
-let send_to_imap addr context =
+let send_to_imap context =
   catch (fun () ->
-  Log_.log `Info1 "smtp: sending to imap\n";
+  Log_.log `Info3 "smtp: sending to imap\n";
+  let t = Unix.gettimeofday () in
+  Log_.log `Debug (Printf.sprintf "smtp: time to send to imap %.04f\n" (t -.  !send_stats));
+  send_stats := t;
   let (_from,domain) = context.from in
   let msg = 
     if context.config.stun_header = true then
@@ -60,16 +100,12 @@ let send_to_imap addr context =
     | Some (_,pswd) -> (match pswd with |Some pswd -> " " ^ pswd|None->"")
     | None -> ""
   in
-  client_send addr (fun _ _ inchan outchan ->
-    let write buff = Lwt_io.write outchan buff >>= fun () -> Lwt_io.flush outchan in
-    let read () = Lwt_io.read_line inchan in
-    write ("a lappend " ^ _to ^ pswd ^ " INBOX {" ^ (string_of_int (String.length msg)) ^ "+}\r\n") >>= fun () ->
-    write msg >>= fun () ->
-    read () >>= fun resp -> (* a OK APPEND completed *)
-    write "a logout\r\n" >>= fun () ->
-    read () >>= fun resp -> (* * BYE *)
-    return true
-  ) true
+  (*context.push_strm (Some (_to,pswd,msg));*)
+  imap_write context.lmtp _to pswd msg >>= fun () ->
+  let t = Unix.gettimeofday () in
+  Log_.log `Debug (Printf.sprintf "smtp: sent to imap %.04f\n" (t -.  !send_stats));
+  send_stats := t;
+  return true
   ) 
   (fun ex -> 
     Log_.log `Error (Printf.sprintf "### send to imap exception: %s\n" (Printexc.to_string ex)); 
@@ -79,7 +115,8 @@ let send_to_imap addr context =
 let write context msg = 
   Log_.log `Info1 (Printf.sprintf "<-- %s\n" msg);
   let (_,w,_) = context.io in
-  Lwt_io.write w (msg ^ "\r\n") 
+  Lwt_io.write w msg >>
+  Lwt_io.write w "\r\n" 
 
 let write_return context msg log res =
   log res;
@@ -93,23 +130,23 @@ let log_return log res =
 let read context =
   let (r,_,_) = context.io in
   catch (fun () ->
-    Lwt.pick [
-      (Lwt_unix.sleep  context.config.smtp_idle_max >> 
-      Lwt_unix.gethostname () >>= fun host ->
+    Utils.with_timeout_cancel (int_of_float context.config.smtp_idle_max)
+      (fun () -> Lwt_io.read_line_opt r)
+  ) (function
+    | Canceled ->
+      Lazy.force lazy_hostname >>= fun host ->
       write context ("421 4.4.2 " ^ host ^ " Error: timeout exceeded") >>
-      return None);
-      Lwt_io.read_line_opt r;
-    ]
-  ) (fun ex -> Log_.log `Error (Printf.sprintf "smtp:read exception %s\n" (Printexc.to_string ex));
-  return None)
+      return None
+    | ex -> Log_.log `Error 
+      (Printf.sprintf "smtp:read exception %s\n" (Printexc.to_string ex));
+      return None)
 
-let buffer_ends buffer str =
-  let str_len = Bytes.length str in
-  let buf_len = Buffer.length buffer in
-  if str_len > buf_len then
+let buffer_ends_crlf buffer =
+  let len = Buffer.length buffer in
+  if len < 2 then
     false
   else
-    (Buffer.sub buffer (buf_len-str_len) str_len) = str 
+    Buffer.nth buffer (len - 2) = '\r' && Buffer.nth buffer (len - 1) = '\n'
 
 let syntx_helo log next_state ~msg str context =
   if List.exists (fun s -> s = `Helo) next_state = false then (
@@ -143,7 +180,7 @@ let syntx_ehlo log next_state ~msg str context =
   if List.exists (fun s -> s = `Ehlo) next_state = false then (
     write_return context msg log `NextOutOfSeq
   ) else if Regex.match_regex ~regx:"^[ \t]+\\([^ \t]+\\)$" str then (
-    Lwt_unix.gethostname () >>= fun host ->
+    Lazy.force lazy_hostname >>= fun host ->
     let host = "250-" ^ host in
     let cap = ["250-ENHANCEDSTATUSCODES";"250 VRFY"] in
     let tls = starttls_required context in
@@ -219,19 +256,22 @@ let is_master_domain domain context =
 let in_my_domain context domain =
   let interface = context.config.smtp_addr in (* interface listening on *)
   let mydomain = context.config.domain in (* server's domain *)
+  Lazy.force lazy_interfaces >>= fun my_ips ->
   Log_.log `Info2 
     (Printf.sprintf "### detecting send to domain %s on interface %s, my domain
     %s, configured domains %s\n" 
     domain interface mydomain context.config.domain) ;
-  Utils.get_interfaces () >>= fun my_ips -> (* interfaces on this server *)
   begin
   let dexists domains domain = 
     List.exists (fun d -> d = domain) (Str.split (Str.regexp ";") domains) in
   if dexists context.config.domain domain || is_master_domain domain context then (
+    Log_.log `Debug (Printf.sprintf "### domain exists or is master\n%!");
     return my_ips (* it's my domain *)
   ) else if (try let _ = Unix.inet_addr_of_string domain in true with _ -> false) then (
+    Log_.log `Debug (Printf.sprintf "### domain is ip\n%!");
     return [domain] (* already ip *)
   ) else (
+    Log_.log `Debug (Printf.sprintf "### resolving domain via dns\n%!");
     Imaplet_dns.gethostbyname ?config:(context.config.resolve) domain >>= fun ips ->
     if List.length ips = 0 then
       Utils.gethostbyname domain (* could be local host *)
@@ -325,6 +365,7 @@ let valid_from context =
     return res
 
 let syntx_rcpt log next_state ~msg cmd context =
+  let t = Unix.gettimeofday () in
   if List.exists (fun s -> s = `RcptTo) next_state = false then (
     write_return context msg log `NextOutOfSeq
   ) else if Regex.match_regex ~case:false ~regx:"^[ \t]+TO:[ \t]*<?\\([^ <>@\t]+\\)@\\([^>]*\\)" cmd then (
@@ -336,6 +377,7 @@ let syntx_rcpt log next_state ~msg cmd context =
     ) else if res = `Yes then (
       authenticate_user_domain user (Some domain) >>= fun (fqn,_,auth) ->
       if auth then (
+        Log_.log `Debug (Printf.sprintf "rcpt to time %.04f\n" (Unix.gettimeofday() -. t));
         write_return context "250 OK" log (`RcptTo (fqn,domain,`None))
       ) else (
         write_return context 
@@ -400,6 +442,9 @@ let syntx_data log next_state ~msg cmd context =
   if List.exists (fun s -> s = `Data) next_state = false then (
     write_return context msg log `NextOutOfSeq
   ) else if Regex.match_regex ~regx:"^[ \t]*$" cmd then (
+    let t = Unix.gettimeofday () in
+    Log_.log `Debug (Printf.sprintf "smtp: start data, time lapse %.04f\n" (t -.  !send_stats));
+    send_stats := t;
     write_return context "354 End data with <CR><LF>.<CR><LF>" log `Data
   ) else (
     write_return context "501 5.5.2 Syntax: DATA" log `Next
@@ -492,21 +537,25 @@ let all state context = function
   | _ -> return (`State (state,context))
 
 let spoof_master content context =
-  if Str.string_match (Str.regexp_case_fold "^from:") content 0 then (
-    match context.config.master with
-    | Some master when master <> "localhost" && master <> "127.0.0.1" ->
-      Log_.log `Debug "### spoofing master\n";
+  match context.config.master with
+  | Some master when master <> "localhost" && master <> "127.0.0.1" ->
+    Log_.log `Debug "### spoofing master\n";
+    if Str.string_match (Str.regexp_case_fold "^from:") content 0 then
       Str.replace_first (Str.regexp "[^@]+>") (master ^ ">") content
-    | _ -> content
-  ) else
-    content
+    else
+      content
+  | _ -> content
 
 let rec datastream context =
   Log_.log `Debug "smtp: starting datastream\n";
   next ~isdata:true ~cur_state:`DataStream ~next_state:[`DataStream] context >>= function
   | `DataStream str ->
     let str = spoof_master str context in
-    if buffer_ends context.buff "\r\n" && str = "." then (
+    if buffer_ends_crlf context.buff && str = "." then (
+      let t = Unix.gettimeofday () in
+      Log_.log `Debug 
+        (Printf.sprintf "smtp: stats report, data collection %.04f\n" (t -. !send_stats));
+      send_stats := t;
       (* send relayed on another thread *)
       async (fun () ->
         Lwt_list.iter_p (fun rcpt ->
@@ -516,16 +565,16 @@ let rec datastream context =
             return ()
           ) else (
             Smtplet_relay.relay context.config.stun_header context 
-              (fun context -> send_to_imap imap_addr context >>= fun _ -> return())
+              (fun context -> send_to_imap context >>= fun _ -> return())
           )
         ) context.rcpt
       );
       (* serialize send to the local accounts *)
       Lwt_list.fold_left_s (fun acc rcpt ->
-        let context = {context with rcpt = [rcpt]} in
         let (_,_,relay_rec) = rcpt in
         if relay_rec = `None then (
-          send_to_imap imap_addr context >>= fun res ->
+          let context = {context with rcpt = [rcpt]} in
+          send_to_imap context >>= fun res ->
           return (acc && res)
         ) else (
           return acc
@@ -534,7 +583,8 @@ let rec datastream context =
       write context (if res then "250 OK" else "554 5.5.0 Transaction failed") >>
       return `Rset
     ) else (
-      Buffer.add_string context.buff (str ^ "\r\n");
+      Buffer.add_string context.buff str;
+      Buffer.add_string context.buff "\r\n";
       return (`State (datastream, context))
     )
   (* anything is data until done, would not get to this state *)
@@ -544,7 +594,9 @@ let rec rcptto context =
   Log_.log `Debug "smtp: starting rcptto\n";
   next ~cur_state:`RcptTo ~next_state:[`RcptTo;`Data;`Vrfy;`Noop;`Helo;`Ehlo;`Rset] context >>= function
   | `RcptTo r -> return (`State (rcptto, {context with rcpt = r :: context.rcpt}))
-  | `Data -> return (`State (datastream,{context with buff = Buffer.create 100}))
+  | `Data -> 
+    Buffer.clear context.buff;
+    return (`State (datastream,context))
   | cmd -> all (rcptto) context cmd
 
 let rec mailfrom context =
@@ -660,31 +712,39 @@ let greeting context =
   let rec run state context =
     state context >>= function
     | `Quit -> return ()
-    | `Ehlo -> run (ehlo) {context with grttype=`Ehlo;buff=Buffer.create 100}
-    | `Authenticated up -> run (ehlo) {context with auth=Some up;grttype=`Ehlo;buff=Buffer.create 100}
-    | `Helo -> run (helo) {context with grttype=`Helo;buff=Buffer.create 100}
+    | `Ehlo -> 
+      Buffer.clear context.buff;
+      run (ehlo) {context with grttype=`Ehlo;}
+    | `Authenticated up -> 
+      Buffer.clear context.buff;
+      run (ehlo) {context with auth=Some up;grttype=`Ehlo;}
+    | `Helo -> 
+      Buffer.clear context.buff;
+      run (helo) {context with grttype=`Helo;}
     | `Rset -> 
+      Buffer.clear context.buff;
       if context.grttype = `Ehlo then
-        run (ehlo) {context with buff=Buffer.create 100}
+        run (ehlo) context
       else
-        run (helo) {context with buff=Buffer.create 100}
+        run (helo) context
     | `State (state,context) -> run (state) context
     | _ -> write context "503 5.5.1 Command out of sequence" >> run (state) context
   in
   run (start) context
 
-let mkcontext config sock inchan outchan =
+let mkcontext config sock inchan outchan push_strm lmtp =
   let io =
     match sock with
     | None -> (inchan,outchan,`Ssl)
     | Some sock -> (inchan,outchan,`Reg sock)
   in
-  {config;auth=None;grttype=`Rset;io;from=("",None);rcpt=[];buff=Buffer.create 100}
+  {config;auth=None;grttype=`Rset;io;from=("",None);rcpt=[];
+    buff=Buffer.create 1_000;lmtp;push_strm}
 
-let server_on_port addr port config =
+let server_on_port addr port push_strm lmtp config =
   Log_.log `Info2 (Printf.sprintf "### start accepting on %s:%d\n" addr port);
   server (`Inet (addr, port)) config (fun sock r w ->
-    greeting (mkcontext config sock r w))
+    greeting (mkcontext config sock r w push_strm lmtp))
     (fun ex -> Log_.log `Error (Printf.sprintf "### smtplet: exception %s\n"
     (Printexc.to_string ex)); return ())
 
@@ -702,7 +762,13 @@ let _ =
       (ImapTime.to_string (ImapTime.now()))
       config.smtp_addr (ports_str config.smtp_port) config.ssl config.starttls);
     Stun_maint.start config;
+    (* open connection to the IMAP server *)
+    Lwt_io.open_connection 
+      (Unix.ADDR_UNIX (Filename.concat Install.data_path "sock/smtp")) >>= fun lmtp ->
+    let (strm,push_strm) = Lwt_stream.create () in
+    (* start async thread for IMAP write *)
+    async(fun() -> imap_async_write lmtp strm);
     Lwt_list.iter_p (fun port ->
-      server_on_port config.smtp_addr port config) config.smtp_port
+      server_on_port config.smtp_addr port push_strm lmtp config) config.smtp_port
     ) ()
   )
