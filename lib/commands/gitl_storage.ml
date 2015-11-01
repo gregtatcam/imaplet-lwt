@@ -20,6 +20,7 @@ open Storage
 open Storage_meta
 open Imaplet_types
 open Server_config
+open Mail_file_name
 open Gitl
 
 (* store message in git like storage, the only difference so far is in having
@@ -41,31 +42,30 @@ open Gitl
 
 module MapStr = Map.Make(String)
 
-type storage_ = {store:Gitl.t ref; user: string; mailbox: Key.t; config: imapConfig; keys: 
-  Ssl_.keys; index: (string * int) list ref; gitl_cache: cache_type;root_tree:Sha.t ref}
+type storage_ = {store:Gitl.t ref; user: string; mailbox: Key.t; config: imapConfig; keys: Ssl_.keys}
 
 module GitlStorage : Storage_intf with type t = storage_ = 
 struct
   type t = storage_
 
+  let metamessage_dir = "/.metamessage/"
+  let message_dir = "/.message/"
+
   let get_key t = function
     | `Index -> Key.add t.mailbox ".index"
-    | `Metamessage id -> Key.add t.mailbox ("/.metamessage/" ^ id)
+    | `Metamessage (uid,id) -> 
+      Key.add t.mailbox (String.concat "" [metamessage_dir; string_of_int uid; "."; id])
     | `Metamailbox -> Key.add t.mailbox ".metamailbox"
-    | `Message id -> Key.add t.mailbox ("/.message/" ^ id)
+    | `Message id -> Key.add t.mailbox (message_dir ^ id)
     | `Subscription -> Key.of_unix ".subscription"
 
   (* user,mailbox,keys *)
   let create config user mailbox keys =
-    let cache = ref MapStr.empty in
-    Gitl.create ~cache ~compress:config.compress_repo ~repo:config.irmin_path () >>= fun store ->
-    return {store=ref store;user;mailbox=Key.of_unix mailbox;config;keys;
-    index=ref [];gitl_cache=cache;root_tree=ref Sha.empty}
+    Gitl.create ?compress:config.compress_repo ~repo:config.irmin_path () >>= fun store ->
+    return {store=ref store;user;mailbox=Key.of_unix mailbox;config;keys}
 
   let update_with_sha t k v =
-    Gitl.update t.!store k v >>= fun (v'sha,sha) ->
-    t.root_tree := sha;
-    return (v'sha,sha)
+    Gitl.update t.!store k v
 
   let update t k v =
     update_with_sha t k v >>= fun (_,_) ->
@@ -77,33 +77,6 @@ struct
     | Some k -> Key.add t.mailbox k
     in
     Gitl.remove t.!store key >>= fun sha ->
-    t.root_tree := sha;
-    return ()
-
-  (* read message's index *)
-  let read_index t =
-    if t.!index = [] then (
-      Gitl.read_exn t.!store (get_key t `Index) >>= fun sexp_str ->
-      let uids = list_of_sexp
-        (fun i ->
-          pair_of_sexp (fun a -> Sexp.to_string a) (fun b -> int_of_string (Sexp.to_string b)) i
-        ) (Sexp.of_string sexp_str) in
-      t.index := uids;
-      return uids
-    ) else (
-      return t.!index
-    )
-
-  (* update message's index *)
-  let update_index t uids =
-    t.index := uids;
-    update t (get_key t `Index)
-      (Sexp.to_string (
-        sexp_of_list (
-          fun i -> sexp_of_pair 
-            (fun a -> Sexp.of_string a) (fun b -> Sexp.of_string (string_of_int b)) i
-          ) uids
-      )) >>= fun _ ->
     return ()
 
   (* check if mailbox exists *)
@@ -132,7 +105,7 @@ struct
       ~selectable:true in
     let sexp = sexp_of_mailbox_metadata metadata in
     update t (get_key t `Metamailbox) (Sexp.to_string sexp) >>= fun _ ->
-    update_index t []
+    return ()
 
   (* delete mailbox *)
   let delete t =
@@ -141,7 +114,6 @@ struct
   (* rename mailbox1 mailbox2 *)
   let rename t mailbox =
     Gitl.rename t.!store t.mailbox (Key.of_unix mailbox) >>= fun sha ->
-    t.root_tree := sha;
     return ()
 
   let read_subscription t =
@@ -195,70 +167,112 @@ struct
   let append t message message_metadata =
     let (pub_key,_) = t.keys in
     Email_parse.do_encrypt pub_key t.config message >>= fun message ->
-    update_with_sha t (get_key t (`Message "*")) message >>= fun (v'sha,_) ->
-    let sha_str = Sha.to_string v'sha in
-    update t (get_key t (`Metamessage sha_str))
-      (Sexp.to_string (sexp_of_mailbox_message_metadata message_metadata)) >>
-    read_index t >>= fun index ->
-    update_index t ((sha_str,message_metadata.uid) :: index)
+    if t.config.hybrid then (
+      let obj = Object.create ?compress:t.config.compress_repo t.config.irmin_path in
+      Object.write_raw obj message >>= fun v'sha ->
+      let sha_str = Sha.to_string v'sha in
+      update t (get_key t (`Metamessage (message_metadata.uid, sha_str)))
+        (Sexp.to_string (sexp_of_mailbox_message_metadata message_metadata))
+    ) else (
+      let id = Printf.sprintf "%d.<*>" message_metadata.uid in
+      let file = make_message_file_name ~init_file:(init_message_file_name_id id)
+        t.mailbox message_metadata in
+      update t (get_key t (`Message file)) message 
+    )
+
+  let re_uid_sha = Re_posix.compile_pat "^([0-9]+)\\.([^\\.]+)"
 
   let get_uid t pos =
-    read_index t >>= fun uids ->
-    match pos with
-    | `Sequence seq ->
-      if seq > List.length uids then
-        return `Eof
-      else if seq = 0 then
-        return `NotFound
-      else (
-        let (sha,uid) = List.nth uids ((List.length uids) - seq) in
-        return (`Ok (seq,uid,sha))
-      )
-    | `UID uid ->
-      (* should do binary search, the list is ordered *)
-      match Utils.list_findi uids (fun i (_,u) -> u = uid) with
-      | None -> 
-        let nth_uid uids n = 
-          let (_,uid) = List.nth uids n in
-          uid
-        in
-        if uid > nth_uid uids 0 then
+    let uid_sha str =
+      let subs = Re.exec re_uid_sha str in
+      (int_of_string (Re.get subs 1),Re.get subs 2)
+    in
+    begin
+    if t.config.hybrid then
+      Gitl.find_obj_opt t.!store (Key.add t.mailbox metamessage_dir)
+    else
+      Gitl.find_obj_opt t.!store (Key.add t.mailbox message_dir)
+    end >>= function
+    | `Tree tr ->
+      let len = List.length tr in
+      begin
+      match pos with
+      | `Sequence seq ->
+        if seq > len then
           return `Eof
-        else
+        else if seq = 0 then
           return `NotFound
-      | Some (seq,(sha,uid)) ->
-        return (`Ok ((List.length uids) - seq,uid,sha))
+        else (
+          let te = List.nth tr (len - seq) in
+          let uid,sha = uid_sha !te.name in
+          Log_.log `Info1 (Printf.sprintf "get_uid by seq: seq: %d, uid: %d, %s\n" 
+            seq uid !te.name);
+          return (`Ok (seq,uid,sha,!te.name))
+        )
+      | `UID uid ->
+        (* should do binary search, the list is ordered *)
+        match Utils.list_findi tr (fun i te -> 
+          Re.execp (Re_posix.compile_pat ("^" ^ (string_of_int uid) ^ "\\.")) !te.name
+        ) with
+        | None -> 
+          let nth_uid tr n = 
+            let te = List.nth tr n in
+            let (uid,_) = uid_sha !te.name in
+            uid
+          in
+          if uid > nth_uid tr 0 then
+            return `Eof
+          else
+            return `NotFound
+        | Some (seq,te) ->
+          let uid,sha = uid_sha !te.name in
+          Log_.log `Info1 (Printf.sprintf "get_uid by uid: seq: %d, uid: %d, %s\n" 
+            (len-seq) uid !te.name);
+          return (`Ok (len-seq,uid,sha,!te.name))
+      end
+    | _ -> return `NotFound
 
   let delete_ t k =
     Gitl.remove t.!store k >>= fun sha ->
-    t.root_tree := sha;
     return ()
 
   (* delete a message
    *)
   let delete_message t pos =
     get_uid t pos >>= function
-    | `Ok (_,uid,sha) ->
-      delete_ t (get_key t (`Message sha)) >>
-      delete_ t (get_key t (`Metamessage sha)) >>
-      read_index t >>= fun uids ->
-      update_index t (List.filter (fun (_,u) -> u <> uid) uids)
+    | `Ok (_,uid,sha,name) ->
+      if t.config.hybrid then
+        delete_ t (get_key t (`Metamessage (uid, sha)))
+      else
+        delete_ t (get_key t (`Message name))
     | _ -> return ()
 
-  let get_message_metadata t sha =
-    Gitl.read_exn t.!store (get_key t (`Metamessage sha)) >>= fun sexp_str ->
-    return (mailbox_message_metadata_of_sexp (Sexp.of_string sexp_str))
+  let get_message_metadata t uid sha name =
+    if t.config.hybrid then
+      Gitl.read_exn t.!store (get_key t (`Metamessage (uid, sha))) >>= fun sexp_str ->
+      return (mailbox_message_metadata_of_sexp (Sexp.of_string sexp_str))
+    else (
+      let (internal_date,size,modseq,flags) = message_file_name_to_data t.mailbox name in
+      return {uid;modseq;internal_date;size;flags}
+    )
 
   (* fetch messages from selected mailbox
   *)
   let fetch t pos =
     get_uid t pos >>= function
-    | `Ok (_,_,sha) -> 
+    | `Ok (_,uid,sha,name) -> 
       let open Lazy_maildir_message in
       let open Parsemail in
       let lazy_read = Lazy.from_fun (fun () -> 
         let tm = Unix.gettimeofday () in
-        Gitl.read_exn t.!store (get_key t (`Message sha))  >>= fun message ->
+        begin
+        if t.config.hybrid then (
+          let obj = Object.create ?compress:t.config.compress_repo t.config.irmin_path in
+          Object.read_raw obj (Sha.of_hex_string sha)
+        ) else (
+          Gitl.read_exn t.!store (get_key t (`Message name))
+        )
+        end >>= fun message ->
         Email_parse.message_unparsed_from_blob t.config t.keys message >>= fun message ->
         Stats.add_readt (Unix.gettimeofday() -. tm);
         return message
@@ -270,7 +284,7 @@ struct
           ~f:(fun _ message -> Some message) ~init:None))) in
       let lazy_metadata = Lazy.from_fun (fun () -> 
         let tm = Unix.gettimeofday() in
-        get_message_metadata t sha >>= fun meta ->
+        get_message_metadata t uid sha name >>= fun meta ->
         Stats.add_readmetat (Unix.gettimeofday() -. tm);
         return meta) in
       return (`Ok  (Lazy_message.build_lazy_message_inst (module LazyMaildirMessage) 
@@ -282,8 +296,8 @@ struct
   *)
   let fetch_message_metadata t pos =
     get_uid t pos >>= function
-    | `Ok (_,_,sha) -> 
-      get_message_metadata t sha >>= fun meta ->
+    | `Ok (_,uid,sha,name) -> 
+      get_message_metadata t uid sha name >>= fun meta ->
       return (`Ok meta)
     | `Eof -> return `Eof
     | `NotFound -> return `NotFound
@@ -291,9 +305,18 @@ struct
   (* store flags to selected mailbox *)
   let store t pos message_metadata =
     get_uid t pos >>= function
-    | `Ok (_,_,sha) -> 
-      update t (get_key t (`Metamessage sha))
-        (Sexp.to_string (sexp_of_mailbox_message_metadata message_metadata))
+    | `Ok (_,uid,sha,src) -> 
+      if t.config.hybrid then
+        update t (get_key t (`Metamessage (uid, sha)))
+          (Sexp.to_string (sexp_of_mailbox_message_metadata message_metadata))
+      else (
+        let dest = update_message_file_name t.mailbox src message_metadata in
+        let src = get_key t (`Message src) in
+        let dest = get_key t (`Message dest) in
+        Log_.log `Info1 (Printf.sprintf "renaming %s to %s\n" (Key.to_string src) (Key.to_string dest));
+        Gitl.rename t.!store ~src  ~dest >>= fun _ ->
+        return ()
+      )
     | _ -> return ()
 
   (* store mailbox metadata *)
@@ -305,19 +328,22 @@ struct
    *)
   let copy t pos t2 message_metadata =
     get_uid t pos >>= function
-    | `Ok (_,_,sha) -> (* message's sha *)
-      update t2 (get_key t2 (`Metamessage sha))
-        (Sexp.to_string (sexp_of_mailbox_message_metadata message_metadata)) >>
-      update_tree t2.!store (Key.add t2.mailbox "metamessage") 
-        (`Add (sha,`Dir,Sha.of_hex_string sha)) >>= fun _ ->
-      read_index t2 >>= fun index ->
-      update_index t2 ((sha,message_metadata.uid) :: index)
+    | `Ok (_,uid,sha,name) -> (* message's sha *)
+      if t.config.hybrid then (
+        update t2 (get_key t2 (`Metamessage (message_metadata.uid, sha)))
+          (Sexp.to_string (sexp_of_mailbox_message_metadata message_metadata))
+      ) else (
+        let file = update_message_file_name t2.mailbox name message_metadata in
+        Gitl.update_tree t.!store (Key.add t2.mailbox message_dir) 
+          (`Add (file,`Normal,Sha.of_hex_string sha)) >>= fun _ ->
+        return ()
+      )
     | _ -> return ()
 
   (* all operations that update the mailbox have to be completed with commit
    *)
   let commit t =
-    Gitl.commit t.!store t.!root_tree ~author:"<user@gitl>" 
+    Gitl.commit t.!store ~author:"<user@gitl>" 
       ~message:"consolidated commit" >>= fun store ->
     t.store := store;
     return ()
@@ -325,7 +351,7 @@ struct
   (* get sequence # for the given uid *)
   let uid_to_seq t uid =
     get_uid t (`UID uid) >>= function
-    | `Ok (seq,_,_) -> return (Some seq)
+    | `Ok (seq,_,_,_) -> return (Some seq)
     | _ -> return None
 
   (* create user account *)

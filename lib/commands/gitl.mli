@@ -17,6 +17,8 @@ open Lwt
 
 exception InvalidObject of string
 exception InvalidKey
+exception InvalidArgument of string
+exception InvalidCommit
 
 val gitreadt : float ref
 val gitcomprt : float ref
@@ -44,9 +46,9 @@ type commit =
   {tree:Sha.t;parent:Sha.t list;author:string;committer:string;message:string}
 type perm = [`Normal|`Exec|`Link|`Dir|`Commit]
 type tree_entry = {perm:perm;name:string;sha:Sha.t}
-type tree = tree_entry list
+type tree = tree_entry ref list
 type obj_type = [`Tree of tree|`Blob of string|`Commit of commit|`Tag of string|`None]
-type cache_type = ([`Read |`Write] * string * tree) Map.Make(String).t ref
+type cache_type = (string * Sha.t * tree) Map.Make(String).t ref
 
 module Commit :
 sig
@@ -83,7 +85,22 @@ sig
   val empty : t
 end
 
-val create : ?cache:cache_type -> ?compress:bool -> repo:string -> unit -> t Lwt.t
+module Object :
+sig
+  type t
+  val create : ?compress:int -> string -> t
+  val read : t -> Sha.t -> obj_type Lwt.t
+  val write : t -> [`Blob of string|`Tree of Tree.t|
+    `Commit of Commit.t|`Tag of string] -> Sha.t Lwt.t
+  val read_raw : t -> Sha.t -> string Lwt.t
+  val write_raw : t -> ?sha:Sha.t -> string -> Sha.t Lwt.t
+  val blob_sha : string -> Sha.t
+  val tree_sha : tree -> string * Sha.t
+  val exists : t -> Sha.t -> bool Lwt.t
+  val file_from_sha : t -> Sha.t -> string
+end
+
+val create : ?compress:int -> repo:string -> unit -> t Lwt.t
 
 val mem : t -> Key.t -> bool Lwt.t
 
@@ -105,16 +122,8 @@ val remove : t -> Key.t -> Sha.t Lwt.t
 
 val rename : t -> src:Key.t -> dest:Key.t -> Sha.t Lwt.t
 
-(* commit root's tree sha, return updated gitl *)
-val commit : t -> Sha.t -> author:string -> message:string -> t Lwt.t
-
-(* combines update and commit, return sha of updated object and updated gitl *)
-val update_with_commit : t -> author:string -> message:string -> Key.t -> string -> (Sha.t*t) Lwt.t
-
-val remove_with_commit : t -> author:string -> message:string -> Key.t -> string -> t Lwt.t
-
-val rename_with_commit : t -> author:string -> message:string -> src:Key.t ->
-  dest:Key.t -> string -> t Lwt.t
+(* commit return updated gitl *)
+val commit : t -> author:string -> message:string -> t Lwt.t
 
 val list : t -> ?filter_blob:bool -> Key.t -> Key.t list Lwt.t
 
@@ -127,7 +136,8 @@ val find_sha_opt : t -> Key.t -> Sha.t option Lwt.t
 
 val find_sha_exn : t -> Key.t -> Sha.t Lwt.t
 
-val write_ : ?append:bool -> ?preempt:bool -> ?compress:bool -> file:string ->
-  string -> unit Lwt.t
+val find_obj_opt : t -> ?leaf:bool -> Key.t -> obj_type Lwt.t
 
-val read_ : ?compress:bool -> ?preempt:bool -> string -> string Lwt.t
+val write_ : ?preempt:bool -> ?compress:int -> file:string -> string -> unit Lwt.t
+
+val read_ : ?compress:int -> ?preempt:bool -> string -> Mstruct.t Lwt.t

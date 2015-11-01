@@ -17,7 +17,6 @@ open Storage
 open Server_config
 open Gitl
 
-type storage_ = {store:Gitl.t ref; user: string; mailbox: Key.t; config: imapConfig; keys: 
-  Ssl_.keys; index: (string * int) list ref; gitl_cache: cache_type;root_tree:Sha.t ref}
+type storage_ = {store:Gitl.t ref; user: string; mailbox: Key.t; config: imapConfig; keys: Ssl_.keys}
 
 module GitlStorage : Storage_intf with type t = storage_
