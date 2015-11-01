@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: a2b8d7c6952e12c70188dce2f691fa9c)
+# DO NOT EDIT (digest: dbb17c8951ba2ce01e47cc6f212c7546)
 version = "0.1.15"
 description = "IMAP server"
 requires =
@@ -24,7 +24,7 @@ package "commands" (
  version = "0.1.15"
  description = "IMAP server"
  requires =
- "lwt lwt.unix lwt.syntax lwt.preemptive tls.lwt dns dns.lwt ipaddr sexplib.syntax threads str cstruct.unix irmin.unix nocrypto imaplet.parsemail"
+ "lwt lwt.unix lwt.syntax lwt.preemptive tls.lwt dns dns.lwt ipaddr sexplib.syntax threads str cstruct.unix mstruct irmin.unix nocrypto imaplet.parsemail"
  archive(byte) = "commands.cma"
  archive(byte, plugin) = "commands.cma"
  archive(native) = "commands.cmxa"

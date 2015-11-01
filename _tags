@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: c99a70a7de5c53a3dfd836878bde76da)
+# DO NOT EDIT (digest: 93503fd5573f90224cddbc4baaa30b2b)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -76,6 +76,7 @@ true: annot, bin_annot
 "lib/commands/log_.cmx": for-pack(Commands)
 "lib/commands/mailbox_storage.cmx": for-pack(Commands)
 "lib/commands/maildir_storage.cmx": for-pack(Commands)
+"lib/commands/mail_file_name.cmx": for-pack(Commands)
 "lib/commands/parser.cmx": for-pack(Commands)
 "lib/commands/regex.cmx": for-pack(Commands)
 "lib/commands/replica_maint.cmx": for-pack(Commands)
@@ -99,6 +100,7 @@ true: annot, bin_annot
 <lib/commands/*.ml{,i,y}>: pkg_lwt.preemptive
 <lib/commands/*.ml{,i,y}>: pkg_lwt.syntax
 <lib/commands/*.ml{,i,y}>: pkg_lwt.unix
+<lib/commands/*.ml{,i,y}>: pkg_mstruct
 <lib/commands/*.ml{,i,y}>: pkg_nocrypto
 <lib/commands/*.ml{,i,y}>: pkg_re
 <lib/commands/*.ml{,i,y}>: pkg_re.posix
@@ -120,6 +122,7 @@ true: annot, bin_annot
 <lib/*.ml{,i,y}>: pkg_lwt.preemptive
 <lib/*.ml{,i,y}>: pkg_lwt.syntax
 <lib/*.ml{,i,y}>: pkg_lwt.unix
+<lib/*.ml{,i,y}>: pkg_mstruct
 <lib/*.ml{,i,y}>: pkg_nocrypto
 <lib/*.ml{,i,y}>: pkg_re
 <lib/*.ml{,i,y}>: pkg_re.posix
@@ -140,6 +143,7 @@ true: annot, bin_annot
 "test/parse_restore.native": pkg_lwt.preemptive
 "test/parse_restore.native": pkg_lwt.syntax
 "test/parse_restore.native": pkg_lwt.unix
+"test/parse_restore.native": pkg_mstruct
 "test/parse_restore.native": pkg_nocrypto
 "test/parse_restore.native": pkg_re
 "test/parse_restore.native": pkg_re.posix
@@ -161,6 +165,7 @@ true: annot, bin_annot
 "test/dedup.native": pkg_lwt.preemptive
 "test/dedup.native": pkg_lwt.syntax
 "test/dedup.native": pkg_lwt.unix
+"test/dedup.native": pkg_mstruct
 "test/dedup.native": pkg_nocrypto
 "test/dedup.native": pkg_re
 "test/dedup.native": pkg_re.posix
@@ -182,6 +187,7 @@ true: annot, bin_annot
 "servers/imaplet_configure.native": pkg_lwt.preemptive
 "servers/imaplet_configure.native": pkg_lwt.syntax
 "servers/imaplet_configure.native": pkg_lwt.unix
+"servers/imaplet_configure.native": pkg_mstruct
 "servers/imaplet_configure.native": pkg_nocrypto
 "servers/imaplet_configure.native": pkg_re
 "servers/imaplet_configure.native": pkg_re.posix
@@ -203,6 +209,7 @@ true: annot, bin_annot
 "servers/imaplet_server.native": pkg_lwt.preemptive
 "servers/imaplet_server.native": pkg_lwt.syntax
 "servers/imaplet_server.native": pkg_lwt.unix
+"servers/imaplet_server.native": pkg_mstruct
 "servers/imaplet_server.native": pkg_nocrypto
 "servers/imaplet_server.native": pkg_re
 "servers/imaplet_server.native": pkg_re.posix
@@ -224,6 +231,7 @@ true: annot, bin_annot
 "servers/imaplet_create_account.native": pkg_lwt.preemptive
 "servers/imaplet_create_account.native": pkg_lwt.syntax
 "servers/imaplet_create_account.native": pkg_lwt.unix
+"servers/imaplet_create_account.native": pkg_mstruct
 "servers/imaplet_create_account.native": pkg_nocrypto
 "servers/imaplet_create_account.native": pkg_re
 "servers/imaplet_create_account.native": pkg_re.posix
@@ -245,6 +253,7 @@ true: annot, bin_annot
 "deploy/imaplet_deploy.native": pkg_lwt.preemptive
 "deploy/imaplet_deploy.native": pkg_lwt.syntax
 "deploy/imaplet_deploy.native": pkg_lwt.unix
+"deploy/imaplet_deploy.native": pkg_mstruct
 "deploy/imaplet_deploy.native": pkg_nocrypto
 "deploy/imaplet_deploy.native": pkg_re
 "deploy/imaplet_deploy.native": pkg_re.posix
@@ -265,6 +274,7 @@ true: annot, bin_annot
 <deploy/*.ml{,i,y}>: pkg_lwt.preemptive
 <deploy/*.ml{,i,y}>: pkg_lwt.syntax
 <deploy/*.ml{,i,y}>: pkg_lwt.unix
+<deploy/*.ml{,i,y}>: pkg_mstruct
 <deploy/*.ml{,i,y}>: pkg_nocrypto
 <deploy/*.ml{,i,y}>: pkg_re
 <deploy/*.ml{,i,y}>: pkg_re.posix
@@ -286,6 +296,7 @@ true: annot, bin_annot
 "servers/imaplet_lmtp.native": pkg_lwt.preemptive
 "servers/imaplet_lmtp.native": pkg_lwt.syntax
 "servers/imaplet_lmtp.native": pkg_lwt.unix
+"servers/imaplet_lmtp.native": pkg_mstruct
 "servers/imaplet_lmtp.native": pkg_nocrypto
 "servers/imaplet_lmtp.native": pkg_re
 "servers/imaplet_lmtp.native": pkg_re.posix
@@ -307,6 +318,7 @@ true: annot, bin_annot
 "servers/smtplet.native": pkg_lwt.preemptive
 "servers/smtplet.native": pkg_lwt.syntax
 "servers/smtplet.native": pkg_lwt.unix
+"servers/smtplet.native": pkg_mstruct
 "servers/smtplet.native": pkg_nocrypto
 "servers/smtplet.native": pkg_re
 "servers/smtplet.native": pkg_re.posix
@@ -329,6 +341,7 @@ true: annot, bin_annot
 "servers/imaplet_irmin_read.native": pkg_lwt.preemptive
 "servers/imaplet_irmin_read.native": pkg_lwt.syntax
 "servers/imaplet_irmin_read.native": pkg_lwt.unix
+"servers/imaplet_irmin_read.native": pkg_mstruct
 "servers/imaplet_irmin_read.native": pkg_nocrypto
 "servers/imaplet_irmin_read.native": pkg_re
 "servers/imaplet_irmin_read.native": pkg_re.posix
@@ -349,6 +362,7 @@ true: annot, bin_annot
 "servers/imaplet_irmin_build.native": pkg_lwt.preemptive
 "servers/imaplet_irmin_build.native": pkg_lwt.syntax
 "servers/imaplet_irmin_build.native": pkg_lwt.unix
+"servers/imaplet_irmin_build.native": pkg_mstruct
 "servers/imaplet_irmin_build.native": pkg_nocrypto
 "servers/imaplet_irmin_build.native": pkg_re
 "servers/imaplet_irmin_build.native": pkg_re.posix
@@ -369,6 +383,7 @@ true: annot, bin_annot
 "servers/imaplet_maildir_index.native": pkg_lwt.preemptive
 "servers/imaplet_maildir_index.native": pkg_lwt.syntax
 "servers/imaplet_maildir_index.native": pkg_lwt.unix
+"servers/imaplet_maildir_index.native": pkg_mstruct
 "servers/imaplet_maildir_index.native": pkg_nocrypto
 "servers/imaplet_maildir_index.native": pkg_re
 "servers/imaplet_maildir_index.native": pkg_re.posix
@@ -389,6 +404,7 @@ true: annot, bin_annot
 <servers/*.ml{,i,y}>: pkg_lwt.preemptive
 <servers/*.ml{,i,y}>: pkg_lwt.syntax
 <servers/*.ml{,i,y}>: pkg_lwt.unix
+<servers/*.ml{,i,y}>: pkg_mstruct
 <servers/*.ml{,i,y}>: pkg_nocrypto
 <servers/*.ml{,i,y}>: pkg_re
 <servers/*.ml{,i,y}>: pkg_re.posix
@@ -410,6 +426,7 @@ true: annot, bin_annot
 "utils/imaplet_init_maildir.native": pkg_lwt.preemptive
 "utils/imaplet_init_maildir.native": pkg_lwt.syntax
 "utils/imaplet_init_maildir.native": pkg_lwt.unix
+"utils/imaplet_init_maildir.native": pkg_mstruct
 "utils/imaplet_init_maildir.native": pkg_nocrypto
 "utils/imaplet_init_maildir.native": pkg_re
 "utils/imaplet_init_maildir.native": pkg_re.posix
@@ -431,6 +448,7 @@ true: annot, bin_annot
 "utils/get_messages.native": pkg_lwt.preemptive
 "utils/get_messages.native": pkg_lwt.syntax
 "utils/get_messages.native": pkg_lwt.unix
+"utils/get_messages.native": pkg_mstruct
 "utils/get_messages.native": pkg_nocrypto
 "utils/get_messages.native": pkg_re
 "utils/get_messages.native": pkg_re.posix
@@ -463,6 +481,7 @@ true: annot, bin_annot
 "utils/smtp_client.native": pkg_lwt.preemptive
 "utils/smtp_client.native": pkg_lwt.syntax
 "utils/smtp_client.native": pkg_lwt.unix
+"utils/smtp_client.native": pkg_mstruct
 "utils/smtp_client.native": pkg_nocrypto
 "utils/smtp_client.native": pkg_re
 "utils/smtp_client.native": pkg_re.posix
@@ -484,6 +503,7 @@ true: annot, bin_annot
 "test/test_gitl.native": pkg_lwt.preemptive
 "test/test_gitl.native": pkg_lwt.syntax
 "test/test_gitl.native": pkg_lwt.unix
+"test/test_gitl.native": pkg_mstruct
 "test/test_gitl.native": pkg_nocrypto
 "test/test_gitl.native": pkg_re
 "test/test_gitl.native": pkg_re.posix
@@ -506,6 +526,7 @@ true: annot, bin_annot
 "test/maildir_read.native": pkg_lwt.preemptive
 "test/maildir_read.native": pkg_lwt.syntax
 "test/maildir_read.native": pkg_lwt.unix
+"test/maildir_read.native": pkg_mstruct
 "test/maildir_read.native": pkg_nocrypto
 "test/maildir_read.native": pkg_re
 "test/maildir_read.native": pkg_re.posix
@@ -528,6 +549,7 @@ true: annot, bin_annot
 "test/irvsfsio.native": pkg_lwt.preemptive
 "test/irvsfsio.native": pkg_lwt.syntax
 "test/irvsfsio.native": pkg_lwt.unix
+"test/irvsfsio.native": pkg_mstruct
 "test/irvsfsio.native": pkg_nocrypto
 "test/irvsfsio.native": pkg_re
 "test/irvsfsio.native": pkg_re.posix
@@ -539,33 +561,57 @@ true: annot, bin_annot
 "test/irvsfsio.native": use_commands
 "test/irvsfsio.native": use_imaplet
 "test/irvsfsio.native": use_parsemail
-<test/*.ml{,i,y}>: pkg_cstruct.unix
-<test/*.ml{,i,y}>: pkg_dns
-<test/*.ml{,i,y}>: pkg_dns.lwt
-<test/*.ml{,i,y}>: pkg_fieldslib.syntax
-<test/*.ml{,i,y}>: pkg_ipaddr
-<test/*.ml{,i,y}>: pkg_irmin.unix
-<test/*.ml{,i,y}>: pkg_lwt.preemptive
-<test/*.ml{,i,y}>: pkg_nocrypto
-<test/*.ml{,i,y}>: pkg_re
-<test/*.ml{,i,y}>: pkg_re.posix
-<test/*.ml{,i,y}>: pkg_sexplib.syntax
-<test/*.ml{,i,y}>: pkg_str
-<test/*.ml{,i,y}>: pkg_tls.lwt
-<test/*.ml{,i,y}>: use_commands
-<test/*.ml{,i,y}>: use_imaplet
-<test/*.ml{,i,y}>: use_parsemail
 # Executable irvsfsio_cl
 "test/irvsfsio_cl.native": pkg_lwt
 "test/irvsfsio_cl.native": pkg_lwt.syntax
 "test/irvsfsio_cl.native": pkg_lwt.unix
 "test/irvsfsio_cl.native": pkg_threads
 "test/irvsfsio_cl.native": pkg_unix
+# Executable email_server
+"test/email_server.native": pkg_cstruct.unix
+"test/email_server.native": pkg_dns
+"test/email_server.native": pkg_dns.lwt
+"test/email_server.native": pkg_fieldslib.syntax
+"test/email_server.native": pkg_ipaddr
+"test/email_server.native": pkg_irmin.unix
+"test/email_server.native": pkg_lwt
+"test/email_server.native": pkg_lwt.preemptive
+"test/email_server.native": pkg_lwt.syntax
+"test/email_server.native": pkg_lwt.unix
+"test/email_server.native": pkg_mstruct
+"test/email_server.native": pkg_nocrypto
+"test/email_server.native": pkg_re
+"test/email_server.native": pkg_re.posix
+"test/email_server.native": pkg_sexplib.syntax
+"test/email_server.native": pkg_str
+"test/email_server.native": pkg_threads
+"test/email_server.native": pkg_tls.lwt
+"test/email_server.native": pkg_unix
+"test/email_server.native": use_commands
+"test/email_server.native": use_imaplet
+"test/email_server.native": use_parsemail
+<test/*.ml{,i,y}>: pkg_cstruct.unix
+<test/*.ml{,i,y}>: pkg_dns
+<test/*.ml{,i,y}>: pkg_dns.lwt
+<test/*.ml{,i,y}>: pkg_fieldslib.syntax
+<test/*.ml{,i,y}>: pkg_ipaddr
+<test/*.ml{,i,y}>: pkg_irmin.unix
 <test/*.ml{,i,y}>: pkg_lwt
+<test/*.ml{,i,y}>: pkg_lwt.preemptive
 <test/*.ml{,i,y}>: pkg_lwt.syntax
 <test/*.ml{,i,y}>: pkg_lwt.unix
+<test/*.ml{,i,y}>: pkg_mstruct
+<test/*.ml{,i,y}>: pkg_nocrypto
+<test/*.ml{,i,y}>: pkg_re
+<test/*.ml{,i,y}>: pkg_re.posix
+<test/*.ml{,i,y}>: pkg_sexplib.syntax
+<test/*.ml{,i,y}>: pkg_str
 <test/*.ml{,i,y}>: pkg_threads
+<test/*.ml{,i,y}>: pkg_tls.lwt
 <test/*.ml{,i,y}>: pkg_unix
+<test/*.ml{,i,y}>: use_commands
+<test/*.ml{,i,y}>: use_imaplet
+<test/*.ml{,i,y}>: use_parsemail
 # Executable stun
 "utils/stun.native": pkg_cstruct.unix
 "utils/stun.native": pkg_dns
@@ -577,6 +623,7 @@ true: annot, bin_annot
 "utils/stun.native": pkg_lwt.preemptive
 "utils/stun.native": pkg_lwt.syntax
 "utils/stun.native": pkg_lwt.unix
+"utils/stun.native": pkg_mstruct
 "utils/stun.native": pkg_nocrypto
 "utils/stun.native": pkg_re
 "utils/stun.native": pkg_re.posix
@@ -597,6 +644,7 @@ true: annot, bin_annot
 <utils/*.ml{,i,y}>: pkg_lwt.preemptive
 <utils/*.ml{,i,y}>: pkg_lwt.syntax
 <utils/*.ml{,i,y}>: pkg_lwt.unix
+<utils/*.ml{,i,y}>: pkg_mstruct
 <utils/*.ml{,i,y}>: pkg_nocrypto
 <utils/*.ml{,i,y}>: pkg_re
 <utils/*.ml{,i,y}>: pkg_re.posix

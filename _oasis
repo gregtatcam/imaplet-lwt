@@ -113,6 +113,7 @@ Library commands
                     Log_,
                     Mailbox_storage,
                     Maildir_storage,
+                    Mail_file_name,
                     Parser,
                     Regex,
                     Replica_maint,
@@ -138,6 +139,7 @@ Library commands
                     threads,
                     str,
                     cstruct.unix,
+                    mstruct,
                     irmin.unix,
                     nocrypto,
                     imaplet.parsemail
@@ -301,6 +303,14 @@ Executable irvsfsio_cl
   CompiledObject  : native
   MainIs	  : irvsfsio_cl.ml
   BuildDepends	  : unix,threads,lwt,lwt.unix,lwt.syntax
+
+Executable email_server
+  Build$:           flag(test)
+  Install	  : false
+  Path		  : test
+  CompiledObject  : native
+  MainIs	  : email_server.ml
+  BuildDepends	  : unix,threads,lwt,lwt.unix,lwt.syntax,re,re.posix,imaplet,imaplet.commands
 
 Executable stun
   Build		  : true
