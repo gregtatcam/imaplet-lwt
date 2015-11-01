@@ -43,8 +43,8 @@ type imapConfig = {
   encrypt : bool; (* encrypt messages, default true *)
   compress : bool; (* compress messages, but not attachments, default true *)
   compress_attach : bool; (* compress attachments, default false *)
-  compress_repo : bool; (* repository compress, gitl only so far, should use
-  level 0 for irmin, default false *)
+  compress_repo : int option; (* repository compress, gitl only so far, should use
+  level 0 for irmin, default None *)
   user_cert_path : string; (* user's certificate/key location *)
   log : string; (* log location, default /var/log *)
   log_level:[`Error|`Info1|`Info2|`Info3|`Debug|`None]; (* log level, default error *)
@@ -93,7 +93,7 @@ let default_config = {
   encrypt = true;
   compress = true;
   compress_attach = false;
-  compress_repo = false;
+  compress_repo = None;
   user_cert_path = "/var/mail/accounts/%user%/cert";
   log = "/var/log";
   log_level = `Error;
@@ -260,7 +260,9 @@ let config_of_lines lines =
           | "encrypt" -> {acc with encrypt = (bval n v true)}
           | "compress" -> {acc with compress = (bval n v true)}
           | "compress_attach" -> {acc with compress_attach = (bval n v true)}
-          | "compress_repo" -> {acc with compress_repo = (bval n v false)}
+          | "compress_repo" -> 
+            let compress_repo = if v = "-" then None else Some (int_of_string v) in
+            {acc with compress_repo}
           | "auth_required" -> {acc with auth_required = (bval n v true)}
           | "user_cert_path" -> {acc with user_cert_path = v}
           | "idle_interval" -> {acc with idle_interval = fval n v 120.}

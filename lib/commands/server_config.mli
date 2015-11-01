@@ -42,8 +42,8 @@ type imapConfig = {
   encrypt : bool; (* encrypt messages, default true *)
   compress : bool; (* compress messages, but not attachments, default true *)
   compress_attach : bool; (* compress attachments, default false *)
-  compress_repo : bool; (* repository compress, gitl only so far, should use
-  level 0 for irmin, default false *)
+  compress_repo : int option; (* repository compress, gitl only so far, should use
+  level 0 for irmin, default None *)
   user_cert_path : string; (* user's certificate/key location *)
   log : string; (* log location, default /var/log *)
   log_level:[`Error|`Info1|`Info2|`Info3|`Debug|`None]; (* log level, default error *)
