@@ -74,14 +74,15 @@ single maildir_parse compress_repo =
     | "-m" -> args (i+2) user force mbox_type ignore encrypt compress
     compressattch hybrid single (bool_of_string Sys.argv.(i+1)) compress_repo
     | "-cr" -> args (i+2) user force mbox_type ignore encrypt compress
-    compressattch hybrid single maildir_parse (bool_of_string Sys.argv.(i+1))
+    compressattch hybrid single maildir_parse (if Sys.argv.(i+1) = "-" then None
+    else Some (int_of_string Sys.argv.(i+1)))
     | _ -> raise InvalidCommand
   )
 
 let usage () =
   Printf.printf "usage: imaplet_create_account -u [user:pswd] [-f] -t
   [irmin|workdir|maildir|mbox|gitl] [-i] -e [true|false] -c [true|false] -ca
-  [true|false] -cr [true|false] -h [true|false] -s [true|false] -m [true|false]\n%!"
+  [true|false] -cr [-0-9] -h [true|false] -s [true|false] -m [true|false]\n%!"
 
 let commands f =
   try 
@@ -154,15 +155,19 @@ let frmt_bool = function
   | true -> 't'
   | false -> 'f'
 
+let frmt_level = function
+  | None -> "-"
+  | Some i -> Printf.sprintf "%d" i
+
 let user_config mbox_type ~encrypt ~compress ~compressattch ~hybrid ~single
 ~maildir_parse ~compress_repo =
-  Printf.sprintf "%s:a%c:e%c:c%c%c%c:s%c:h%c:m%c"
+  Printf.sprintf "%s:a%c:e%c:c%c%c%s:s%c:h%c:m%c"
   (mbox_type_to_string mbox_type)
   (frmt_bool srv_config.auth_required)
   (frmt_bool encrypt)
   (frmt_bool compress)
   (frmt_bool compressattch)
-  (frmt_bool compress_repo)
+  (frmt_level compress_repo)
   (frmt_bool single)
   (frmt_bool hybrid)
   (frmt_bool maildir_parse)
