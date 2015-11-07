@@ -21,3 +21,6 @@ test_gitl: test_gitl.ml
 
 clean:
 	rm -rf *.cmx *.cmi *.o *.native _build 
+
+email_stats: email_stats.ml
+	ocamlfind ocamlopt -thread -o email_stats -linkpkg -package imaplet,imaplet.commands,imaplet.parsemail,lwt,lwt.syntax,lwt.unix,re,re.posix email_stats.ml

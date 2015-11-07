@@ -312,6 +312,14 @@ Executable email_server
   MainIs	  : email_server.ml
   BuildDepends	  : unix,threads,lwt,lwt.unix,lwt.syntax,re,re.posix,imaplet,imaplet.commands
 
+Executable email_stats
+  Build$:           flag(test)
+  Install	  : false
+  Path		  : test
+  CompiledObject  : native
+  MainIs	  : email_stats.ml
+  BuildDepends	  : unix,threads,lwt,lwt.unix,lwt.syntax,re,re.posix,imaplet,imaplet.commands
+
 Executable stun
   Build		  : true
   Install	  : false

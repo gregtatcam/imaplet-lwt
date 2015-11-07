@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: 93503fd5573f90224cddbc4baaa30b2b)
+# DO NOT EDIT (digest: 5dd8ab3f4bdca7ef2684d11c1d7210c1)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -590,6 +590,29 @@ true: annot, bin_annot
 "test/email_server.native": use_commands
 "test/email_server.native": use_imaplet
 "test/email_server.native": use_parsemail
+# Executable email_stats
+"test/email_stats.native": pkg_cstruct.unix
+"test/email_stats.native": pkg_dns
+"test/email_stats.native": pkg_dns.lwt
+"test/email_stats.native": pkg_fieldslib.syntax
+"test/email_stats.native": pkg_ipaddr
+"test/email_stats.native": pkg_irmin.unix
+"test/email_stats.native": pkg_lwt
+"test/email_stats.native": pkg_lwt.preemptive
+"test/email_stats.native": pkg_lwt.syntax
+"test/email_stats.native": pkg_lwt.unix
+"test/email_stats.native": pkg_mstruct
+"test/email_stats.native": pkg_nocrypto
+"test/email_stats.native": pkg_re
+"test/email_stats.native": pkg_re.posix
+"test/email_stats.native": pkg_sexplib.syntax
+"test/email_stats.native": pkg_str
+"test/email_stats.native": pkg_threads
+"test/email_stats.native": pkg_tls.lwt
+"test/email_stats.native": pkg_unix
+"test/email_stats.native": use_commands
+"test/email_stats.native": use_imaplet
+"test/email_stats.native": use_parsemail
 <test/*.ml{,i,y}>: pkg_cstruct.unix
 <test/*.ml{,i,y}>: pkg_dns
 <test/*.ml{,i,y}>: pkg_dns.lwt
