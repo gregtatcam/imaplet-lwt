@@ -293,6 +293,6 @@ let postmark_date_time ?time () =
   | None -> ImapTime.to_float (ImapTime.now()) 
   in
   let tm = Unix.gmtime time in
-  Printf.sprintf "%s %s %d %02d:%02d:%02d %d"
+  Printf.sprintf "%s %s %02d %02d:%02d:%02d %d"
     (day_of_week tm.Unix.tm_wday) (int_to_month tm.Unix.tm_mon) tm.Unix.tm_mday
     tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec (1900+tm.Unix.tm_year)
