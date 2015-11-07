@@ -261,7 +261,7 @@ let config_of_lines lines =
           | "compress" -> {acc with compress = (bval n v true)}
           | "compress_attach" -> {acc with compress_attach = (bval n v true)}
           | "compress_repo" -> 
-            let compress_repo = if v = "-" then None else Some (int_of_string v) in
+            let compress_repo = if v = "-" then None else Some (ival n v 6) in
             {acc with compress_repo}
           | "auth_required" -> {acc with auth_required = (bval n v true)}
           | "user_cert_path" -> {acc with user_cert_path = v}
