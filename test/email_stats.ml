@@ -7,58 +7,44 @@ open Parsemail
 module MapStr = Map.Make(String)
 
 exception InvalidCommand
-exception FailedPubKey
-exception FailedLogin
 exception Failed
+exception LoginFailed
 
 let echoterm = ref false
 
-let cert = 
-"-----BEGIN CERTIFICATE-----
-MIICWDCCAcGgAwIBAgIJAPHg+v48OaXDMA0GCSqGSIb3DQEBBQUAMEUxCzAJBgNV
-BAYTAkFVMRMwEQYDVQQIDApTb21lLVN0YXRlMSEwHwYDVQQKDBhJbnRlcm5ldCBX
-aWRnaXRzIFB0eSBMdGQwHhcNMTUwODI1MDkzMjI5WhcNMTUwOTI0MDkzMjI5WjBF
-MQswCQYDVQQGEwJBVTETMBEGA1UECAwKU29tZS1TdGF0ZTEhMB8GA1UECgwYSW50
-ZXJuZXQgV2lkZ2l0cyBQdHkgTHRkMIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKB
-gQDpZlJPshUhIPVMxOHq+d1R1L4CiiyjEyapugvyz2QHAhjtu6JN37BhdjTsXWLT
-jgd9FsBD5cfat6+8RZw1+UOiQQvT4wB3fXCTpy8zIfwVvJ4gR/mCwLIVyCSZHikZ
-KdYB1tjLayD67sO4XGhSZX1cnGQ8xBiTIphkFdIa/hyLIwIDAQABo1AwTjAdBgNV
-HQ4EFgQUtLWV6EsgxskDqIVBuodaUaqokcIwHwYDVR0jBBgwFoAUtLWV6EsgxskD
-qIVBuodaUaqokcIwDAYDVR0TBAUwAwEB/zANBgkqhkiG9w0BAQUFAAOBgQCOZYxI
-keLyha3YsuxHOpn3O2U6E4En0nOJg8zhvIxPu/erlTDiH/iBE5d8AsnV5MrSPKMj
-bstEZzeFVO2ZXtr2V6lsTSo8pePLXwbKEqPjivvcPlLptlO+EVG2u1jCsVEO5Q1M
-eZjV46t4w1tSsbwfnWz3xSnHViIWNJOao7jqzQ==
------END CERTIFICATE-----"
-
-let pub_of_cert_string cert =
-  let cert = Certificate.of_pem_cstruct1 (Cstruct.of_string cert) in
-  match (X509.public_key cert) with
-  | `RSA pub_key -> pub_key
-  | _ -> raise FailedPubKey
-
 let echo_on on =
-  (*
-  Lwt_unix.tcgetattr Lwt_unix.stdin >>= fun io ->
-  let io = {io with Unix.c_echo = on} in
-  Lwt_unix.tcsetattr Lwt_unix.stdin Unix.TCSANOW io
-  *)
   Lwt_unix.system (Printf.sprintf "stty %secho" (if on then "" else "-")) >>=
     fun _ -> return ()
 
+let gmail host = if host = "imap.gmail.com" then true else false
+
 let get_arch str =
-  let re = Re_posix.compile_pat "^(mbox|maildir|imap):(.+)$" in
+  let re = Re_posix.compile_pat "^(mbox|maildir|imap|imap-dld):(.+)$" in
   let subs = Re.exec re str in
   let arch = Re.get subs 1 in
   let args = Re.get subs 2 in
   match arch with
   | "mbox" -> `Mbox args
   | "maildir" -> `Maildir args
-  | "imap" ->
+  | "imap" | "imap-dld" ->
     let re = Re_posix.compile_pat "^([^:]+)(:([0-9]+))?$" in
     let subs = Re.exec re args in
-    let host = Re.get subs 1 in
+    let host = 
+      match Re.get subs 1 with
+      | "gmail" -> "imap.gmail.com"
+      | "yahoo" -> "imap.mail.yahoo.com"
+      | "outlook" -> "imap-mail.outlook.com"
+      | "aol" -> "imap.aol.com"
+      | "icloud" -> "imap.mail.me.com"
+      | "mail" -> "imap.mail.com"
+      | "hermes" -> "imap.hermes.cam.ac.uk"
+      | other -> other
+    in
     let port = try Some (int_of_string (Re.get subs 3)) with Not_found -> None in
-    `Imap (host,port)
+    if arch = "imap" then
+      `Imap (host,port)
+    else
+      `ImapDld (host,port)
   | _ -> raise InvalidCommand
 
 let opt_val = function
@@ -70,16 +56,18 @@ let rec args i archive echo =
     archive,echo
   else
     match Sys.argv.(i) with 
-    | "-archive" -> args (i+2) (Some (get_arch Sys.argv.(i+1))) echo
-    | "-echo" -> args (i+1) archive true
+    | "-archive" -> args (i+2) (Some (get_arch Sys.argv.(i+1))) echo 
+    | "-echo" -> args (i+1) archive true 
     | _ -> raise InvalidCommand
 
 let commands f =
   try 
     let archive,echo = args 1 None false in
     f (opt_val archive) echo
-  with _ ->
+  with 
+    | InvalidCommand ->
     Printf.printf "usage: email_stats -archive [mbox:file|imap:server:port:user:password]\n%!"
+    | _ -> ()
 
 
 let email_addr = ref MapStr.empty
@@ -112,6 +100,7 @@ let get_attach key =
   get_unique key attachments_cnt attachments 
 
 let get_mailbox key =
+  let key = Re.replace_string (Re_posix.compile_pat "^\"|\"$") ~by:"" key in
   get_unique key mailboxes_cnt mailboxes 
 
 let get_subject key =
@@ -124,8 +113,9 @@ let headers_to_map headers =
   List.fold_left (fun map (n,v) ->
     let n = String.lowercase n in
     if n = "from" || n = "to" || n = "cc" || n = "subject" || n = "object-id" || 
-        n = "in-reply-to" || n = "x-gmail-labels" || n = "content-type" || n = "date" then
-      MapStr.add n v map
+        n = "in-reply-to" || n = "x-gmail-labels" || n = "content-type" || 
+        n = "date" || n = "message-id" then
+      MapStr.add n (String.trim v) map
     else
       map
   ) MapStr.empty headers
@@ -172,11 +162,20 @@ let _gmail_labels headers =
   if h = "" then
     get_mailbox "inbox"
   else (
-  let l = Re.split (Re_posix.compile_pat ",") h in
-  String.concat "," (List.map (fun h ->
-    let h = String.lowercase h in
-    get_mailbox h
-  ) l)
+    let l = Re.split (Re_posix.compile_pat ",") h in
+    String.concat "," (List.map (fun h ->
+      if Re.execp (Re_posix.compile_pat "[[]Gmail[]]") h = false then (
+        let m = Re.split (Re_posix.compile_pat "/") h in
+        if List.length m > 1 then (
+          String.concat "/" (List.map (fun m ->
+            get_mailbox (String.lowercase m)
+          ) m)
+        ) else (
+          get_mailbox (String.lowercase h)
+        )
+      ) else
+        get_mailbox h
+    ) l)
   )
 
 let _messageid headers =
@@ -272,11 +271,18 @@ let mailboxes_init () =
   let _ = get_mailbox "inbox" in
   let _ = get_mailbox "sent" in
   let _ = get_mailbox "sent messages" in
+  let _ = get_mailbox "\"[Gmail]/Sent Mail\"" in
   let _ = get_mailbox "trash" in
+  let _ = get_mailbox "\"[Gmail]/Trash\"" in
   let _ = get_mailbox "junk" in
   let _ = get_mailbox "deleted" in
   let _ = get_mailbox "deleted messages" in
-  let _ = get_mailbox "drafts" in ()
+  let _ = get_mailbox "spam" in
+  let _ = get_mailbox "\"[Gmail]/Spam\"" in
+  let _ = get_mailbox "\"[Gmail]/All Mail\"" in
+  let _ = get_mailbox "\"[Gmail]/Important\"" in
+  let _ = get_mailbox "drafts" in
+  let _ = get_mailbox "\"[Gmail]/Drafts\"" in ()
 
 let ok res =
   let re = Re_posix.compile_pat ~opts:[`ICase] ("^[^\\* ]+ ok( .*)?$") in
@@ -337,27 +343,65 @@ let capability ic oc =
   while_not_ok ic
 
 let login user pswd ic oc =
-  write oc (Printf.sprintf "%s login %s %s\r\n" (get_tag()) user pswd) >>= fun () ->
-  while_not_ok ic
+  catch (fun() ->
+    write oc (Printf.sprintf "%s login %s %s\r\n" (get_tag()) user pswd) >>= fun () ->
+    while_not_ok ic
+  ) (fun _ -> raise LoginFailed)
+
+let logout oc =
+  write oc (Printf.sprintf "%s logout\r\n" (get_tag()))
+
+let status ic oc mailbox =
+  write oc (Printf.sprintf "%s status %s (messages)\r\n" (get_tag()) mailbox) >>= fun () ->
+  read_line ic >>= fun res ->
+  let msgs = 
+    try
+      let re = Re_posix.compile_pat ~opts:[`ICase] "messages ([0-9]+)\\)$" in
+      let subs = Re.exec re res in
+      Re.get subs 1
+    with Not_found -> "-" 
+  in
+  while_not_ok ic >>= fun () ->
+  return msgs
 
 (*
    * LIST (\HasNoChildren) "/" "Bulk Mail"
    * LIST (\HasChildren) "/" "Cambridge"
    * LIST (\HasNoChildren) "/" "Cambridge/Entertainment"
  *)
-let list ic oc = 
+let list host ic oc = 
   write oc (Printf.sprintf "%s list \"\" *\r\n" (get_tag())) >>= fun () ->
-    let re = Re_posix.compile_pat "((\"[^\"]+\")|([^\t ]+))$" in
+    let re = Re_posix.compile_pat ~opts:[`ICase] "^\\* list \\(([^)]+)\\) [^ ]+ ((\"[^\"]+\")|([^\t ]+))$" in
+  Printf.fprintf stderr "mailboxes to process:\n%!";
   let rec read l =
-    read_line ~force:true ic >>= fun res ->
+    read_line ic >>= fun res ->
     if ok res then
       return l
     else (
       let subs = Re.exec re res in
-      read ((Re.get subs 1) :: l)
+      let mailbox = Re.get subs 2 in
+      let attrs = Re.split (Re_posix.compile_pat " ") (Re.get subs 1) in
+      if List.exists (fun attr -> (String.lowercase attr) = "\\noselect") attrs ||
+          mailbox = "\"[Gmail]/All Mail\"" || mailbox = "\"[Gmail]/Important\"" || 
+          mailbox = "\"[Gmail]/Starred\"" then
+        read l
+      else (
+        read (mailbox :: l)
+      )
     )
   in 
-  read []
+  read (if gmail host then ["\"[Gmail]/All Mail\"";"\"[Gmail]/Important\""] else []) >>= fun l ->
+  let l = ["\"Cambridge\""] in
+  let total = ref 0 in
+  Lwt_list.map_s (fun m ->
+    status ic oc m >>= fun msgs ->
+    Printf.fprintf stderr "%s, %s messages\n%!" m msgs;
+    let msgs = int_of_string msgs in
+    total := !total + msgs;
+    return (msgs,m)
+  ) l >>= fun l ->
+  Printf.fprintf stderr "Total messages: %d\n%!" !total;
+  return l
 
 let select ic oc mailbox =
   write oc (Printf.sprintf "%s select %s\r\n" (get_tag()) mailbox) >>= fun () ->
@@ -373,6 +417,54 @@ let select ic oc mailbox =
   in 
   read 0
 
+let get_part ic =
+  let re_fetch = Re_posix.compile_pat ~opts:[`ICase] 
+    "^\\* ([0-9]+) fetch [^}]+[{]([0-9]+)[}]$" in (* * 5 FETCH (BODY[] {1208} *)
+  read_line ic >>= fun res ->
+  let subs = Re.exec re_fetch res in
+  let count = int_of_string (Re.get subs 2) in
+  let msg = String.create count in
+  Lwt_io.read_into_exactly ic msg 0 count >>= fun () ->
+  read_line ic >>= fun res ->
+  if res <> ")" then raise Failed;
+  read_line ic >>= fun res ->
+  if ok res = false then raise Failed;
+  return msg
+
+let fetch_part ic oc i part =
+  write oc (Printf.sprintf "%s fetch %d body[%s]\r\n" (get_tag()) i part) >>= fun () ->
+  get_part ic
+
+let fetch_unique ic oc mailbox cnt f =
+  let rec _fetch i =
+    if i > cnt then 
+      return ()
+    else (
+      fetch_part ic oc i "header" >>= fun headers ->
+      let re = Re_posix.compile_pat ~opts:[`ICase] "message-id: ([^ \r\n]+)" in
+      let msgid =
+        try
+          let subs = (Re.exec re headers) in
+          Re.get subs 1
+        with Not_found -> ""
+      in
+      if msgid <> "" && MapStr.mem msgid !messageid then (
+        Printf.fprintf stderr "duplicate message\n%!";
+        _fetch (i + 1)
+      ) else (
+        let _ = get_messageid msgid in
+        fetch_part ic oc i "text" >>= fun body ->
+        let buffer = Buffer.create ((String.length headers) + (String.length body) + 2) in
+        Buffer.add_string buffer headers;
+        Buffer.add_string buffer "\r\n";
+        Buffer.add_string buffer body;
+        f i mailbox (Buffer.contents buffer) >>= fun () ->
+        _fetch (i + 1)
+      )
+    )
+  in
+  _fetch 1
+
 let fetch ic oc mailbox f =
   let re_fetch = Re_posix.compile_pat ~opts:[`ICase] 
     "^\\* ([0-9]+) fetch [^}]+[{]([0-9]+)[}]$" in (* * 5 FETCH (BODY[] {1208} *)
@@ -380,21 +472,16 @@ let fetch ic oc mailbox f =
   let rec read () =
     read_line ic >>= fun res ->
     if ok_ex res then (
-      Printf.fprintf stderr "---------- returning from fetch\n%!";
       return () 
     ) else if Re.execp re_fetch res then (
-      Printf.fprintf stderr "---------- fetch header\n%!";
       let subs = Re.exec re_fetch res in
       let id = int_of_string (Re.get subs 1) in
       let count = int_of_string (Re.get subs 2) in
       let msg = String.create count in
       Lwt_io.read_into_exactly ic msg 0 count >>= fun () ->
-      read_line ic >>= fun _ -> (* new line *)
-      read_line ic >>= fun _ -> (* closing bracket *)
       f id mailbox msg >>= fun () ->
       read ()
     ) else  (
-      Printf.fprintf stderr "---------- something else\n%!";
       read ()
     )
   in
@@ -416,9 +503,8 @@ let start_ssl ip port f =
     f ic oc
   ) ()
 
-let authenticator () =
-  let cert = Certificate.of_pem_cstruct (Cstruct.of_string cert) in
-  X509.Authenticator.chain_of_trust ~time:(Unix.gettimeofday()) cert
+let try_close ch =
+  catch (fun() -> Lwt_io.close ch) (fun _ -> return())
 
 let start_tls ip port f =
   X509_lwt.authenticator `No_authentication_I'M_STUPID >>= fun authenticator ->
@@ -426,10 +512,18 @@ let start_tls ip port f =
   Tls_lwt.connect_ext config (ip,port) >>= fun (ic,oc) -> 
   Lwt_io.read_line ic >>= fun _ -> (* capabilities *)
   f ic oc >>= fun () ->
-  Lwt_io.close ic >>= fun () -> Lwt_io.close oc
+  try_close ic >>= fun () -> try_close oc
+
+(* maildir has flat structure with mailboxes represented as .dirname and nested
+ * mailboxes as .dirname.dirname1 ..
+ * inbox is in the root, messages are store in cur and new folders 
+ *)
+let maildir_fold dir f =
+  return ()
 
 let imap_fold host port f =
   let open Socket_utils in
+  let connected = ref false in
   Printf.fprintf stderr "Please enter user name:%!";
   Lwt_io.read_line Lwt_io.stdin >>= fun user ->
   Printf.fprintf stderr "Please enter password:%!";
@@ -442,7 +536,9 @@ let imap_fold host port f =
   | Some port -> [port]
   in
   (* get email servers *)
-  Lwt_unix.gethostbyname host >>= fun entries ->
+  catch (fun () -> Lwt_unix.gethostbyname host) 
+    (fun ex -> Printf.fprintf stderr "failed to resolve host %s: %s\n%!" host
+    (Printexc.to_string ex); raise ex) >>= fun entries ->
   let ips = Array.to_list entries.Unix.h_addr_list in
   Printf.fprintf stderr "domain %s resolution, ip entries found %d\n%!" host (List.length ips);
   let loop ports connect =
@@ -466,23 +562,27 @@ let imap_fold host port f =
       in
       catch (fun () ->
         start (fun ic oc ->
+          Printf.fprintf stderr "connected to %s:%d\n%!" ip port;
+          connected := true;
           capability ic oc >>= fun () ->
           login user pswd ic oc >>= fun () ->
-          list ic oc >>= fun l ->
-          Lwt_list.iter_s (fun mailbox ->
+          list host ic oc >>= fun l ->
+          Printf.fprintf stderr "--- started processing ---\n%!";
+          Lwt_list.iter_s (fun (cnt,mailbox) ->
             select ic oc mailbox >>= fun msgs ->
             if msgs = 0 then (
               Printf.fprintf stderr "%s, 0 messages\n%!" mailbox;
               return ()
             ) else (
               Printf.fprintf stderr "%s, %d messages\n%!" mailbox msgs;
-              fetch ic oc mailbox f
+              fetch_unique ic oc (Some mailbox) cnt f
             )
-          ) l
+          ) l >>= fun() ->
+          logout oc 
         ) >>= fun () ->
         return true
-      ) (fun ex -> Printf.fprintf stderr "exception: %s\n%!" (Printexc.to_string
-      ex); return false)
+      ) (fun ex -> Printf.fprintf stderr "%s\n%!" (Printexc.to_string
+      ex); if !connected then raise ex; return false)
     )
   ) [true,ports] >>= fun res ->
   if res = false then
@@ -494,9 +594,16 @@ let mbox_fold file f =
   Printf.printf "archive size: %l\n%!" st.Unix.st_size;
   Utils.fold_email_with_file file (fun (cnt,mailbox) message ->
     f cnt mailbox message >>= fun () ->
-    return (`Ok (cnt + 1,""))
-  ) (1,"") >>= fun _ ->
+    return (`Ok (cnt + 1,mailbox))
+  ) (1,None) >>= fun _ ->
   return ()
+
+let labels_from_mailbox mailbox =
+  if Re.execp (Re_posix.compile_pat "[[]Gmail[]]") mailbox = false then (
+    let l = Re.split (Re_posix.compile_pat "/") mailbox in
+    String.concat "," (List.map get_mailbox l)
+  ) else 
+    get_mailbox mailbox
 
 let () =
   let open Parsemail.Mailbox in
@@ -505,37 +612,54 @@ let () =
   Lwt_main.run (
     mailboxes_init();
     let t = Unix.gettimeofday () in
-    let fold = 
+    let (fold,download) = 
     match arch with
-    | `Mbox file -> mbox_fold file
-    | `Imap (host,port) -> imap_fold host port
+    | `Mbox file -> mbox_fold file,false
+    | `Imap (host,port) -> imap_fold host port,false
+    | `ImapDld (host,port) -> imap_fold host port,true
     | `Maildir _ -> raise InvalidCommand
     in
     fold (fun cnt mailbox message_s ->
-      Printf.fprintf stderr "%d\r%!" cnt;
-      (*Printf.printf "message:\n%s\n%!" message_s;*)
-      let message = Utils.make_email_message message_s in
-      let email = message.Mailbox.Message.email in
-      let headers = Email.header email in
-      (*Printf.printf "headers:\n%s\n%!" (headers_to_string headers);*)
-      let headers_l = Header.to_list headers in
-      (* select interesting headers, update if more stats is needed *)
-      let headers_m = headers_to_map headers_l in
-      Printf.printf "--> start\n%!";
-      Printf.printf "Full Message: %d %d\n" (String.length message_s) (len_compressed message_s);
-      Printf.printf "Hdrs\n%!";
-      Printf.printf "from: %s\n%!" (_from headers_m);
-      Printf.printf "to: %s\n%!" (_to headers_m);
-      Printf.printf "cc: %s\n%!" (_cc headers_m);
-      Printf.printf "date: %s\n%!" (get_header_m headers_m "date");
-      Printf.printf "subject: %s\n%!" (_subject headers_m);
-      Printf.printf "labels: %s\n%!" (_gmail_labels headers_m);
-      Printf.printf "messageid: %s\n%!" (_messageid headers_m);
-      Printf.printf "inreplyto: %s\n%!" (_inreplyto headers_m);
-      Printf.printf "Parts:\n%!";
-      walk email 0 0 false;
-      Printf.printf "<-- end\n%!";
-      return ()
+      Printf.fprintf stderr "%d %d\r%!" cnt (String.length message_s);
+      catch (fun () ->
+        if download = false then (
+          let message = Utils.make_email_message message_s in
+          let email = message.Mailbox.Message.email in
+          let headers = Email.header email in
+          (*Printf.printf "headers:\n%s\n%!" (headers_to_string headers);*)
+          let headers_l = Header.to_list headers in
+          (* select interesting headers, update if more stats is needed *)
+          let headers_m = headers_to_map headers_l in
+          Printf.printf "--> start\n%!";
+          Printf.printf "Full Message: %d %d\n" (String.length message_s) (len_compressed message_s);
+          Printf.printf "Hdrs\n%!";
+          Printf.printf "from: %s\n%!" (_from headers_m);
+          Printf.printf "to: %s\n%!" (_to headers_m);
+          Printf.printf "cc: %s\n%!" (_cc headers_m);
+          Printf.printf "date: %s\n%!" (get_header_m headers_m "date");
+          Printf.printf "subject: %s\n%!" (_subject headers_m);
+          begin
+          match mailbox with
+          | Some mailbox -> Printf.printf "mailbox: %s\n%!" (labels_from_mailbox mailbox)
+          | None -> Printf.printf "labels: %s\n%!" (_gmail_labels headers_m)
+          end;
+          Printf.printf "messageid: %s\n%!" (_messageid headers_m);
+          Printf.printf "inreplyto: %s\n%!" (_inreplyto headers_m);
+          Printf.printf "Parts:\n%!";
+          walk email 0 0 false;
+          Printf.printf "<-- end\n%!";
+          return ()
+        ) else (
+          Printf.printf "%s\r\n%!" (Utils.make_postmark message_s);
+          Printf.printf "X-Gmail-Labels: %s\r\n%!" (opt_val mailbox);
+          Printf.printf "%s%!" message_s;
+          if String.get message_s (String.length message_s - 1) <> '\n' then
+            Printf.printf "\r\n";
+          return ()
+        )
+      ) (fun ex -> if download = false then Printf.printf "<-- end failed to process: %s\n%!"
+          (Printexc.to_string ex) else Printf.fprintf stderr "failed to parse the
+          message\n%!"; return ())
     ) >>= fun () ->
     Printf.fprintf stderr "processing time: %d seconds\n%!" 
       (int_of_float (Unix.gettimeofday() -. t));
