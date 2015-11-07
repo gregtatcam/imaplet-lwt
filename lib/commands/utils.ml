@@ -94,7 +94,7 @@ let re_date = Re_posix.compile_pat ~opts:[`ICase] "Date: \\([.]+\\)[\r\n]+"
 
 let length message = 
   let len = String.length message in
-  if len > 1000 then 1000 else len
+  if len > 3000 then 3000 else len
 
 (* create postmark from email,
  * assume postmark is not included
@@ -290,7 +290,7 @@ let get_interfaces () =
   read []
 
 let postmark = "^from [^ ]+ " ^ Regex.dayofweek ^ " " ^ Regex.mon ^ " " ^
-  "[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] [0-9]+"
+  "[0-9][0-9]? [0-9][0-9]:[0-9][0-9]:[0-9][0-9] [0-9]+"
 
 let is_postmark line =
   Regex.match_regex ~case:false ~regx:postmark line

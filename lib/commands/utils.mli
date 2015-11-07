@@ -34,6 +34,8 @@ val make_email_message : string -> Mailbox.Message.t
 
 val make_postmark_email : string -> (string * string)
 
+val make_postmark : string -> string
+
 val concat_postmark_email : string -> string -> string
 
 val make_message_with_postmark : string -> string
