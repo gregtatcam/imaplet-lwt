@@ -265,8 +265,8 @@ date/time: 2014-03-05 21:36:02.233417Z
 **)
 let email_to_date_time_exn date =
   let date = replace ~regx:"\"" ~tmpl:"" date in
-  let date = replace ~regx:"^[ ]*\\(Mon\\|Tue\\|Wed\\|Thu\\|Fri\\|Sat\\|Sun\\),
-    " ~tmpl:"" date in
+  let date = replace ~regx:"^[ ]*\\(Mon\\|Tue\\|Wed\\|Thu\\|Fri\\|Sat\\|Sun\\), " 
+    ~tmpl:"" date in
   if match_regex date ~regx:email_date_regex = false then
     raise InvalidDate;
   
