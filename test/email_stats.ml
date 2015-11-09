@@ -11,6 +11,84 @@ exception Failed
 exception LoginFailed
 
 let echoterm = ref false
+let compression = ref false
+
+(* in/out buffer if compression is enabled *)
+let inbuffer = ref (Buffer.create 100)
+let outbuffer = ref (Buffer.create 100)
+
+let buff_size = 1024
+
+(* uncompress *)
+let inflate strm inbuff =
+  let outbuff = String.create buff_size in
+  let rec _inflate inbuff offset len =
+    let (fi, orig, size) = Zlib.inflate strm inbuff offset len 
+      outbuff 0 buff_size Zlib.Z_SYNC_FLUSH in
+    Buffer.add_string !outbuffer (String.sub outbuff 0 size);
+    let offset = offset + orig in
+    let len = len - orig in
+    if fi then (
+      Buffer.clear !inbuffer;
+      if len <> 0 then (
+        Buffer.add_string !inbuffer (String.sub inbuff offset len)
+      );
+      Zlib.inflate_end strm;
+      true
+    ) else if len = 0 then ( (* need dummy byte if no header *)
+      return false
+    ) else (
+      _inflate inbuff offset len
+    )
+  in
+  _inflate inbuff 0 (String.length inbuff)
+
+(* reading/uncompression is done in chunks and
+ * part of the chunk could be next compressed data stream
+ * so the part is stored in the cache *)
+let read_cache ic =
+  if Buffer.length !inbuffer > 0 then (
+    let contents = Buffer.contents !inbuffer in
+    Buffer.clear !inbuffer;
+    return (Some contents)
+  ) else (
+    let buff = String.create buff_size in
+    Lwt_io.read_into ic buff 0 buff_size >>= function
+    | 0 -> return None
+    | size -> 
+      let str = String.sub buff 0 size in
+      return (Some str)
+  )
+
+(* return the line if not compressed,
+ * uncompress otherwise *)
+let zip_read ?count ic =
+  if !compression = false then (
+    match count with 
+    | None -> Lwt_io.read_line_opt ic 
+    | Some count -> 
+      let buff = String.create count in
+      Lwt_io.read_into_exactly ic buff 0 count >>
+      return (Some buff)
+  ) else (
+    (* initialize zlib *)
+    let strm = Zlib.inflate_init false in
+    (* recusevily uncompress chunks of data *)
+    let rec read () =
+      read_cache ic >>= function
+      | None -> return None
+      | Some buff -> 
+        if inflate strm buff then (
+          let output = Buffer.contents !outbuffer in
+          Buffer.clear !outbuffer;
+          return (Some output) (*(Regex.replace ~regx:"[\r\n]*$" ~tmpl:""
+          output))*)
+        ) else (
+          read ()
+        )
+    in
+    read ()
+  )
 
 let echo_on on =
   Lwt_unix.system (Printf.sprintf "stty %secho" (if on then "" else "-")) >>=
@@ -51,24 +129,34 @@ let opt_val = function
   | None -> raise InvalidCommand
   | Some v -> v
 
-let rec args i archive echo =
+let rec args i archive echo compress outfile =
   if i >= Array.length Sys.argv then
-    archive,echo
+    archive,echo,compress,outfile
   else
     match Sys.argv.(i) with 
-    | "-archive" -> args (i+2) (Some (get_arch Sys.argv.(i+1))) echo 
-    | "-echo" -> args (i+1) archive true 
+    | "-archive" -> args (i+2) (Some (get_arch Sys.argv.(i+1))) echo compress outfile
+    | "-echo" -> args (i+1) archive true compress outfile
+    | "-compress" -> args (i+1) archive echo true outfile
+    | "-outfile" -> args (i+2) archive echo compress (Some Sys.argv.(i+1))
     | _ -> raise InvalidCommand
 
 let commands f =
   try 
-    let archive,echo = args 1 None false in
-    f (opt_val archive) echo
+    let archive,echo,compress,outfile = args 1 None false false None in
+    let file = opt_val outfile in
+    let (resume,file) =
+      if String.sub file 0 7 = "resume:" then (
+        let file = String.sub file 7 (String.length file - 7) in
+        (Some file, file)
+      ) else (
+        (None,file)
+      )
+    in
+    f (opt_val archive) echo compress file resume
   with 
     | InvalidCommand ->
-    Printf.printf "usage: email_stats -archive [mbox:file|imap:server:port:user:password]\n%!"
+    Printf.printf "usage: email_stats -archive [mbox:file|imap:server:port:user:password] -outfile [[resume:]file] -echo -compress\n%!"
     | _ -> ()
-
 
 let email_addr = ref MapStr.empty
 let email_addr_cnt = ref 0
@@ -234,38 +322,40 @@ let headers_to_string headers =
 let len_compressed content = 
   String.length (Imap_crypto.do_compress ~header:true content)
 
-let rec walk email id part multipart =
+let rec walk outc email id part multipart =
+  let sprf = Printf.sprintf in
+  let write = Lwt_io.write outc in
   let headers = Header.to_list (Email.header email) in
   let headers_s = headers_to_string (Email.header email) in
   let attach,rfc822 = get_hdr_attrs headers in
-  Printf.printf "part: %d\n%!" part;
-  (*Printf.printf "headers:\n%s\n%!" headers_s;*)
-  Printf.printf "headers: %d %d %d\n%!" (List.length headers) (String.length headers_s) 
-    (len_compressed headers_s);
+  write (sprf "part: %d\n" part) >>= fun () ->
+  write (sprf "headers: %d %d %d\n" (List.length headers) (String.length headers_s) 
+    (len_compressed headers_s)) >>= fun () ->
+  begin
   match Email.content email with
   | `Data _ ->
     let content = email_raw_content email in
-    (*Printf.printf "content:\n%s\n%!" content;*)
     if multipart && rfc822 then (
-      Printf.printf "start rfc822: %d\n%!" id;
+      write (sprf "start rfc822: %d\n" id) >>= fun () ->
       let email = Email.of_string content in
-      walk email (id+1) 0 multipart;
-      Printf.printf "end rfc822: %d\n%!" id;
+      walk outc email (id+1) 0 multipart >>= fun () ->
+      write (sprf "end rfc822: %d\n" id)
     ) else if attach then (
       let sha = Imap_crypto.get_hash ~hash:`Sha1 content in
-      Printf.printf "attachment: %s %d %d\n%!" (get_attach sha) 
-        (String.length content) (len_compressed content)
+      write (sprf "attachment: %s %d %d\n" (get_attach sha) 
+        (String.length content) (len_compressed content))
     ) else (
-      Printf.printf "body: %d %d\n%!" (String.length content) (len_compressed content)
+      write (sprf "body: %d %d\n" (String.length content) (len_compressed content))
     )
   | `Message _ -> assert (false)
   | `Multipart elist ->
     Printf.printf "start multipart %d %d:\n%!" id (List.length elist);
-    let _ = List.fold_left (fun part email ->
-      walk email (id+1) part true;
-      part + 1
-    ) 0 elist in
-    Printf.printf "end multipart %d\n%!" id
+    Lwt_list.fold_left_s (fun part email ->
+      walk outc email (id+1) part true >>= fun () ->
+      return (part + 1)
+    ) 0 elist >>= fun _ ->
+    write (sprf "end multipart %d\n%!" id)
+  end >> Lwt_io.flush outc
 
 let mailboxes_init () =
   let _ = get_mailbox "inbox" in
@@ -312,25 +402,30 @@ let exists res =
 let write oc msg =
   if !echoterm then
     Printf.fprintf stderr "%s%!" msg;
-  Lwt_io.write oc msg
+  if !compression then 
+    Lwt_io.write oc (Imap_crypto.do_compress msg)
+  else
+    Lwt_io.write oc msg
 
-let read_line ?(force=false) ic =
-  Lwt_io.read_line ic >>= fun l ->
+let read ?count ?(force=false) ic =
+  zip_read ?count ic >>= function
+  | None -> raise Failed
+  | Some l ->
   if force || !echoterm then
     Printf.fprintf stderr "%s\n%!" l;
   return l
 
 let while_not_ok ic =
-  let rec read () =
-    read_line ic >>= fun res ->
+  let rec _read () =
+    read ic >>= fun res ->
     if ok res then
       return ()
     else if bad res || no res then
       raise Failed
     else 
-      read ()
+      _read ()
   in
-  read ()
+  _read ()
 
 let tag = ref 0
 
@@ -338,14 +433,48 @@ let get_tag () =
   tag := !tag + 1;
   Printf.sprintf "a%04d" !tag
 
+(*
+ a capability
+ * CAPABILITY IMAP4rev1 UNSELECT IDLE NAMESPACE QUOTA ID XLIST CHILDREN
+   X-GM-EXT-1 UIDPLUS COMPRESS=DEFLATE ENABLE MOVE CONDSTORE ESEARCH UTF8=ACCEPT
+   LIST-EXTENDED LIST-STATUS
+ a OK Success
+ *)
 let capability ic oc =
   write oc (Printf.sprintf "%s capability\r\n" (get_tag())) >>= fun () ->
-  while_not_ok ic
+  read ic >>= fun res ->
+  let l = Re.split (Re_posix.compile_pat "[ ]+") res in
+  read ic >>= fun res ->
+  if ok res then
+    return l
+  else
+    raise Failed
 
-let login user pswd ic oc =
+let compress_deflate ic oc =
+  write oc (Printf.sprintf "%s compress deflate\r\n" (get_tag())) >>= fun () ->
+  while_not_ok ic >>= fun () ->
+  compression := true;
+  return ()
+
+let login user pswd compress ic oc =
   catch (fun() ->
     write oc (Printf.sprintf "%s login %s %s\r\n" (get_tag()) user pswd) >>= fun () ->
-    while_not_ok ic
+    while_not_ok ic >>= fun () ->
+    begin
+    if compress then (
+      capability ic oc >>= fun caps ->
+      if List.exists (fun c -> String.lowercase c = "compress=deflate") caps then (
+        compress_deflate ic oc >>= fun () ->
+        Printf.fprintf stderr "compression enabled\n%!";
+        return ()
+      ) else (
+        Printf.fprintf stderr "compression is not supported or failed to enable\n%!";
+        return ()
+      )
+    ) else (
+      return ()
+    )
+    end
   ) (fun _ -> raise LoginFailed)
 
 let logout oc =
@@ -353,7 +482,7 @@ let logout oc =
 
 let status ic oc mailbox =
   write oc (Printf.sprintf "%s status %s (messages)\r\n" (get_tag()) mailbox) >>= fun () ->
-  read_line ic >>= fun res ->
+  read ic >>= fun res ->
   let msgs = 
     try
       let re = Re_posix.compile_pat ~opts:[`ICase] "messages ([0-9]+)\\)$" in
@@ -364,17 +493,55 @@ let status ic oc mailbox =
   while_not_ok ic >>= fun () ->
   return msgs
 
+let checkresume = function
+  | None -> return MapStr.empty
+  | Some file ->
+    Printf.fprintf stderr "checking resume point\n%!";
+    let labels = "X-Gmail-Labels: " in
+    let lenlbl = String.length labels in
+    let msgid = "message-id: " in
+    let lenid = String.length msgid in
+    Lwt_io.with_file ~flags:[Unix.O_RDONLY;Unix.O_NONBLOCK] ~mode:Lwt_io.Input file (fun ic ->
+      Lwt_io.length ic >>= fun length ->
+      let length = Int64.to_float length in
+      let rec _read mailboxes =
+        Lwt_io.read_line_opt ic >>= function
+        | None -> return mailboxes
+        | Some line ->
+        let len = String.length line in
+        if len > lenid && (String.lowercase (String.sub line 0 lenid)) = msgid then (
+          let id = String.trim (String.sub line lenid (len - lenid)) in
+          let _ = get_messageid id in ()
+        );
+        if len > lenlbl && String.sub line 0 lenlbl = labels then (
+          let label = String.trim (String.sub line lenlbl (len - lenlbl)) in
+          let position = Int64.to_float (Lwt_io.position ic) in
+          let pct = (100. *. position) /. length in
+          if MapStr.mem label mailboxes = false then (
+            Printf.fprintf stderr "%%%.02f, %d, %s                   \r%!" pct 1 label;
+            _read (MapStr.add label 1 mailboxes)
+          ) else (
+            let cnt = MapStr.find label mailboxes in
+            Printf.fprintf stderr "%%%.02f, %d, %s                   \r%!" pct (cnt+1) label;
+            _read (MapStr.add label (cnt + 1) mailboxes)
+          )
+        ) else 
+          _read mailboxes 
+      in
+      _read MapStr.empty
+    )
+
 (*
    * LIST (\HasNoChildren) "/" "Bulk Mail"
    * LIST (\HasChildren) "/" "Cambridge"
    * LIST (\HasNoChildren) "/" "Cambridge/Entertainment"
  *)
-let list host ic oc = 
+let list host resume ic oc = 
   write oc (Printf.sprintf "%s list \"\" *\r\n" (get_tag())) >>= fun () ->
     let re = Re_posix.compile_pat ~opts:[`ICase] "^\\* list \\(([^)]+)\\) [^ ]+ ((\"[^\"]+\")|([^\t ]+))$" in
   Printf.fprintf stderr "mailboxes to process:\n%!";
-  let rec read l =
-    read_line ic >>= fun res ->
+  let rec _read l =
+    read ic >>= fun res ->
     if ok res then
       return l
     else (
@@ -384,50 +551,58 @@ let list host ic oc =
       if List.exists (fun attr -> (String.lowercase attr) = "\\noselect") attrs ||
           mailbox = "\"[Gmail]/All Mail\"" || mailbox = "\"[Gmail]/Important\"" || 
           mailbox = "\"[Gmail]/Starred\"" then
-        read l
+        _read l
       else (
-        read (mailbox :: l)
+        _read (mailbox :: l)
       )
     )
   in 
-  read (if gmail host then ["\"[Gmail]/All Mail\"";"\"[Gmail]/Important\""] else []) >>= fun l ->
-  let l = ["\"Cambridge\""] in
+  _read [] >>= fun l ->
+  let l = List.sort String.compare l in
+  let l = 
+    if gmail host then List.concat [l;["\"[Gmail]/All Mail\"";"\"[Gmail]/Important\""]] else l
+  in
   let total = ref 0 in
   Lwt_list.map_s (fun m ->
     status ic oc m >>= fun msgs ->
     Printf.fprintf stderr "%s, %s messages\n%!" m msgs;
     let msgs = int_of_string msgs in
     total := !total + msgs;
-    return (msgs,m)
+    let start =
+      if MapStr.mem m resume then
+        ref (MapStr.find m resume)
+      else
+        ref 1
+    in
+    return (start,msgs,m)
   ) l >>= fun l ->
   Printf.fprintf stderr "Total messages: %d\n%!" !total;
   return l
 
 let select ic oc mailbox =
   write oc (Printf.sprintf "%s select %s\r\n" (get_tag()) mailbox) >>= fun () ->
-  let rec read msgs =
-    read_line ic >>= fun res ->
+  let rec _read msgs =
+    read ic >>= fun res ->
     if ok res then
       return msgs
     else (
       let ex,m = exists res in
       let msgs = if ex then m else msgs in
-      read msgs
+      _read msgs
     )
   in 
-  read 0
+  _read 0
 
 let get_part ic =
   let re_fetch = Re_posix.compile_pat ~opts:[`ICase] 
     "^\\* ([0-9]+) fetch [^}]+[{]([0-9]+)[}]$" in (* * 5 FETCH (BODY[] {1208} *)
-  read_line ic >>= fun res ->
+  read ic >>= fun res ->
   let subs = Re.exec re_fetch res in
   let count = int_of_string (Re.get subs 2) in
-  let msg = String.create count in
-  Lwt_io.read_into_exactly ic msg 0 count >>= fun () ->
-  read_line ic >>= fun res ->
+  read ~count ic >>= fun msg ->
+  read ic >>= fun res ->
   if res <> ")" then raise Failed;
-  read_line ic >>= fun res ->
+  read ic >>= fun res ->
   if ok res = false then raise Failed;
   return msg
 
@@ -435,7 +610,7 @@ let fetch_part ic oc i part =
   write oc (Printf.sprintf "%s fetch %d body[%s]\r\n" (get_tag()) i part) >>= fun () ->
   get_part ic
 
-let fetch_unique ic oc mailbox cnt f =
+let fetch_unique ic oc start mailbox cnt f =
   let rec _fetch i =
     if i > cnt then 
       return ()
@@ -449,7 +624,6 @@ let fetch_unique ic oc mailbox cnt f =
         with Not_found -> ""
       in
       if msgid <> "" && MapStr.mem msgid !messageid then (
-        Printf.fprintf stderr "duplicate message\n%!";
         _fetch (i + 1)
       ) else (
         let _ = get_messageid msgid in
@@ -459,18 +633,19 @@ let fetch_unique ic oc mailbox cnt f =
         Buffer.add_string buffer "\r\n";
         Buffer.add_string buffer body;
         f i mailbox (Buffer.contents buffer) >>= fun () ->
+        start := i;
         _fetch (i + 1)
       )
     )
   in
-  _fetch 1
+  _fetch !start
 
 let fetch ic oc mailbox f =
   let re_fetch = Re_posix.compile_pat ~opts:[`ICase] 
     "^\\* ([0-9]+) fetch [^}]+[{]([0-9]+)[}]$" in (* * 5 FETCH (BODY[] {1208} *)
   write oc (Printf.sprintf "%s fetch 1:* body[]\r\n" (get_tag())) >>= fun () ->
-  let rec read () =
-    read_line ic >>= fun res ->
+  let rec _read () =
+    read ic >>= fun res ->
     if ok_ex res then (
       return () 
     ) else if Re.execp re_fetch res then (
@@ -480,39 +655,57 @@ let fetch ic oc mailbox f =
       let msg = String.create count in
       Lwt_io.read_into_exactly ic msg 0 count >>= fun () ->
       f id mailbox msg >>= fun () ->
-      read ()
+      _read ()
     ) else  (
-      read ()
+      _read ()
     )
   in
-  read ()
+  _read ()
 
 let start_plain ip port f =
+  Printf.fprintf stderr "connecting open\n%!";
   let open Socket_utils in
   client_send (`Inet (ip,port)) (fun res sock ic oc -> 
-    Lwt_io.read_line ic >>= fun _ -> (* capabilities *)
-    f ic oc
-  ) ()
+    catch (fun () ->
+      Lwt_io.read_line ic >>= fun _ -> (* capabilities *)
+      f ic oc >>= fun () ->
+      return None
+    ) (fun ex -> return (Some ex))
+  ) None >>= function
+  | Some ex -> Printf.fprintf stderr "startplain: %s\n%!" (Printexc.to_string ex); raise ex
+  | None -> return ()
 
 let start_ssl ip port f =
+  Printf.fprintf stderr "connecting ssl\n%!";
   let open Socket_utils in
   client_send (`Inet (ip,port)) (fun res sock ic oc -> 
-    Lwt_io.read_line ic >>= fun _ -> (* capabilities *)
-    Lwt_io.write oc (Printf.sprintf "astarttls starttls\r\n") >>= fun () ->
-    starttls_client ip sock () >>= fun (ic,oc) ->
-    f ic oc
-  ) ()
+    catch (fun () ->
+      Lwt_io.read_line ic >>= fun _ -> (* capabilities *)
+      Lwt_io.write oc (Printf.sprintf "astarttls starttls\r\n") >>= fun () ->
+      starttls_client ip sock () >>= fun (ic,oc) ->
+      f ic oc >>= fun () ->
+      return None
+    ) (fun ex -> return (Some ex))
+  ) None >>= function
+  | Some ex -> Printf.fprintf stderr "startssl: %s\n%!" (Printexc.to_string ex); raise ex
+  | None -> return ()
 
 let try_close ch =
   catch (fun() -> Lwt_io.close ch) (fun _ -> return())
 
 let start_tls ip port f =
+  Printf.fprintf stderr "connecting tls\n%!";
   X509_lwt.authenticator `No_authentication_I'M_STUPID >>= fun authenticator ->
   let config = Tls.Config.(client ~authenticator ~ciphers:Ciphers.supported()) in
   Tls_lwt.connect_ext config (ip,port) >>= fun (ic,oc) -> 
-  Lwt_io.read_line ic >>= fun _ -> (* capabilities *)
-  f ic oc >>= fun () ->
-  try_close ic >>= fun () -> try_close oc
+  catch (fun() ->
+    Lwt_io.read_line ic >>= fun _ -> (* capabilities *)
+    f ic oc
+  ) 
+  (fun ex -> 
+    Printf.fprintf stderr "starttls: %s\n%!" (Printexc.to_string ex);
+    try_close ic >>= fun () -> try_close oc >>= fun () -> raise ex
+  )
 
 (* maildir has flat structure with mailboxes represented as .dirname and nested
  * mailboxes as .dirname.dirname1 ..
@@ -521,7 +714,7 @@ let start_tls ip port f =
 let maildir_fold dir f =
   return ()
 
-let imap_fold host port f =
+let imap_fold host port compress resume f =
   let open Socket_utils in
   let connected = ref false in
   Printf.fprintf stderr "Please enter user name:%!";
@@ -549,40 +742,56 @@ let imap_fold host port f =
       ) ports
     ) ips
   in
+  let rec run ip port ssl mailboxes attempts =
+    let start =
+      if ssl then (
+        if port = 993 then
+          start_tls ip port
+        else
+          start_ssl ip port
+      ) else 
+        start_plain ip port
+    in
+    catch (fun () ->
+      start (fun ic oc ->
+        Printf.fprintf stderr "connected to %s:%d\n%!" ip port;
+        connected := true;
+        compression := false;
+        login user pswd compress ic oc >>= fun () ->
+        begin
+        if mailboxes = [] then
+          list host resume ic oc
+        else
+          return mailboxes
+        end >>= fun mailboxes ->
+        Printf.fprintf stderr "--- started processing ---\n%!";
+        Lwt_list.iter_s (fun (start,cnt,mailbox) ->
+          if cnt = 0 then (
+            Printf.fprintf stderr "%s, 0 messages\n%!" mailbox;
+            return ()
+          ) else if !start >= cnt then (
+            return () (* was already processed, retrying *)
+          ) else (
+            select ic oc mailbox >>= fun msgs ->
+            Printf.fprintf stderr "%s, %d messages\n%!" mailbox msgs;
+            fetch_unique ic oc start (Some mailbox) cnt f
+          )
+        ) mailboxes >>= fun() ->
+        logout oc 
+      ) >>= fun () ->
+      return true
+    ) 
+    (fun ex -> 
+      if ex <> LoginFailed && !connected && attempts < 10 then (
+        Printf.fprintf stderr "retrying %d\n%!" attempts; 
+        run ip port ssl mailboxes (attempts + 1) 
+      ) else 
+        return false
+    )
+  in
   Lwt_list.exists_s (fun (ssl,ports) ->
     loop ports (fun ip port ->
-      let start = 
-        if ssl then (
-          if port = 993 then
-            start_tls ip port
-          else
-            start_ssl ip port
-        ) else 
-          start_plain ip port
-      in
-      catch (fun () ->
-        start (fun ic oc ->
-          Printf.fprintf stderr "connected to %s:%d\n%!" ip port;
-          connected := true;
-          capability ic oc >>= fun () ->
-          login user pswd ic oc >>= fun () ->
-          list host ic oc >>= fun l ->
-          Printf.fprintf stderr "--- started processing ---\n%!";
-          Lwt_list.iter_s (fun (cnt,mailbox) ->
-            select ic oc mailbox >>= fun msgs ->
-            if msgs = 0 then (
-              Printf.fprintf stderr "%s, 0 messages\n%!" mailbox;
-              return ()
-            ) else (
-              Printf.fprintf stderr "%s, %d messages\n%!" mailbox msgs;
-              fetch_unique ic oc (Some mailbox) cnt f
-            )
-          ) l >>= fun() ->
-          logout oc 
-        ) >>= fun () ->
-        return true
-      ) (fun ex -> Printf.fprintf stderr "%s\n%!" (Printexc.to_string
-      ex); if !connected then raise ex; return false)
+      run ip port ssl [] 1
     )
   ) [true,ports] >>= fun res ->
   if res = false then
@@ -607,19 +816,29 @@ let labels_from_mailbox mailbox =
 
 let () =
   let open Parsemail.Mailbox in
-  commands (fun arch echo ->
+  commands (fun arch echo compress outfile resume ->
   echoterm := echo;
   Lwt_main.run (
+    let flags = 
+      if resume <> None then 
+        [Unix.O_NONBLOCK;Unix.O_CREAT;Unix.O_WRONLY;Unix.O_APPEND]
+      else
+        [Unix.O_NONBLOCK;Unix.O_CREAT;Unix.O_WRONLY] 
+    in
+    Lwt_io.with_file ~flags ~mode:Lwt_io.Output outfile (fun outc ->
     mailboxes_init();
+    checkresume resume >>= fun resume ->
     let t = Unix.gettimeofday () in
     let (fold,download) = 
     match arch with
     | `Mbox file -> mbox_fold file,false
-    | `Imap (host,port) -> imap_fold host port,false
-    | `ImapDld (host,port) -> imap_fold host port,true
+    | `Imap (host,port) -> imap_fold host port compress resume,false
+    | `ImapDld (host,port) -> imap_fold host port compress resume,true
     | `Maildir _ -> raise InvalidCommand
     in
     fold (fun cnt mailbox message_s ->
+      let sprf = Printf.sprintf in
+      let write = Lwt_io.write outc in
       Printf.fprintf stderr "%d %d\r%!" cnt (String.length message_s);
       catch (fun () ->
         if download = false then (
@@ -630,39 +849,44 @@ let () =
           let headers_l = Header.to_list headers in
           (* select interesting headers, update if more stats is needed *)
           let headers_m = headers_to_map headers_l in
-          Printf.printf "--> start\n%!";
-          Printf.printf "Full Message: %d %d\n" (String.length message_s) (len_compressed message_s);
-          Printf.printf "Hdrs\n%!";
-          Printf.printf "from: %s\n%!" (_from headers_m);
-          Printf.printf "to: %s\n%!" (_to headers_m);
-          Printf.printf "cc: %s\n%!" (_cc headers_m);
-          Printf.printf "date: %s\n%!" (get_header_m headers_m "date");
-          Printf.printf "subject: %s\n%!" (_subject headers_m);
+          write "--> start\n" >>
+          write (sprf "Full Message: %d %d\n" (String.length message_s) (len_compressed message_s)) >>
+          write "Hdrs\n" >>
+          write (sprf "from: %s\n" (_from headers_m)) >>
+          write (sprf "to: %s\n" (_to headers_m)) >>
+          write (sprf "cc: %s\n" (_cc headers_m)) >>
+          write (sprf "date: %s\n" (get_header_m headers_m "date")) >>
+          write (sprf "subject: %s\n" (_subject headers_m)) >>
           begin
           match mailbox with
-          | Some mailbox -> Printf.printf "mailbox: %s\n%!" (labels_from_mailbox mailbox)
-          | None -> Printf.printf "labels: %s\n%!" (_gmail_labels headers_m)
-          end;
-          Printf.printf "messageid: %s\n%!" (_messageid headers_m);
-          Printf.printf "inreplyto: %s\n%!" (_inreplyto headers_m);
-          Printf.printf "Parts:\n%!";
-          walk email 0 0 false;
-          Printf.printf "<-- end\n%!";
-          return ()
+          | Some mailbox -> write (sprf "mailbox: %s\n" (labels_from_mailbox mailbox))
+          | None -> write (sprf "labels: %s\n" (_gmail_labels headers_m))
+          end >>
+          write (sprf "messageid: %s\n" (_messageid headers_m)) >>
+          write (sprf "inreplyto: %s\n" (_inreplyto headers_m)) >>
+          write "Parts:\n" >>
+          walk outc email 0 0 false >>
+          write "<-- end\n" >>
+          Lwt_io.flush outc
         ) else (
-          Printf.printf "%s\r\n%!" (Utils.make_postmark message_s);
-          Printf.printf "X-Gmail-Labels: %s\r\n%!" (opt_val mailbox);
-          Printf.printf "%s%!" message_s;
+          write (sprf "%s\r\n" (Utils.make_postmark message_s)) >>
+          write (sprf "X-Gmail-Labels: %s\r\n" (opt_val mailbox)) >>
+          write message_s >>
+          begin
           if String.get message_s (String.length message_s - 1) <> '\n' then
-            Printf.printf "\r\n";
-          return ()
+            write "\r\n"
+          else
+            return ()
+          end >>
+          Lwt_io.flush outc
         )
-      ) (fun ex -> if download = false then Printf.printf "<-- end failed to process: %s\n%!"
-          (Printexc.to_string ex) else Printf.fprintf stderr "failed to parse the
-          message\n%!"; return ())
+      ) (fun ex -> if download = false then write (sprf "<-- end failed to process: %s\n%!"
+          (Printexc.to_string ex)) else (Printf.fprintf stderr "failed to parse the
+          message\n%!"; return ()))
     ) >>= fun () ->
     Printf.fprintf stderr "processing time: %d seconds\n%!" 
       (int_of_float (Unix.gettimeofday() -. t));
     return ()
+    )
   ) 
   )
