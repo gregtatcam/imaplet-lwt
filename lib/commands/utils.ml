@@ -89,7 +89,8 @@ let message_of_string postmark email =
    Mailbox.Message.email = Email.of_string email}
 
 let re_postmark = Re_posix.compile_pat ~opts:[`ICase] "^(From [^\r\n]+)[\r\n]+(.+)"
-let re_from = Re_posix.compile_pat ~opts:[`ICase] "From: ([^<]+)?<?([^>\r\n]+)"
+let from_str = "From: ((\"[^\"\r\n]+\"[\r\n]*)|(([^:\"@<]+[\r\n]*){0,}))[ ]*<?([^\"<: \r\n@]+@[^\": \r\n>]+)>?([\r\n]*)"
+let re_from = Re_posix.compile_pat ~opts:[`ICase] from_str
 let re_date = Re_posix.compile_pat ~opts:[`ICase] "Date: ([^\r\n]+)"
 
 let length message = 
@@ -103,9 +104,12 @@ let make_postmark message =
   let len = length message in
   let from buff =
     let subs = Re.all ~pos:0 ~len re_from buff in
-    if List.length subs >= 1 then
-      Re.get (List.hd subs) 2
-    else
+    if List.length subs >= 1 then (
+      let str = Re.get (List.hd subs) 0 in
+      let l = Re.split (Re_posix.compile_pat "[ \r\n]+") str in
+      let from = List.nth l (List.length l - 1) in
+      Re.replace_string (Re_posix.compile_pat "[<>]") ~by:"" from
+    ) else
       "daemon@localhost.local"
   in
   let date_time buff =
