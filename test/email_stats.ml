@@ -144,20 +144,21 @@ let get_arch str =
       `ImapDld (host,port)
   | _ -> raise InvalidCommand
 
-let rec args i archive echo compress outfile =
+let rec args i archive echo nocompress outfile unique =
   if i >= Array.length Sys.argv then
-    archive,echo,compress,outfile
+    archive,echo,nocompress,outfile,unique
   else
     match Sys.argv.(i) with 
-    | "-archive" -> args (i+2) (Some (get_arch Sys.argv.(i+1))) echo compress outfile
-    | "-echo" -> args (i+1) archive true compress outfile
-    | "-compress" -> args (i+1) archive echo true outfile
-    | "-outfile" -> args (i+2) archive echo compress (Some Sys.argv.(i+1))
+    | "-archive" -> args (i+2) (Some (get_arch Sys.argv.(i+1))) echo nocompress outfile unique
+    | "-echo" -> args (i+1) archive true nocompress outfile unique
+    | "-no-compress" -> args (i+1) archive echo true outfile unique
+    | "-outfile" -> args (i+2) archive echo nocompress (Some Sys.argv.(i+1)) unique
+    | "-unique" -> args (i+1) archive echo nocompress outfile true
     | _ -> raise InvalidCommand
 
 let commands f =
   try 
-    let archive,echo,compress,outfile = args 1 None false false None in
+    let archive,echo,nocompress,outfile,unique = args 1 None false false None false in
     let file = opt_val outfile in
     let (resume,file) =
       if String.sub file 0 7 = "resume:" then (
@@ -167,10 +168,12 @@ let commands f =
         (None,file)
       )
     in
-    f (opt_val archive) echo compress file resume
+    f (opt_val archive) echo nocompress file resume unique
   with 
     | Failed|InvalidCommand ->
-    Printf.printf "usage: email_stats -archive [mbox:file|imap:server:port:user:password] -outfile [[resume:]file] -echo -compress\n%!"
+      Printf.printf 
+        "usage: email_stats -archive [mbox:file|imap[-dld]:server:port] -outfile
+        [[resume:]file] [-echo] [-no-compress] [-unique]\n%!"
     | _ -> ()
 
 let email_addr = ref MapStr.empty
@@ -480,12 +483,12 @@ let cancel_uncompr () =
     Lwt.cancel waiter;
     uncompr_waiter := None
 
-let login user pswd compress ic oc =
+let login user pswd nocompress ic oc =
   catch (fun() ->
     write oc (Printf.sprintf "%s login %s %s\r\n" (get_tag()) user pswd) >>= fun () ->
     while_not_ok ic >>= fun () ->
     begin
-    if compress then (
+    if nocompress = false then (
       capability ic oc >>= fun caps ->
       if List.exists (fun c -> String.lowercase c = "compress=deflate") caps then (
         compress_deflate ic oc >>= fun () ->
@@ -625,9 +628,9 @@ let get_part ic =
   let subs = Re.exec re_fetch res in
   let count = int_of_string (Re.get subs 2) in
   resp_read ~count () >>= fun msg ->
-  resp_read () >>= fun res ->
+  resp_read () >>= fun res -> (* \r\n after the literal *)
   if res <> ")" then raise Failed;
-  resp_read () >>= fun res ->
+  resp_read () >>= fun res -> (* closing parenth *)
   if ok res = false then raise Failed;
   return msg
 
@@ -640,7 +643,7 @@ let fetch_unique ic oc start mailbox cnt f =
     if i > cnt then 
       return ()
     else (
-      fetch_part ic oc i "header" >>= fun headers ->
+      fetch_part ic oc i "header.fields (Message-ID)" >>= fun headers ->
       let re = Re_posix.compile_pat ~opts:[`ICase] "message-id: ([^ \r\n]+)" in
       let msgid =
         try
@@ -652,12 +655,8 @@ let fetch_unique ic oc start mailbox cnt f =
         _fetch (i + 1)
       ) else (
         let _ = get_messageid msgid in
-        fetch_part ic oc i "text" >>= fun body ->
-        let buffer = Buffer.create ((String.length headers) + (String.length body) + 2) in
-        Buffer.add_string buffer headers;
-        Buffer.add_string buffer "\r\n";
-        Buffer.add_string buffer body;
-        f i mailbox (Buffer.contents buffer) >>= fun () ->
+        fetch_part ic oc i "" >>= fun message ->
+        f i mailbox message >>= fun () ->
         start := i;
         _fetch (i + 1)
       )
@@ -742,7 +741,7 @@ let start_tls ip port f =
 let maildir_fold dir f =
   return ()
 
-let imap_fold host port compress resume f =
+let imap_fold host port nocompress resume unique f =
   let open Socket_utils in
   let connected = ref false in
   Printf.fprintf stderr "Please enter user name:%!";
@@ -786,7 +785,7 @@ let imap_fold host port compress resume f =
         connected := true;
         compression := false;
         resp_chan := Some ic;
-        login user pswd compress ic oc >>= fun () ->
+        login user pswd nocompress ic oc >>= fun () ->
         begin
         if mailboxes = [] then
           list host resume ic oc
@@ -803,7 +802,10 @@ let imap_fold host port compress resume f =
           ) else (
             select ic oc mailbox >>= fun msgs ->
             Printf.fprintf stderr "%s, %d messages\n%!" mailbox msgs;
-            fetch ic oc !start (Some mailbox) cnt f
+            if unique then
+              fetch_unique ic oc start (Some mailbox) cnt f
+            else
+              fetch ic oc !start (Some mailbox) cnt f
           )
         ) mailboxes >>= fun() ->
         logout oc 
@@ -845,7 +847,7 @@ let labels_from_mailbox mailbox =
 
 let () =
   let open Parsemail.Mailbox in
-  commands (fun arch echo compress outfile resume ->
+  commands (fun arch echo nocompress outfile resume unique ->
   echoterm := echo;
   Lwt_main.run (
     let flags = 
@@ -867,8 +869,8 @@ let () =
         Lwt_unix.stat file >>= fun st ->
         write (sprf "archive size: %l\n%!" st.Unix.st_size) >>= fun () ->
         return (mbox_fold file,false,st.Unix.st_size)
-    | `Imap (host,port) -> return (imap_fold host port compress resume,false,0)
-    | `ImapDld (host,port) -> return (imap_fold host port compress resume,true,0)
+    | `Imap (host,port) -> return (imap_fold host port nocompress resume unique,false,0)
+    | `ImapDld (host,port) -> return (imap_fold host port nocompress resume unique,true,0)
     | `Maildir _ -> raise InvalidCommand
     end >>= fun (fold,download,size) ->
     fold (fun cnt mailbox message_s ->
