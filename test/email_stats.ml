@@ -12,13 +12,18 @@ exception LoginFailed
 
 let echoterm = ref false
 
+let opt_val = function
+  | None -> raise Failed
+  | Some v -> v
+
 (* in/out buffer if compression is enabled *)
 let compression = ref false
 let compr_strm = Zlib.deflate_init 6 false
 let uncompr_strm = Zlib.inflate_init false
 let inbuffer = ref (Buffer.create 100)
 let buff_size = 1024
-let uncompr_chan = ref None
+let resp_chan = ref None
+let uncompr_waiter = ref None
 
 (* continous compression stream for the session's duration *)
 let _compress buffin =
@@ -90,21 +95,8 @@ let start_async_uncompr ic_net oc_pipe =
  * if count is not requested then read the line otherwise 
  * read the specified count
  *)
-let resp_read ?count ic_net =
-  let ic =
-  if !compression = false then (
-    ic_net
-  ) else (
-    match !uncompr_chan with
-    | None ->
-      Printf.fprintf stderr "##### started async uncompress thread\n%!";
-      let (ic_pipe,oc_pipe) = Lwt_io.pipe () in
-      async(fun() -> start_async_uncompr ic_net oc_pipe);
-      uncompr_chan := Some ic_pipe;
-      ic_pipe
-    | Some ic_pipe -> ic_pipe
-  )
-  in
+let resp_read ?count () =
+  let ic = opt_val !resp_chan in
   begin
   match count with 
   | None -> Lwt_io.read_line ic 
@@ -152,10 +144,6 @@ let get_arch str =
       `ImapDld (host,port)
   | _ -> raise InvalidCommand
 
-let opt_val = function
-  | None -> raise InvalidCommand
-  | Some v -> v
-
 let rec args i archive echo compress outfile =
   if i >= Array.length Sys.argv then
     archive,echo,compress,outfile
@@ -181,7 +169,7 @@ let commands f =
     in
     f (opt_val archive) echo compress file resume
   with 
-    | InvalidCommand ->
+    | Failed|InvalidCommand ->
     Printf.printf "usage: email_stats -archive [mbox:file|imap:server:port:user:password] -outfile [[resume:]file] -echo -compress\n%!"
     | _ -> ()
 
@@ -439,7 +427,7 @@ let write oc msg =
 
 let while_not_ok ic =
   let rec _read () =
-    resp_read ic >>= fun res ->
+    resp_read () >>= fun res ->
     if ok res then
       return ()
     else if bad res || no res then
@@ -464,19 +452,33 @@ let get_tag () =
  *)
 let capability ic oc =
   write oc (Printf.sprintf "%s capability\r\n" (get_tag())) >>= fun () ->
-  resp_read ic >>= fun res ->
+  resp_read () >>= fun res ->
   let l = Re.split (Re_posix.compile_pat "[ ]+") res in
-  resp_read ic >>= fun res ->
+  resp_read () >>= fun res ->
   if ok res then
     return l
   else
     raise Failed
 
-let compress_deflate ic oc =
-  write oc (Printf.sprintf "%s compress deflate\r\n" (get_tag())) >>= fun () ->
-  while_not_ok ic >>= fun () ->
+let compress_deflate ic_net oc_net =
+  write oc_net (Printf.sprintf "%s compress deflate\r\n" (get_tag())) >>= fun () ->
+  while_not_ok ic_net >>= fun () ->
   compression := true;
+  let (ic_pipe,oc_pipe) = Lwt_io.pipe () in
+  let (waiter,wakener) = Lwt.task () in
+  let uncompr = (start_async_uncompr ic_net oc_pipe >>= fun () ->
+    wakeup wakener (); waiter) in
+  uncompr_waiter := Some uncompr;
+  async(fun () -> uncompr);
+  resp_chan := Some ic_pipe;
   return ()
+
+let cancel_uncompr () =
+  match !uncompr_waiter with
+  | None -> ()
+  | Some waiter -> 
+    Lwt.cancel waiter;
+    uncompr_waiter := None
 
 let login user pswd compress ic oc =
   catch (fun() ->
@@ -505,7 +507,7 @@ let logout oc =
 (* STATUS "ATT" (MESSAGES 10) *)
 let status ic oc mailbox =
   write oc (Printf.sprintf "%s status %s (messages)\r\n" (get_tag()) mailbox) >>= fun () ->
-  resp_read ic >>= fun res ->
+  resp_read () >>= fun res ->
   let msgs = 
     try
       let re = Re_posix.compile_pat ~opts:[`ICase] "messages ([0-9]+)\\)$" in
@@ -564,7 +566,7 @@ let list host resume ic oc =
     let re = Re_posix.compile_pat ~opts:[`ICase] "^\\* list \\(([^)]+)\\) [^ ]+ ((\"[^\"]+\")|([^\t ]+))$" in
   Printf.fprintf stderr "mailboxes to process:\n%!";
   let rec _read l =
-    resp_read ic >>= fun res ->
+    resp_read () >>= fun res ->
     if ok res then
       return l
     else (
@@ -605,7 +607,7 @@ let list host resume ic oc =
 let select ic oc mailbox =
   write oc (Printf.sprintf "%s select %s\r\n" (get_tag()) mailbox) >>= fun () ->
   let rec _read msgs =
-    resp_read ic >>= fun res ->
+    resp_read () >>= fun res ->
     if ok res then
       return msgs
     else (
@@ -619,18 +621,18 @@ let select ic oc mailbox =
 let get_part ic =
   let re_fetch = Re_posix.compile_pat ~opts:[`ICase] 
     "^\\* ([0-9]+) fetch [^}]+[{]([0-9]+)[}]$" in (* * 5 FETCH (BODY[] {1208} *)
-  resp_read ic >>= fun res ->
+  resp_read () >>= fun res ->
   let subs = Re.exec re_fetch res in
   let count = int_of_string (Re.get subs 2) in
-  resp_read ~count ic >>= fun msg ->
-  resp_read ic >>= fun res ->
+  resp_read ~count () >>= fun msg ->
+  resp_read () >>= fun res ->
   if res <> ")" then raise Failed;
-  resp_read ic >>= fun res ->
+  resp_read () >>= fun res ->
   if ok res = false then raise Failed;
   return msg
 
 let fetch_part ic oc i part =
-  write oc (Printf.sprintf "%s fetch %d body[%s]\r\n" (get_tag()) i part) >>= fun () ->
+  write oc (Printf.sprintf "%s fetch %d body.peek[%s]\r\n" (get_tag()) i part) >>= fun () ->
   get_part ic
 
 let fetch_unique ic oc start mailbox cnt f =
@@ -669,16 +671,16 @@ let fetch ic oc start mailbox cnt f =
   else (
   let re_fetch = Re_posix.compile_pat ~opts:[`ICase] 
     "^\\* ([0-9]+) fetch [^}]+[{]([0-9]+)[}]$" in (* * 5 FETCH (BODY[] {1208} *)
-  write oc (Printf.sprintf "%s fetch %d:* body[]\r\n" (get_tag()) start) >>= fun () ->
+  write oc (Printf.sprintf "%s fetch %d:* body.peek[]\r\n" (get_tag()) start) >>= fun () ->
   let rec _read () =
-    resp_read ic >>= fun res ->
+    resp_read () >>= fun res ->
     if ok_ex res then (
       return () 
     ) else if Re.execp re_fetch res then (
       let subs = Re.exec re_fetch res in
       let id = int_of_string (Re.get subs 1) in
       let count = int_of_string (Re.get subs 2) in
-      resp_read ~count ic >>= fun msg ->
+      resp_read ~count () >>= fun msg ->
       f id mailbox msg >>= fun () ->
       _read ()
     ) else  (
@@ -783,6 +785,7 @@ let imap_fold host port compress resume f =
         Printf.fprintf stderr "connected to %s:%d\n%!" ip port;
         connected := true;
         compression := false;
+        resp_chan := Some ic;
         login user pswd compress ic oc >>= fun () ->
         begin
         if mailboxes = [] then
@@ -808,6 +811,7 @@ let imap_fold host port compress resume f =
       return true
     ) 
     (fun ex -> 
+      cancel_uncompr ();
       if ex <> LoginFailed && !connected && attempts < 10 then (
         Printf.fprintf stderr "retrying %d\n%!" attempts; 
         run ip port ssl mailboxes (attempts + 1) 
@@ -820,6 +824,7 @@ let imap_fold host port compress resume f =
       run ip port ssl [] 1
     )
   ) [true,ports] >>= fun res ->
+  cancel_uncompr ();
   if res = false then
     Printf.fprintf stderr "failed to get messages\n%!";
   return ()
