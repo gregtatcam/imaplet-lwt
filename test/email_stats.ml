@@ -4,8 +4,6 @@ open Imaplet
 open Commands
 open Parsemail
 
-module MapStr = Map.Make(String)
-
 exception InvalidCommand
 exception Failed
 exception LoginFailed
@@ -159,84 +157,83 @@ let rec args i archive echo nocompress outfile unique =
 let commands f =
   try 
     let archive,echo,nocompress,outfile,unique = args 1 None false false None false in
-    let file = opt_val outfile in
-    let (resume,file) =
+    let resume =
+    match outfile with
+    | Some file ->
       if String.sub file 0 7 = "resume:" then (
         let file = String.sub file 7 (String.length file - 7) in
-        (Some file, file)
+        Some file
       ) else (
-        (None,file)
+        None
       )
+    | None -> None
     in
-    f (opt_val archive) echo nocompress file resume unique
+    f (opt_val archive) echo nocompress outfile resume unique
   with 
     | Failed|InvalidCommand ->
       Printf.printf 
-        "usage: email_stats -archive [mbox:file|imap[-dld]:server:port] -outfile
-        [[resume:]file] [-echo] [-no-compress] [-unique]\n%!"
+        "usage: email_stats -archive [mbox:file|imap[-dld]:server:port] [-outfile
+        [[resume:]file]] [-echo] [-no-compress] [-unique]\n%!"
     | _ -> ()
 
-let email_addr = ref MapStr.empty
-let email_addr_cnt = ref 0
-let attachments = ref MapStr.empty
-let attachments_cnt = ref 0
-let mailboxes = ref MapStr.empty
-let mailboxes_cnt = ref 0
-let subject = ref MapStr.empty
-let subject_cnt = ref 0
-let messageid = ref MapStr.empty
-let messageid_cnt = ref 0
+let email_addr = ref (Hashtbl.create 0)
+let attachments = ref (Hashtbl.create 0)
+let mailboxes = ref (Hashtbl.create 0)
+let subject = ref (Hashtbl.create 0)
+let messageid = ref (Hashtbl.create 0)
 
-let get_unique key cnt map =
+let init_hashtbl_all size =
+  email_addr := Hashtbl.create size;
+  attachments := Hashtbl.create size;
+  mailboxes := Hashtbl.create size;
+  subject := Hashtbl.create size;
+  messageid := Hashtbl.create size
+
+let get_unique key tbl =
   if key = "" then
     ""
   else (
-  try 
-    string_of_int (MapStr.find key !map)
-  with Not_found ->
-    cnt := !cnt + 1;
-    map := MapStr.add key !cnt !map;
-    string_of_int !cnt
+    if Hashtbl.mem !tbl key then
+      Hashtbl.find !tbl key
+    else (
+      let cnt = string_of_int ((Hashtbl.length !tbl) + 1) in
+      Hashtbl.add !tbl key cnt;
+      cnt
+    )
   )
 
 let get_addr key =
-  get_unique key email_addr_cnt email_addr
+  get_unique key email_addr
 
 let get_attach key =
-  get_unique key attachments_cnt attachments 
+  get_unique key attachments 
 
 let get_mailbox key =
   let key = Re.replace_string (Re_posix.compile_pat "^\"|\"$") ~by:"" key in
-  get_unique key mailboxes_cnt mailboxes 
+  get_unique key mailboxes 
 
 let get_subject key =
-  get_unique key subject_cnt subject
+  get_unique key subject
 
 let get_messageid key =
-  get_unique key messageid_cnt messageid
+  get_unique key messageid
 
 let headers_to_map headers =
-  List.fold_left (fun map (n,v) ->
+  List.fold_left (fun tbl (n,v) ->
     let n = String.lowercase n in
     if n = "from" || n = "to" || n = "cc" || n = "subject" || n = "object-id" || 
         n = "in-reply-to" || n = "x-gmail-labels" || n = "content-type" || 
-        n = "date" || n = "message-id" then
-      MapStr.add n (String.trim v) map
-    else
-      map
-  ) MapStr.empty headers
-
-let get_header_l headers name =
-  try
-    let n,v = List.find (fun (n,v) -> String.lowercase n = name) headers in
-    v
-  with Not_found -> ""
+        n = "date" || n = "message-id" then (
+      Hashtbl.add tbl n (String.trim v);
+      tbl
+    ) else
+      tbl
+  ) (Hashtbl.create 10) headers
 
 let get_header_m headers name =
   try 
-    MapStr.find name headers
+    Hashtbl.find headers name
   with Not_found -> ""
-
 
 let re_addr = Re_posix.compile_pat "([^<@]+@[^>]+)"
 
@@ -290,7 +287,9 @@ let _messageid headers =
 
 let messageid_unique headers =
   let h = get_header_m headers "message-id" in
-  (MapStr.mem h !messageid) = false
+  let res = (Hashtbl.mem !messageid h) = false in
+  Printf.printf "message-id: %b %s\n%!" res h;
+  res
 
 let _inreplyto headers =
   let h = get_header_m headers "in-reply-to" in
@@ -522,7 +521,7 @@ let status ic oc mailbox =
   return msgs
 
 let checkresume = function
-  | None -> return MapStr.empty
+  | None -> return (Hashtbl.create 0)
   | Some file ->
     Printf.fprintf stderr "checking resume point\n%!";
     let labels = "X-Gmail-Labels: " in
@@ -545,18 +544,20 @@ let checkresume = function
           let label = String.trim (String.sub line lenlbl (len - lenlbl)) in
           let position = Int64.to_float (Lwt_io.position ic) in
           let pct = (100. *. position) /. length in
-          if MapStr.mem label mailboxes = false then (
+          if Hashtbl.mem mailboxes label = false then (
             Printf.fprintf stderr "%%%.02f, %d, %s                   \r%!" pct 1 label;
-            _read (MapStr.add label 1 mailboxes)
+            Hashtbl.add mailboxes label 1;
+            _read mailboxes
           ) else (
-            let cnt = MapStr.find label mailboxes in
+            let cnt = Hashtbl.find mailboxes label in
             Printf.fprintf stderr "%%%.02f, %d, %s                   \r%!" pct (cnt+1) label;
-            _read (MapStr.add label (cnt + 1) mailboxes)
+            Hashtbl.add mailboxes label (cnt + 1);
+            _read mailboxes
           )
         ) else 
           _read mailboxes 
       in
-      _read MapStr.empty
+      _read (Hashtbl.create 0)
     )
 
 (*
@@ -597,8 +598,8 @@ let list host resume ic oc =
     let msgs = int_of_string msgs in
     total := !total + msgs;
     let start =
-      if MapStr.mem m resume then
-        ref (MapStr.find m resume)
+      if Hashtbl.mem resume m then
+        ref (Hashtbl.find resume m)
       else
         ref 1
     in
@@ -651,7 +652,7 @@ let fetch_unique ic oc start mailbox cnt f =
           Re.get subs 1
         with Not_found -> ""
       in
-      if msgid <> "" && MapStr.mem msgid !messageid then (
+      if msgid <> "" && Hashtbl.mem !messageid msgid then (
         _fetch (i + 1)
       ) else (
         let _ = get_messageid msgid in
@@ -741,7 +742,7 @@ let start_tls ip port f =
 let maildir_fold dir f =
   return ()
 
-let imap_fold host port nocompress resume unique f =
+let imap_fold host port nocompress resume unique download f =
   let open Socket_utils in
   let connected = ref false in
   Printf.fprintf stderr "Please enter user name:%!";
@@ -792,6 +793,10 @@ let imap_fold host port nocompress resume unique f =
         else
           return mailboxes
         end >>= fun mailboxes ->
+        if unique && download then (
+          let total = List.fold_left (fun acc (_,cnt,_) -> acc+cnt) 0 mailboxes in
+          messageid := Hashtbl.create total
+        );
         Printf.fprintf stderr "--- started processing ---\n%!";
         Lwt_list.iter_s (fun (start,cnt,mailbox) ->
           if cnt = 0 then (
@@ -856,7 +861,13 @@ let () =
       else
         [Unix.O_NONBLOCK;Unix.O_CREAT;Unix.O_WRONLY] 
     in
-    Lwt_io.with_file ~flags ~mode:Lwt_io.Output outfile (fun outc ->
+    let with_file = 
+      if outfile = None then 
+        (fun f -> f Lwt_io.stdout)
+      else
+        Lwt_io.with_file ~flags ~mode:Lwt_io.Output (opt_val outfile)
+    in
+    with_file (fun outc ->
     let sprf = Printf.sprintf in
     let write = Lwt_io.write outc in
     let progress = ref 0 in
@@ -869,10 +880,11 @@ let () =
         Lwt_unix.stat file >>= fun st ->
         write (sprf "archive size: %l\n%!" st.Unix.st_size) >>= fun () ->
         return (mbox_fold file,false,st.Unix.st_size)
-    | `Imap (host,port) -> return (imap_fold host port nocompress resume unique,false,0)
-    | `ImapDld (host,port) -> return (imap_fold host port nocompress resume unique,true,0)
+    | `Imap (host,port) -> return (imap_fold host port nocompress resume unique false,false,0)
+    | `ImapDld (host,port) -> return (imap_fold host port nocompress resume unique true,true,0)
     | `Maildir _ -> raise InvalidCommand
     end >>= fun (fold,download,size) ->
+    if download = false then init_hashtbl_all 50_000;
     fold (fun cnt mailbox message_s ->
       catch (fun () ->
         if download = false then (
@@ -882,9 +894,8 @@ let () =
           let message = Utils.make_email_message message_s in
           let email = message.Mailbox.Message.email in
           let headers = Email.header email in
-          (*Printf.printf "headers:\n%s\n%!" (headers_to_string headers);*)
           let headers_l = Header.to_list headers in
-          (* select interesting headers, update if more stats is needed *)
+          (* select required headers, update if more stats is needed *)
           let headers_m = headers_to_map headers_l in
           if messageid_unique headers_m then (
             write "--> start\n" >>
