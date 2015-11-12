@@ -14,6 +14,11 @@ let opt_val = function
   | None -> raise Failed
   | Some v -> v
 
+let sprf = Printf.sprintf
+
+let try_close ch =
+  catch (fun() -> Lwt_io.close ch) (fun _ -> return())
+
 (* in/out buffer if compression is enabled *)
 let compression = ref false
 let compr_strm = Zlib.deflate_init 6 false
@@ -82,7 +87,8 @@ let start_async_uncompr ic_net oc_pipe =
     read_cache ic_net >>= function
     | None -> 
       Printf.fprintf stderr "##### reading from cache failed\n%!";
-      raise Failed
+      try_close oc_pipe >>
+      try_close (opt_val !resp_chan) 
     | Some buff -> 
       inflate oc_pipe buff >>
       read ()
@@ -111,7 +117,7 @@ let echo_on on =
   Lwt_unix.system (Printf.sprintf "stty %secho" (if on then "" else "-")) >>=
     fun _ -> return ()
 
-let gmail host = if host = "imap.gmail.com" then true else false
+let gmail host = if host = "imap.gmail.com" || host = "192.168.2.2" then true else false
 
 let get_arch str =
   let re = Re_posix.compile_pat "^(mbox|maildir|imap|imap-dld):(.+)$" in
@@ -262,6 +268,7 @@ let _cc headers =
 
 let _gmail_labels headers =
   let h = get_header_m headers "x-gmail-labels" in
+  begin
   if h = "" then
     get_mailbox "inbox"
   else (
@@ -280,15 +287,15 @@ let _gmail_labels headers =
         get_mailbox h
     ) l)
   )
+  end
 
 let _messageid headers =
   let h = get_header_m headers "message-id" in
-  get_messageid h
+  (get_messageid h)
 
 let messageid_unique headers =
   let h = get_header_m headers "message-id" in
-  let res = (Hashtbl.mem !messageid h) = false in
-  Printf.printf "message-id: %b %s\n%!" res h;
+  let res = ((Hashtbl.mem !messageid h) = false) in
   res
 
 let _inreplyto headers =
@@ -344,7 +351,6 @@ let len_compressed content =
   String.length (Imap_crypto.do_compress ~header:true content)
 
 let rec walk outc email id part multipart =
-  let sprf = Printf.sprintf in
   let write = Lwt_io.write outc in
   let headers = Header.to_list (Email.header email) in
   let headers_s = headers_to_string (Email.header email) in
@@ -427,7 +433,7 @@ let write oc msg =
   Lwt_io.write oc msg >>
   Lwt_io.flush oc
 
-let while_not_ok ic =
+let while_not_ok () =
   let rec _read () =
     resp_read () >>= fun res ->
     if ok res then
@@ -452,7 +458,7 @@ let get_tag () =
    LIST-EXTENDED LIST-STATUS
  a OK Success
  *)
-let capability ic oc =
+let capability oc =
   write oc (Printf.sprintf "%s capability\r\n" (get_tag())) >>= fun () ->
   resp_read () >>= fun res ->
   let l = Re.split (Re_posix.compile_pat "[ ]+") res in
@@ -464,14 +470,14 @@ let capability ic oc =
 
 let compress_deflate ic_net oc_net =
   write oc_net (Printf.sprintf "%s compress deflate\r\n" (get_tag())) >>= fun () ->
-  while_not_ok ic_net >>= fun () ->
+  while_not_ok () >>= fun () ->
   compression := true;
   let (ic_pipe,oc_pipe) = Lwt_io.pipe () in
   let (waiter,wakener) = Lwt.task () in
   let uncompr = (start_async_uncompr ic_net oc_pipe >>= fun () ->
     wakeup wakener (); waiter) in
   uncompr_waiter := Some uncompr;
-  async(fun () -> uncompr);
+  async(fun () -> catch(fun() -> uncompr)(fun _ -> return()));
   resp_chan := Some ic_pipe;
   return ()
 
@@ -485,10 +491,10 @@ let cancel_uncompr () =
 let login user pswd nocompress ic oc =
   catch (fun() ->
     write oc (Printf.sprintf "%s login %s %s\r\n" (get_tag()) user pswd) >>= fun () ->
-    while_not_ok ic >>= fun () ->
+    while_not_ok () >>= fun () ->
     begin
     if nocompress = false then (
-      capability ic oc >>= fun caps ->
+      capability oc >>= fun caps ->
       if List.exists (fun c -> String.lowercase c = "compress=deflate") caps then (
         compress_deflate ic oc >>= fun () ->
         Printf.fprintf stderr "compression enabled\n%!";
@@ -507,7 +513,7 @@ let logout oc =
   write oc (Printf.sprintf "%s logout\r\n" (get_tag()))
 
 (* STATUS "ATT" (MESSAGES 10) *)
-let status ic oc mailbox =
+let status oc mailbox =
   write oc (Printf.sprintf "%s status %s (messages)\r\n" (get_tag()) mailbox) >>= fun () ->
   resp_read () >>= fun res ->
   let msgs = 
@@ -517,12 +523,14 @@ let status ic oc mailbox =
       Re.get subs 1
     with Not_found -> "-" 
   in
-  while_not_ok ic >>= fun () ->
+  while_not_ok () >>= fun () ->
   return msgs
 
-let checkresume = function
-  | None -> return (Hashtbl.create 0)
+let checkresume unique = function
+  | None -> return (Hashtbl.create 0,Int64.zero)
   | Some file ->
+    if unique then
+      messageid := Hashtbl.create 50_000;
     Printf.fprintf stderr "checking resume point\n%!";
     let labels = "X-Gmail-Labels: " in
     let lenlbl = String.length labels in
@@ -531,15 +539,24 @@ let checkresume = function
     Lwt_io.with_file ~flags:[Unix.O_RDONLY;Unix.O_NONBLOCK] ~mode:Lwt_io.Input file (fun ic ->
       Lwt_io.length ic >>= fun length ->
       let length = Int64.to_float length in
-      let rec _read mailboxes =
+      let rec _read mailboxes offset =
         Lwt_io.read_line_opt ic >>= function
-        | None -> return mailboxes
+        | None -> return (mailboxes,offset)
         | Some line ->
         let len = String.length line in
-        if len > lenid && (String.lowercase (String.sub line 0 lenid)) = msgid then (
+        if unique && len > lenid && (String.lowercase (String.sub line 0 lenid)) = msgid then (
           let id = String.trim (String.sub line lenid (len - lenid)) in
           let _ = get_messageid id in ()
         );
+        let re_postmark = Re_posix.compile_pat ~opts:[`ICase] 
+          "^(From [^ \r\n]+ (mon|tue|wed|thu|fri|sat|sun) (jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec))" in
+        let offset =  (* offset of last from, last message will be overwritten since
+        it could be partial *)
+        if Re.execp re_postmark line then (
+          Int64.sub (Lwt_io.position ic) (Int64.of_int (String.length line))
+        ) else 
+          offset
+        in
         if len > lenlbl && String.sub line 0 lenlbl = labels then (
           let label = String.trim (String.sub line lenlbl (len - lenlbl)) in
           let position = Int64.to_float (Lwt_io.position ic) in
@@ -547,17 +564,17 @@ let checkresume = function
           if Hashtbl.mem mailboxes label = false then (
             Printf.fprintf stderr "%%%.02f, %d, %s                   \r%!" pct 1 label;
             Hashtbl.add mailboxes label 1;
-            _read mailboxes
+            _read mailboxes offset
           ) else (
             let cnt = Hashtbl.find mailboxes label in
             Printf.fprintf stderr "%%%.02f, %d, %s                   \r%!" pct (cnt+1) label;
-            Hashtbl.add mailboxes label (cnt + 1);
-            _read mailboxes
+            Hashtbl.replace mailboxes label (cnt + 1);
+            _read mailboxes offset
           )
         ) else 
-          _read mailboxes 
+          _read mailboxes offset
       in
-      _read (Hashtbl.create 0)
+      _read (Hashtbl.create 0) Int64.zero
     )
 
 (*
@@ -565,7 +582,7 @@ let checkresume = function
    * LIST (\HasChildren) "/" "Cambridge"
    * LIST (\HasNoChildren) "/" "Cambridge/Entertainment"
  *)
-let list host resume ic oc = 
+let list host resume oc = 
   write oc (Printf.sprintf "%s list \"\" *\r\n" (get_tag())) >>= fun () ->
     let re = Re_posix.compile_pat ~opts:[`ICase] "^\\* list \\(([^)]+)\\) [^ ]+ ((\"[^\"]+\")|([^\t ]+))$" in
   Printf.fprintf stderr "mailboxes to process:\n%!";
@@ -589,11 +606,11 @@ let list host resume ic oc =
   _read [] >>= fun l ->
   let l = List.sort String.compare l in
   let l = 
-    if gmail host then List.concat [l;["\"[Gmail]/All Mail\"";"\"[Gmail]/Important\""]] else l
+    if gmail host then List.concat [l;["\"[Gmail]/Important\"";"\"[Gmail]/All Mail\""]] else l
   in
   let total = ref 0 in
   Lwt_list.map_s (fun m ->
-    status ic oc m >>= fun msgs ->
+    status oc m >>= fun msgs ->
     Printf.fprintf stderr "%s, %s messages\n%!" m msgs;
     let msgs = int_of_string msgs in
     total := !total + msgs;
@@ -608,7 +625,7 @@ let list host resume ic oc =
   Printf.fprintf stderr "Total messages: %d\n%!" !total;
   return l
 
-let select ic oc mailbox =
+let select oc mailbox =
   write oc (Printf.sprintf "%s select %s\r\n" (get_tag()) mailbox) >>= fun () ->
   let rec _read msgs =
     resp_read () >>= fun res ->
@@ -622,41 +639,65 @@ let select ic oc mailbox =
   in 
   _read 0
 
-let get_part ic =
-  let re_fetch = Re_posix.compile_pat ~opts:[`ICase] 
-    "^\\* ([0-9]+) fetch [^}]+[{]([0-9]+)[}]$" in (* * 5 FETCH (BODY[] {1208} *)
-  resp_read () >>= fun res ->
+let re_fetch = Re_posix.compile_pat ~opts:[`ICase] 
+  "^\\* ([0-9]+) fetch [^}]+[{]([0-9]+)[}]$" (* * 5 FETCH (BODY[] {1208} *)
+
+let write_fetch oc seq part =
+  let seq =
+  match seq with
+  | `All -> "1:*"
+  | `Start i -> sprf "%d:*" i
+  | `Range (i1,i2) -> sprf "%d:%d" i1 i2
+  | `Single i -> sprf "%d" i
+  in
+  let part =
+  match part with 
+  | `Header -> "header"
+  | `Text -> "text"
+  | `Body -> ""
+  | `HeaderMessageID -> "header.fields (Message-ID)"
+  in
+  write oc (Printf.sprintf "%s fetch %s body.peek[%s]\r\n" (get_tag()) seq part)
+
+let get_literal_data res =
   let subs = Re.exec re_fetch res in
+  let id = int_of_string (Re.get subs 1) in
   let count = int_of_string (Re.get subs 2) in
-  resp_read ~count () >>= fun msg ->
+  resp_read ~count () >>= fun data ->
+  return (id,data)
+
+let get_part () =
+  resp_read () >>= fun res ->
+  get_literal_data res >>= fun (_,msg) ->
   resp_read () >>= fun res -> (* \r\n after the literal *)
   if res <> ")" then raise Failed;
   resp_read () >>= fun res -> (* closing parenth *)
   if ok res = false then raise Failed;
   return msg
 
-let fetch_part ic oc i part =
-  write oc (Printf.sprintf "%s fetch %d body.peek[%s]\r\n" (get_tag()) i part) >>= fun () ->
-  get_part ic
+let fetch_part oc i part =
+  write_fetch oc (`Single i) part >>
+  get_part ()
 
-let fetch_unique ic oc start mailbox cnt f =
+let messageid_from_headers headers =
+  let re = Re_posix.compile_pat ~opts:[`ICase] "message-id: ([^ \r\n]+)" in
+  try
+    let subs = (Re.exec re headers) in
+    Re.get subs 1
+  with Not_found -> ""
+
+let fetch_unique oc start mailbox cnt f =
   let rec _fetch i =
     if i > cnt then 
       return ()
     else (
-      fetch_part ic oc i "header.fields (Message-ID)" >>= fun headers ->
-      let re = Re_posix.compile_pat ~opts:[`ICase] "message-id: ([^ \r\n]+)" in
-      let msgid =
-        try
-          let subs = (Re.exec re headers) in
-          Re.get subs 1
-        with Not_found -> ""
-      in
+      fetch_part oc i `HeaderMessageID >>= fun headers ->
+      let msgid = messageid_from_headers headers in
       if msgid <> "" && Hashtbl.mem !messageid msgid then (
         _fetch (i + 1)
       ) else (
         let _ = get_messageid msgid in
-        fetch_part ic oc i "" >>= fun message ->
+        fetch_part oc i `Body >>= fun message ->
         f i mailbox message >>= fun () ->
         start := i;
         _fetch (i + 1)
@@ -665,22 +706,48 @@ let fetch_unique ic oc start mailbox cnt f =
   in
   _fetch !start
 
-let fetch ic oc start mailbox cnt f =
+let fetch_unique_all oc start mailbox cnt f =
+  if !start >= cnt then
+    return ()
+  else (
+    write_fetch oc (`Start !start) `HeaderMessageID >>= fun () ->
+    let rec _read seq =
+      resp_read () >>= fun res ->
+      if ok_ex res then (
+        return seq
+      ) else if Re.execp re_fetch res then (
+        get_literal_data res >>= fun (id,headers) ->
+        let msgid = messageid_from_headers headers in
+        if msgid <> "" && Hashtbl.mem !messageid msgid then (
+          _read seq
+        ) else (
+          let _ = get_messageid msgid in
+          _read (id::seq)
+        )
+      ) else  (
+        _read seq
+      )
+    in
+    _read [] >>= fun seq ->
+    Lwt_list.fold_right_s (fun s _ ->
+      fetch_part oc s `Body >>= fun message ->
+      f s mailbox message >>= fun () ->
+      start := s;
+      return ()
+    ) seq ()
+  )
+
+let fetch oc start mailbox cnt f =
   if start >= cnt then
     return ()
   else (
-  let re_fetch = Re_posix.compile_pat ~opts:[`ICase] 
-    "^\\* ([0-9]+) fetch [^}]+[{]([0-9]+)[}]$" in (* * 5 FETCH (BODY[] {1208} *)
-  write oc (Printf.sprintf "%s fetch %d:* body.peek[]\r\n" (get_tag()) start) >>= fun () ->
+  write_fetch oc (`Start start) `Body >>= fun () ->
   let rec _read () =
     resp_read () >>= fun res ->
     if ok_ex res then (
       return () 
     ) else if Re.execp re_fetch res then (
-      let subs = Re.exec re_fetch res in
-      let id = int_of_string (Re.get subs 1) in
-      let count = int_of_string (Re.get subs 2) in
-      resp_read ~count () >>= fun msg ->
+      get_literal_data res >>= fun (id,msg) ->
       f id mailbox msg >>= fun () ->
       _read ()
     ) else  (
@@ -717,9 +784,6 @@ let start_ssl ip port f =
   ) None >>= function
   | Some ex -> Printf.fprintf stderr "startssl: %s\n%!" (Printexc.to_string ex); raise ex
   | None -> return ()
-
-let try_close ch =
-  catch (fun() -> Lwt_io.close ch) (fun _ -> return())
 
 let start_tls ip port f =
   Printf.fprintf stderr "connecting tls\n%!";
@@ -789,11 +853,11 @@ let imap_fold host port nocompress resume unique download f =
         login user pswd nocompress ic oc >>= fun () ->
         begin
         if mailboxes = [] then
-          list host resume ic oc
+          list host resume oc
         else
           return mailboxes
         end >>= fun mailboxes ->
-        if unique && download then (
+        if unique && download && Hashtbl.length !messageid = 0 then (
           let total = List.fold_left (fun acc (_,cnt,_) -> acc+cnt) 0 mailboxes in
           messageid := Hashtbl.create total
         );
@@ -805,12 +869,12 @@ let imap_fold host port nocompress resume unique download f =
           ) else if !start >= cnt then (
             return () (* was already processed, retrying *)
           ) else (
-            select ic oc mailbox >>= fun msgs ->
+            select oc mailbox >>= fun msgs ->
             Printf.fprintf stderr "%s, %d messages\n%!" mailbox msgs;
-            if unique then
-              fetch_unique ic oc start (Some mailbox) cnt f
+            if mailbox = "\"[Gmail]/All Mail\"" && unique then
+              fetch_unique_all oc start (Some mailbox) cnt f
             else
-              fetch ic oc !start (Some mailbox) cnt f
+              fetch oc !start (Some mailbox) cnt f
           )
         ) mailboxes >>= fun() ->
         logout oc 
@@ -840,7 +904,8 @@ let mbox_fold file f =
   Utils.fold_email_with_file file (fun (cnt,mailbox) message ->
     f cnt mailbox message >>= fun () ->
     return (`Ok (cnt + 1,mailbox))
-  ) (1,None) >>= fun _ ->
+  ) (1,None) >>= fun (cnt,_) ->
+  Printf.fprintf stderr "total messages processed: %d\n%!" cnt;
   return ()
 
 let labels_from_mailbox mailbox =
@@ -855,12 +920,8 @@ let () =
   commands (fun arch echo nocompress outfile resume unique ->
   echoterm := echo;
   Lwt_main.run (
-    let flags = 
-      if resume <> None then 
-        [Unix.O_NONBLOCK;Unix.O_CREAT;Unix.O_WRONLY;Unix.O_APPEND]
-      else
-        [Unix.O_NONBLOCK;Unix.O_CREAT;Unix.O_WRONLY] 
-    in
+    let flags = [Unix.O_NONBLOCK;Unix.O_CREAT;Unix.O_WRONLY] in
+    let flags = if resume = None then Unix.O_TRUNC :: flags else flags in
     let with_file = 
       if outfile = None then 
         (fun f -> f Lwt_io.stdout)
@@ -871,8 +932,6 @@ let () =
     let sprf = Printf.sprintf in
     let write = Lwt_io.write outc in
     let progress = ref 0 in
-    mailboxes_init();
-    checkresume resume >>= fun resume ->
     let t = Unix.gettimeofday () in
     begin
     match arch with
@@ -880,11 +939,17 @@ let () =
         Lwt_unix.stat file >>= fun st ->
         write (sprf "archive size: %l\n%!" st.Unix.st_size) >>= fun () ->
         return (mbox_fold file,false,st.Unix.st_size)
-    | `Imap (host,port) -> return (imap_fold host port nocompress resume unique false,false,0)
-    | `ImapDld (host,port) -> return (imap_fold host port nocompress resume unique true,true,0)
+    | `Imap (host,port) -> 
+      let resume = Hashtbl.create 0 in
+      return (imap_fold host port nocompress resume unique false,false,0)
+    | `ImapDld (host,port) -> 
+      checkresume unique resume >>= fun (resume,offset) ->
+      (if Int64.compare offset Int64.zero > 0 then Lwt_io.set_position outc offset else return ()) >>= fun () ->
+      return (imap_fold host port nocompress resume unique true,true,0)
     | `Maildir _ -> raise InvalidCommand
     end >>= fun (fold,download,size) ->
     if download = false then init_hashtbl_all 50_000;
+    mailboxes_init();
     fold (fun cnt mailbox message_s ->
       catch (fun () ->
         if download = false then (
