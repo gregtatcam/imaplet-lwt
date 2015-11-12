@@ -30,6 +30,7 @@ type context = {
   client_last_active: float ref;
   client_timed_out: Lwt_mutex.t;
   user_logout: Lwt_mutex.t;
-  compression: Imaplet_types.compressionAlgrthm option ref;
+  compression: (Imaplet_types.compressionAlgrthm * Zlib.stream * unit Lwt.t *
+    Lwt_io.input_channel) option ref;
   push_append_strm: (Amailbox.append_strm_type option -> unit)
 }

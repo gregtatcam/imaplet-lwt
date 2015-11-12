@@ -88,16 +88,34 @@ end = struct
     to_str str
 end
 
-let do_compress compress resp =
-  match compress with
-  | None -> resp
-  | Some _ -> Imap_crypto.do_compress ~header:true resp
+let buff_size = 1024
+let buffout = String.create buff_size
+
+let write_compressed w strm resp =
+  let len_resp = String.length resp in
+    Log_.log `Info1 (Printf.sprintf "--> writing compressed data:start %d\n" len_resp); 
+  let rec _compress offset len =
+    let (fi,used_in,used_out) = Zlib.deflate strm resp offset len
+      buffout 0 buff_size Zlib.Z_SYNC_FLUSH in
+    Log_.log `Info1 (Printf.sprintf " -- writing compressed data %b %d %d %d %d\n" 
+      fi used_in used_out offset len);
+    Lwt_io.write w (String.sub buffout 0 used_out) >>= fun () ->
+    let offset = offset + used_in in
+    let len = len - used_in in
+    if len = 0 then (
+      Log_.log `Info1 (Printf.sprintf "<-- compression complete %d %d\n" offset len); 
+      return ()
+    ) else
+      _compress offset len
+  in
+  _compress 0 len_resp
 
 let write_resp compress id w ?(tag="*") resp =
   let send_wcrlf w str = 
     Log_.log `Info3 (Printf.sprintf "<-- %s: %s\n" (Int64.to_string id) str);
-    let buff = do_compress compress (str ^ Regex.crlf) in
-    Lwt_io.write w buff
+    match compress with
+    | None -> Lwt_io.write w (str ^ Regex.crlf)
+    | Some (_,strm,_,_) -> write_compressed w strm (str ^ Regex.crlf)
   in
   match resp with
   | Resp_Ok (code, s) -> send_wcrlf w (StatusResponse.ok ~tag ~code s)
@@ -113,10 +131,10 @@ let write_resp_untagged compress id writer text =
   write_resp compress id writer (Resp_Untagged text)
 
 let write_resp_untagged_vector compress id w resp =
-  let l = List.concat [["* "];resp;[Regex.crlf]] in
   if compress <> None then (
-    let buff = String.concat "" l in
+    let buff = String.concat "" resp in
     write_resp_untagged compress id w buff
   ) else (
+    let l = List.concat [["* "];resp;[Regex.crlf]] in
     Lwt_list.iter_s (Lwt_io.write w) l
   )

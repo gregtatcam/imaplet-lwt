@@ -70,24 +70,85 @@ let is_client_id l name value =
     Regex.match_regex ~regx:("^\"?" ^ name) n && Regex.match_regex ~case:false ~regx:value v
   ) l
 
+(* 
+ * compression start 
+ *)
+
+let buff_size = 1024
+
+let inflate strm oc_pipe inbuff =
+  Log_.log `Info1 "### started inflating\n";
+  let outbuff = String.create buff_size in
+  let rec _inflate inbuff offset len =
+    let (fi, used_in, used_out) = Zlib.inflate strm inbuff offset len 
+      outbuff 0 buff_size Zlib.Z_SYNC_FLUSH in
+    Log_.log `Info3 (Printf.sprintf "### processed compressed data so far %b %d %d\n" fi used_in used_out);
+    Lwt_io.write oc_pipe (String.sub outbuff 0 used_out) >>
+    Lwt_io.flush oc_pipe >>= fun () ->
+    let offset = offset + used_in in
+    let len = len - used_in in
+    if fi then ( (* this should not happen? *)
+      Log_.log `Error "##### inflate stream is finished\n";
+      return ()
+    ) else if len = 0 then ( 
+      Log_.log `Info1 "### uncompressed all input buffer\n";
+      return ()
+    ) else (
+      Log_.log `Info1 "### continue uncompressing\n";
+      _inflate inbuff offset len
+    )
+  in
+  _inflate inbuff 0 (String.length inbuff)
+
+(* reading/uncompression is done in chunks and
+ * part of the chunk could be next compressed data stream
+ * so the part is stored in the cache *)
+let read_compressed ic_net =
+  let buff = String.create buff_size in
+  Lwt_io.read_into ic_net buff 0 buff_size >>= function
+  | 0 -> 
+    Log_.log `Error "##### compress read size 0\n";
+    return None
+  | size -> 
+    Log_.log `Info1 (Printf.sprintf "### read compressed data %d\n" size);
+    let str = String.sub buff 0 size in
+    return (Some str)
+
+let start_async_uncompr ic_net oc_pipe =
+  Log_.log `Info3 "### started inflate async thread\n";
+  let try_close c = catch (fun () -> Lwt_io.close c)(fun _->return()) in
+  (* recusevily uncompress chunks of data *)
+  let strm = Zlib.inflate_init false in
+  let rec read () =
+    read_compressed ic_net >>= function
+    | None -> try_close oc_pipe
+    | Some buff -> 
+      inflate strm oc_pipe buff >>
+      read ()
+  in
+  read ()
+
 let zip_read context =
-  match context.!compression with
-  | None -> Lwt_io.read_line_opt context.!netr >>= fun buff ->
-    begin
-    match buff with
-    | None -> return `None
-    | Some buff -> return (`Ok buff)
-    end
-  | Some _ ->
-    let buff = String.create 2048 in
-    Lwt_io.read_into context.!netr buff 0 2048 >>= function 
-    | 0 -> return `None
-    | size -> return (`Ok (Imap_crypto.do_uncompress (String.sub buff 0 size)))
+  let ic =
+    match context.!compression with
+    | None -> context.!netr
+    | Some (_,_,_,compr_ic) -> compr_ic
+  in
+  Lwt_io.read_line_opt ic >>= fun buff ->
+  begin
+  match buff with
+  | None -> return `None
+  | Some buff -> return (`Ok buff)
+  end
 
 let zip_read_exn context =
   zip_read context >>= function
   | `None -> raise End_of_file
   | `Ok buff -> return buff
+
+(* 
+ * compression end 
+ *)
 
 (* handle all commands
  * return either Ok, Bad, No, Preauth, Bye, or Continue response
@@ -266,10 +327,7 @@ let handle_starttls context =
 **)
 
 let quote_file file =
-  if match_regex file ~regx:"[ ]" then
-    "\"" ^ file ^ "\""
-  else
-    file
+  "\"" ^ file ^ "\""
 
 let list_resp flags file =
   let flags_str = String.concat " " flags in
@@ -378,7 +436,7 @@ let handle_status context mailbox optlist =
     let output = (List.fold_left (fun acc opt ->
       let str = (match opt with
       | Stat_Highestmodseq -> "HIGHESTMODSEQ " ^ (Int64.to_string header.modseq)
-      | Stat_Messages -> "EXISTS " ^ (string_of_int header.count)
+      | Stat_Messages -> "MESSAGES " ^ (string_of_int header.count)
       | Stat_Recent -> "RECENT " ^ (string_of_int header.recent)
       | Stat_Uidnext -> "UIDNEXT " ^(string_of_int header.uidnext)
       | Stat_Uidvalidity -> "UIDVALIDITY " ^ header.uidvalidity
@@ -745,7 +803,18 @@ let set_compression context command =
   begin
   match is_compress command with
   | None -> ()
-  | Some c -> context.compression := Some c
+  | Some algorithm -> 
+    if context.!compression = None then (
+      let (ic_pipe,oc_pipe) = Lwt_io.pipe () in
+      let (waiter,wakener) = Lwt.task () in
+      let uncompr = (start_async_uncompr context.!netr oc_pipe >>= fun () ->
+        wakeup wakener (); waiter) in
+      let strm = Zlib.deflate_init 6 false in
+      context.compression := Some (algorithm,strm,uncompr,ic_pipe);
+      async(fun() -> catch(fun() -> uncompr)(fun _ -> 
+        Log_.log `Info1 "### compress async thread cancelled\n";
+        return()))
+    )
   end;
   return ()
 

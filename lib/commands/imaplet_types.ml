@@ -182,6 +182,8 @@ type storeFlags =
 
 type compressionAlgrthm =
   | Compr_Deflate
+
+type compression = compressionAlgrthm * Zlib.stream * unit Lwt.t * Lwt_io.input_channel
   
 type anyCmd = 
   | Cmd_Enable of string

@@ -50,12 +50,13 @@ let special'use = "SPECIAL-USE"
 let binary = "BINARY"
 let move = "MOVE"
 
-let notauth_cap = [revision;literal; sasl; login'ref; id; enable; idle;starttls; auth;]
+let notauth_cap = [revision;literal; sasl; login'ref; id; enable; idle;starttls;
+auth;compress]
 let auth_cap = [revision;literal; sasl; login'ref; id; enable; idle;starttls;auth;
   login'disabled; sort; sort'display; thread'references; thread'orderedsubject;
   multiappend; url'partial; catenate; unselect; children; namespace; uidplus;
   list'extended; i18nlevel; condstore; qresync; esearch; esort; searches;
-  within; context'search; list'status; binary; move; 
+  within; context'search; list'status; binary; move; compress
 ]
 let auth_cap = List.concat [notauth_cap;[condstore]]
 
