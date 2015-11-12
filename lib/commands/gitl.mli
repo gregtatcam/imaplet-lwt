@@ -65,7 +65,7 @@ sig
   type t = string list
   val create : string list -> t
   val of_unix : string -> t
-  val to_string : t -> string
+  val to_string : ?absolute_path:bool -> t -> string
   val to_string_rev : t -> string
   val parent : t -> t
   val replace_wild : t -> Sha.t -> t
