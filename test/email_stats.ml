@@ -5,13 +5,13 @@ open Commands
 open Parsemail
 
 exception InvalidCommand
-exception Failed
+exception Failed of string
 exception LoginFailed
 
 let echoterm = ref false
 
 let opt_val = function
-  | None -> raise Failed
+  | None -> raise (Failed "opt_val")
   | Some v -> v
 
 let sprf = Printf.sprintf
@@ -29,23 +29,32 @@ let resp_chan = ref None
 let uncompr_waiter = ref None
 
 (* continous compression stream for the session's duration *)
-let _compress buffin =
-  let len = String.length buffin in
-  let buffout = String.create (2*len) in
-  let (fi,bin,bout) = Zlib.deflate compr_strm buffin 0 len 
-      buffout 0 (2*len) Zlib.Z_SYNC_FLUSH in
-  String.sub buffout 0 bout
+let write_compressed oc buffin =
+  let len_buff = String.length buffin in
+  let buffout = String.create buff_size in
+  let rec _compress offset len =
+    let (fi,used_in,used_out) = Zlib.deflate compr_strm buffin offset len 
+      buffout 0 buff_size Zlib.Z_SYNC_FLUSH in
+      Lwt_io.write oc (String.sub buffout 0 used_out) >>= fun () ->
+      let offset = offset + used_in in
+      let len = len - used_in in
+      if len = 0 then
+        return ()
+      else
+        _compress offset len
+  in
+  _compress 0 len_buff
 
 (* uncompress *)
 let inflate oc_pipe inbuff =
   let outbuff = String.create buff_size in
   let rec _inflate inbuff offset len =
-    let (fi, orig, size) = Zlib.inflate uncompr_strm inbuff offset len 
+    let (fi, used_in, used_out) = Zlib.inflate uncompr_strm inbuff offset len 
       outbuff 0 buff_size Zlib.Z_SYNC_FLUSH in
-    Lwt_io.write oc_pipe (String.sub outbuff 0 size) >>
+    Lwt_io.write oc_pipe (String.sub outbuff 0 used_out) >>
     Lwt_io.flush oc_pipe >>= fun () ->
-    let offset = offset + orig in
-    let len = len - orig in
+    let offset = offset + used_in in
+    let len = len - used_in in
     if fi then ( (* this should not happen? *)
       Printf.fprintf stderr "##### inflate stream is finished\n%!";
       Buffer.clear !inbuffer;
@@ -117,7 +126,7 @@ let echo_on on =
   Lwt_unix.system (Printf.sprintf "stty %secho" (if on then "" else "-")) >>=
     fun _ -> return ()
 
-let gmail host = if host = "imap.gmail.com" || host = "192.168.2.2" then true else false
+let gmail host = if host = "imap.gmail.com" then true else false
 
 let get_arch str =
   let re = Re_posix.compile_pat "^(mbox|maildir|imap|imap-dld):(.+)$" in
@@ -160,6 +169,11 @@ let rec args i archive echo nocompress outfile unique =
     | "-unique" -> args (i+1) archive echo nocompress outfile true
     | _ -> raise InvalidCommand
 
+let usage () =
+  Printf.printf 
+    "usage: email_stats -archive [mbox:file|imap[-dld]:server:port] [-outfile
+    [[resume:]file]] [-echo] [-no-compress] [-unique]\n%!"
+
 let commands f =
   try 
     let archive,echo,nocompress,outfile,unique = args 1 None false false None false in
@@ -176,10 +190,7 @@ let commands f =
     in
     f (opt_val archive) echo nocompress outfile resume unique
   with 
-    | Failed|InvalidCommand ->
-      Printf.printf 
-        "usage: email_stats -archive [mbox:file|imap[-dld]:server:port] [-outfile
-        [[resume:]file]] [-echo] [-no-compress] [-unique]\n%!"
+    | Failed _ -> usage()|InvalidCommand -> usage()
     | _ -> ()
 
 let email_addr = ref (Hashtbl.create 0)
@@ -401,21 +412,30 @@ let mailboxes_init () =
   let _ = get_mailbox "drafts" in
   let _ = get_mailbox "\"[Gmail]/Drafts\"" in ()
 
+let tag = ref 0
+
+let next_tag () =
+  tag := !tag + 1;
+  Printf.sprintf "a%06d" !tag
+
 let ok res =
-  let re = Re_posix.compile_pat ~opts:[`ICase] ("^[^\\* ]+ ok( .*)?$") in
+  let re = Re_posix.compile_pat ~opts:[`ICase] 
+    (Printf.sprintf "^a%06d ok( .*)?$" !tag) in
   Re.execp re res
 
 let bad res =
-  let re = Re_posix.compile_pat ~opts:[`ICase] ("^[^\\* ]+ bad( .*)?$") in
+  let re = Re_posix.compile_pat ~opts:[`ICase] 
+    (Printf.sprintf "^a%06d bad( .*)?$" !tag) in
   Re.execp re res
 
 let no res =
-  let re = Re_posix.compile_pat ~opts:[`ICase] ("^[^\\* ]+ no( .*)?$") in
+  let re = Re_posix.compile_pat ~opts:[`ICase] 
+    (Printf.sprintf "^a%06d no( .*)?$" !tag) in
   Re.execp re res
 
 let ok_ex res =
   if bad res || no res then
-    raise Failed;
+    raise (Failed ("ok_ex: " ^ res));
   ok res
 
 let exists res =
@@ -429,8 +449,12 @@ let exists res =
 let write oc msg =
   if !echoterm then
     Printf.fprintf stderr "%s%!" msg;
-  let msg = if !compression then _compress msg else msg in
-  Lwt_io.write oc msg >>
+  begin
+  if !compression then 
+    write_compressed oc msg 
+  else 
+    Lwt_io.write oc msg
+  end >>
   Lwt_io.flush oc
 
 let while_not_ok () =
@@ -439,17 +463,11 @@ let while_not_ok () =
     if ok res then
       return ()
     else if bad res || no res then
-      raise Failed
+      raise (Failed ("while_no_ok: " ^ res))
     else 
       _read ()
   in
   _read ()
-
-let tag = ref 0
-
-let get_tag () =
-  tag := !tag + 1;
-  Printf.sprintf "a%04d" !tag
 
 (*
  a capability
@@ -459,17 +477,17 @@ let get_tag () =
  a OK Success
  *)
 let capability oc =
-  write oc (Printf.sprintf "%s capability\r\n" (get_tag())) >>= fun () ->
+  write oc (Printf.sprintf "%s capability\r\n" (next_tag())) >>= fun () ->
   resp_read () >>= fun res ->
   let l = Re.split (Re_posix.compile_pat "[ ]+") res in
   resp_read () >>= fun res ->
   if ok res then
     return l
   else
-    raise Failed
+    raise (Failed ("capability:" ^ res))
 
 let compress_deflate ic_net oc_net =
-  write oc_net (Printf.sprintf "%s compress deflate\r\n" (get_tag())) >>= fun () ->
+  write oc_net (Printf.sprintf "%s compress deflate\r\n" (next_tag())) >>= fun () ->
   while_not_ok () >>= fun () ->
   compression := true;
   let (ic_pipe,oc_pipe) = Lwt_io.pipe () in
@@ -490,7 +508,7 @@ let cancel_uncompr () =
 
 let login user pswd nocompress ic oc =
   catch (fun() ->
-    write oc (Printf.sprintf "%s login %s %s\r\n" (get_tag()) user pswd) >>= fun () ->
+    write oc (Printf.sprintf "%s login %s %s\r\n" (next_tag()) user pswd) >>= fun () ->
     while_not_ok () >>= fun () ->
     begin
     if nocompress = false then (
@@ -510,11 +528,11 @@ let login user pswd nocompress ic oc =
   ) (fun _ -> raise LoginFailed)
 
 let logout oc =
-  write oc (Printf.sprintf "%s logout\r\n" (get_tag()))
+  write oc (Printf.sprintf "%s logout\r\n" (next_tag()))
 
 (* STATUS "ATT" (MESSAGES 10) *)
 let status oc mailbox =
-  write oc (Printf.sprintf "%s status %s (messages)\r\n" (get_tag()) mailbox) >>= fun () ->
+  write oc (Printf.sprintf "%s status %s (messages)\r\n" (next_tag()) mailbox) >>= fun () ->
   resp_read () >>= fun res ->
   let msgs = 
     try
@@ -525,6 +543,9 @@ let status oc mailbox =
   in
   while_not_ok () >>= fun () ->
   return msgs
+
+let re_postmark = Re_posix.compile_pat ~opts:[`ICase] 
+  "^(From [^ \r\n]+ (mon|tue|wed|thu|fri|sat|sun) (jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec))"
 
 let checkresume unique = function
   | None -> return (Hashtbl.create 0,Int64.zero)
@@ -548,8 +569,6 @@ let checkresume unique = function
           let id = String.trim (String.sub line lenid (len - lenid)) in
           let _ = get_messageid id in ()
         );
-        let re_postmark = Re_posix.compile_pat ~opts:[`ICase] 
-          "^(From [^ \r\n]+ (mon|tue|wed|thu|fri|sat|sun) (jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec))" in
         let offset =  (* offset of last from, last message will be overwritten since
         it could be partial *)
         if Re.execp re_postmark line then (
@@ -583,7 +602,7 @@ let checkresume unique = function
    * LIST (\HasNoChildren) "/" "Cambridge/Entertainment"
  *)
 let list host resume oc = 
-  write oc (Printf.sprintf "%s list \"\" *\r\n" (get_tag())) >>= fun () ->
+  write oc (Printf.sprintf "%s list \"\" *\r\n" (next_tag())) >>= fun () ->
     let re = Re_posix.compile_pat ~opts:[`ICase] "^\\* list \\(([^)]+)\\) [^ ]+ ((\"[^\"]+\")|([^\t ]+))$" in
   Printf.fprintf stderr "mailboxes to process:\n%!";
   let rec _read l =
@@ -626,7 +645,7 @@ let list host resume oc =
   return l
 
 let select oc mailbox =
-  write oc (Printf.sprintf "%s select %s\r\n" (get_tag()) mailbox) >>= fun () ->
+  write oc (Printf.sprintf "%s select %s\r\n" (next_tag()) mailbox) >>= fun () ->
   let rec _read msgs =
     resp_read () >>= fun res ->
     if ok res then
@@ -657,7 +676,7 @@ let write_fetch oc seq part =
   | `Body -> ""
   | `HeaderMessageID -> "header.fields (Message-ID)"
   in
-  write oc (Printf.sprintf "%s fetch %s body.peek[%s]\r\n" (get_tag()) seq part)
+  write oc (Printf.sprintf "%s fetch %s body.peek[%s]\r\n" (next_tag()) seq part)
 
 let get_literal_data res =
   let subs = Re.exec re_fetch res in
@@ -670,14 +689,14 @@ let get_part () =
   resp_read () >>= fun res ->
   get_literal_data res >>= fun (_,msg) ->
   resp_read () >>= fun res -> (* \r\n after the literal *)
-  if res <> ")" then raise Failed;
+  if res <> ")" then raise (Failed ("get_part:" ^ res));
   resp_read () >>= fun res -> (* closing parenth *)
-  if ok res = false then raise Failed;
+  if ok res = false then raise (Failed ("get_part ok:" ^ res));
   return msg
 
 let fetch_part oc i part =
   write_fetch oc (`Single i) part >>
-  get_part ()
+  get_part () 
 
 let messageid_from_headers headers =
   let re = Re_posix.compile_pat ~opts:[`ICase] "message-id: ([^ \r\n]+)" in
@@ -987,8 +1006,14 @@ let () =
           )
         ) else (
           Printf.fprintf stderr "%d %d     \r%!" cnt (String.length message_s);
-          write (sprf "%s\r\n" (Utils.make_postmark message_s)) >>
-          write (sprf "X-Gmail-Labels: %s\r\n" (opt_val mailbox)) >>
+          begin
+          if Re.execp re_postmark message_s = false then (
+            write (sprf "%s\r\n" (Utils.make_postmark message_s)) >>
+            write (sprf "X-Gmail-Labels: %s\r\n" (opt_val mailbox))
+          ) else (
+            return ()
+          )
+          end >>
           write message_s >>
           begin
           if String.get message_s (String.length message_s - 1) <> '\n' then
