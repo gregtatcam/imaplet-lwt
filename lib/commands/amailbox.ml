@@ -222,24 +222,33 @@ let examine mailboxt mailbox =
 
 (* create mailbox *)
 let create_mailbox mailboxt mailbox =
-  factory mailboxt mailbox >>= fun (module Mailbox) ->
-  Mailbox.MailboxStorage.exists Mailbox.this >>= function
-  | `Mailbox -> return (`Error("Mailbox already exists"))
-  | `Folder -> return (`Error("Invalid Superior"))
-  | `No ->
-    let open Regex in
-    if match_regex mailbox ~regx:"^/" then
-      return (`Error("Invalid mailbox name: Begins with hierarchy separator"))
-    else if match_regex mailbox ~regx:"^\"?.imaplet/?\"?" then
-      return (`Error("Invalid mailbox name: Contains reserved name"))
-    else if match_regex mailbox ~regx:"^\"?./?\"?$" || match_regex mailbox ~regx:"^\"?../?\"?$" then
-      return (`Error("Invalid mailbox name: Contains . part"))
-    else 
-    (
-      Mailbox.MailboxStorage.create_mailbox Mailbox.this >> 
-      Mailbox.MailboxStorage.commit Mailbox.this >>
-      return `Ok
-    )
+  let create mailbox =
+    factory mailboxt mailbox >>= fun (module Mailbox) ->
+    Mailbox.MailboxStorage.exists Mailbox.this >>= function
+    | `Mailbox -> return (`Error("Mailbox already exists"))
+    | `Folder -> return (`Error("Invalid Superior"))
+    | `No ->
+      let open Regex in
+      if match_regex mailbox ~regx:"^/" then
+        return (`Error("Invalid mailbox name: Begins with hierarchy separator"))
+      else if match_regex mailbox ~regx:"^\"?.imaplet/?\"?" then
+        return (`Error("Invalid mailbox name: Contains reserved name"))
+      else if match_regex mailbox ~regx:"^\"?./?\"?$" || match_regex mailbox ~regx:"^\"?../?\"?$" then
+        return (`Error("Invalid mailbox name: Contains . part"))
+      else 
+      (
+        Mailbox.MailboxStorage.create_mailbox Mailbox.this >> 
+        Mailbox.MailboxStorage.commit Mailbox.this >>
+        return `Ok
+      )
+  in
+  let dirs = Str.split (Str.regexp "/") mailbox in
+  Lwt_list.fold_left_s (fun (mailbox,status) dir ->
+    let mailbox = Filename.concat mailbox dir in
+    create mailbox >>= fun status ->
+    return (mailbox,status)
+  ) ("",`Ok) dirs >>= fun (_,status) ->
+  return status
 
 (* delete mailbox *)
 let delete_mailbox mailboxt mailbox =
