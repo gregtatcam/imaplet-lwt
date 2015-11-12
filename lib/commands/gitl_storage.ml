@@ -151,11 +151,14 @@ struct
     let rec list_ key init =
       Gitl.list t.!store key >>= fun listing ->
       Lwt_list.fold_left_s (fun (acc,cnt) name ->
-        if access (Key.to_string key) = false then
+        let leaf = Key.last name in
+        if access (Key.to_string name) = false || leaf = ".message" || 
+            leaf = ".index" || leaf = ".metamessage" || leaf = ".metamailbox" 
+            || leaf = ".subscription" then
           return (acc,cnt)
         else (
           list_ name acc >>= fun (acc,cnt) ->
-          f acc (`Mailbox ((Key.to_string name),cnt)) >>= fun acc ->
+          f acc (`Mailbox ((Key.to_string ~absolute_path:false name),cnt)) >>= fun acc ->
           return (acc,cnt+1)
         )
       ) (init,0) listing
@@ -205,7 +208,7 @@ struct
         else (
           let te = List.nth tr (len - seq) in
           let uid,sha = uid_sha !te.name in
-          Log_.log `Info1 (Printf.sprintf "get_uid by seq: seq: %d, uid: %d, %s\n" 
+          Log_.log `Debug (Printf.sprintf "get_uid by seq: seq: %d, uid: %d, %s\n" 
             seq uid !te.name);
           return (`Ok (seq,uid,sha,!te.name))
         )
@@ -226,7 +229,7 @@ struct
             return `NotFound
         | Some (seq,te) ->
           let uid,sha = uid_sha !te.name in
-          Log_.log `Info1 (Printf.sprintf "get_uid by uid: seq: %d, uid: %d, %s\n" 
+          Log_.log `Debug (Printf.sprintf "get_uid by uid: seq: %d, uid: %d, %s\n" 
             (len-seq) uid !te.name);
           return (`Ok (len-seq,uid,sha,!te.name))
       end
@@ -313,7 +316,7 @@ struct
         let dest = update_message_file_name t.mailbox src message_metadata in
         let src = get_key t (`Message src) in
         let dest = get_key t (`Message dest) in
-        Log_.log `Info1 (Printf.sprintf "renaming %s to %s\n" (Key.to_string src) (Key.to_string dest));
+        Log_.log `Debug (Printf.sprintf "renaming %s to %s\n" (Key.to_string src) (Key.to_string dest));
         Gitl.rename t.!store ~src  ~dest >>= fun _ ->
         return ()
       )
