@@ -89,7 +89,7 @@ sig
   type t = string list
   val create : string list -> t
   val of_unix : string -> t
-  val to_string : ?absolute_path:bool -> t -> string
+  val to_string : t -> string
   val to_string_rev : t -> string
   val parent : t -> t
   val replace_wild : t -> Sha.t -> t
@@ -105,12 +105,8 @@ struct
   let create t = t
   let of_unix str =
     Re.split re str
-  let to_string ?(absolute_path=true) t =
-    let str = String.concat "/" t in
-    if absolute_path then
-      "/" ^ str
-    else
-      str
+  let to_string t =
+    ("/" ^ String.concat "/" t)
   let to_string_rev t =
     to_string (List.rev t)
   let parent t =
@@ -175,21 +171,21 @@ let clear_global_cache () =
 
 let cache_exists cache sha k =
   if MapStr.mem k !cache then (
-    Log_.log `Debug (Printf.sprintf "cache exists %s\n" k);
+    Log_.log `Info3 (Printf.sprintf "cache exists %s\n" k);
     let (_,_,v) = MapStr.find k !cache in
      Some v
   ) else if MapStr.mem (Sha.to_string sha) !global_cache then (
     let gcache = MapStr.find (Sha.to_string sha) !global_cache in
     if MapStr.mem k !gcache then (
-      Log_.log `Debug (Printf.sprintf "cache exists %s\n" k);
+      Log_.log `Info3 (Printf.sprintf "cache exists %s\n" k);
       let (_,v) = MapStr.find k !gcache in
       Some v
     ) else (
-      Log_.log `Debug (Printf.sprintf "cache doesn't exist %s\n" k);
+      Log_.log `Info1 (Printf.sprintf "cache doesn't exist %s\n" k);
       None
     )
   ) else (
-    Log_.log `Debug (Printf.sprintf "cache doesn't exist %s\n" k);
+    Log_.log `Info1 (Printf.sprintf "cache doesn't exist %s\n" k);
     None
   )
 
@@ -205,7 +201,7 @@ let add_read_cache sha k v =
  global_cache := MapStr.add sha dcache !global_cache
 
 let add_write_cache cache k v =
-  Log_.log `Debug (Printf.sprintf "adding cache %s\n" k);
+  Log_.log `Info3 (Printf.sprintf "adding cache %s\n" k);
   cache := MapStr.add k v !cache
 
 let rem_cache cache k =
@@ -484,12 +480,12 @@ struct
       List.sort trsort t
 
   let to_string tree =
-    String.concat "\n" (List.map (fun e -> 
+    String.concat "\n" (List.rev_map (fun e -> 
       Printf.sprintf "%s %s %s %s" (string_of_perm !e.perm) 
         (perm_to_type_string !e.perm) !e.name (Sha.to_string !e.sha)) tree)
 
   let to_object_string tree =
-    String.concat "" ((List.map (fun e ->
+    String.concat "" ((List.rev_map (fun e ->
       Printf.sprintf "%s %s\000%s" (string_of_perm !e.perm) !e.name 
         (Sha.to_binary !e.sha)
     )) tree)
@@ -583,7 +579,7 @@ struct
       | None -> Sha.of_string content
     in
     let file = file_from_sha t sha in
-    Log_.log `Debug (Printf.sprintf "writing object to %s\n" file);
+    Log_.log `Info3 (Printf.sprintf "writing object to %s\n" file);
     catch (fun () ->
       write_ ?compress:t.compress ~file content
     ) (function |Unix.Unix_error (e,f,a) when e = Unix.ENOENT ->
@@ -760,7 +756,7 @@ let create ?compress ~repo () =
     let lock = Imap_lock.create pool_mutex acct_lock_pool in
     Imap_lock.with_lock lock root (fun () ->
       Head.create repo) >>= fun head ->
-    Log_.log `Debug (Printf.sprintf "read head %s\n" (Sha.to_string head.sha));
+    Log_.log `Info1 (Printf.sprintf "read head %s\n" (Sha.to_string head.sha));
     if Sha.is_empty head.sha then (
       return {root;head;commit=Commit.empty;compress;cache=ref MapStr.empty}
     ) else (
@@ -887,7 +883,7 @@ let update_tree t key op =
  * ASSUME ONE WRITER FOR NOW TBD
  *)
 let update_ t key v =
-  Log_.log `Debug (Printf.sprintf "updating %s, %d\n" (Key.to_string key) (String.length v));
+  Log_.log `Info3 (Printf.sprintf "updating %s, %d\n" (Key.to_string key) (String.length v));
   if Key.is_empty key then
     raise (InvalidArgument "update, key is empty");
   let obj = Object.create ?compress:t.compress t.root in
@@ -932,7 +928,7 @@ let commit t ~author ~message =
   * with the latest commit, if different then load the latest commit, merge,
   * write new commit with update parent, update HEAD, unlock HEAD TBD
   *)
-  Log_.log `Debug "### Committing\n";
+  Log_.log `Info1 "### Committing\n";
   if author = "" || message = "" then
     raise (InvalidArgument "commit, author or message empty");
   let obj = Object.create ?compress:t.compress t.root in
@@ -959,10 +955,10 @@ let commit t ~author ~message =
     {parent=t.head.sha;commit=commit_sha;author;message;postfix="";date;utc="+0000"} >>= fun () ->
   (* should be safe to delete the previous cache, if single client, multiple
    * clients TBD *)
-  Log_.log `Debug (Printf.sprintf "deleting from global cache %s\n" (Sha.to_string t.commit.tree));
+  Log_.log `Info1 (Printf.sprintf "deleting from global cache %s\n" (Sha.to_string t.commit.tree));
   let gcache = MapStr.find (Sha.to_string t.commit.tree) !global_cache in
   global_cache := MapStr.remove (Sha.to_string t.commit.tree) !global_cache;
-  Log_.log `Debug (Printf.sprintf "adding to global cache for %s\n" (Sha.to_string root_sha));
+  Log_.log `Info1 (Printf.sprintf "adding to global cache for %s\n" (Sha.to_string root_sha));
   global_cache := MapStr.add (Sha.to_string root_sha) gcache !global_cache;
   return {t with head;commit}
 
