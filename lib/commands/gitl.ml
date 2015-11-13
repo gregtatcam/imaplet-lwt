@@ -89,7 +89,7 @@ sig
   type t = string list
   val create : string list -> t
   val of_unix : string -> t
-  val to_string : t -> string
+  val to_string : ?absolute_path:bool -> t -> string
   val to_string_rev : t -> string
   val parent : t -> t
   val replace_wild : t -> Sha.t -> t
@@ -105,8 +105,9 @@ struct
   let create t = t
   let of_unix str =
     Re.split re str
-  let to_string t =
-    ("/" ^ String.concat "/" t)
+  let to_string ?(absolute_path=true) t =
+    let path = String.concat "/" t in
+    if absolute_path then "/" ^ path else path
   let to_string_rev t =
     to_string (List.rev t)
   let parent t =
