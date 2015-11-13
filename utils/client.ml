@@ -256,6 +256,8 @@ let write_echo oc command =
  * is referenced by a file *)
 let handle_append ic oc mailbox msgfile =
   Utils.fold_email_with_file msgfile (fun cnt message ->
+    Printf.printf "appending %d\r%!" cnt;
+    (* dovecot needs + 1 *)
     let cmd = 
       Printf.sprintf "A%d APPEND %s {%d+}" cnt mailbox (String.length message + 2) in
     write_echo oc cmd >>
@@ -277,8 +279,10 @@ let exec_command strm ic oc =
   read_script strm >>= function
   | None -> return `Done
   | Some command -> 
-    if Regex.match_regex ~regx:"^append[ \t]+\\([^ \t]+\\)[ \t]+\\([^ \t]+\\)$" command then (
-      handle_append ic oc (Str.matched_group 1 command) (Str.matched_group 2 command) >>
+    let re = Re_posix.compile_pat "^append[ \t]+(([^ \t]+)|(\"[^\"]+\"))[ \t]+([^ \t]+)$" in
+    if Re.execp re command then (
+      let subs = Re.exec re command in
+      handle_append ic oc (Re.get subs 1) (Re.get subs 4) >>
       return `OkAppend
     ) else (
       write_echo oc command >> return (`Ok (is_compression command))
