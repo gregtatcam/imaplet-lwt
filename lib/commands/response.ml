@@ -88,23 +88,43 @@ end = struct
     to_str str
 end
 
-let buff_size = 1024
-let buffout = String.create buff_size
+let buff_size = 4096
+
+let get_pr str =
+  let str_len = String.length str in
+  if str_len >= 40 then (
+    let head = String.sub str 0 40 in
+    let tail = String.sub str (str_len - 40) 40 in
+    head ^ "..." ^ tail
+  ) else
+    str
+
+let write_compressed_block w strm buff_in offset_in len_in buff_out len_out =
+  let (fi,used_in,used_out) = Zlib.deflate strm buff_in offset_in len_in
+      buff_out 0 len_out Zlib.Z_SYNC_FLUSH in
+  Log_.log `Info1 (Printf.sprintf " -- writing compressed data %b %d %d %d %d\n" 
+      fi used_in used_out offset_in len_in);
+  Lwt_io.write w (String.sub buff_out 0 used_out) >>
+  Lwt_io.flush w >>
+  return (fi,used_in,used_out)
 
 let write_compressed w strm resp =
   let len_resp = String.length resp in
     Log_.log `Info1 (Printf.sprintf "--> writing compressed data:start %d\n" len_resp); 
+  Log_.log `Info1 (Printf.sprintf "--> un-compressed data:start %s$$$$\n%!" (get_pr resp));
+  let buffout = String.create buff_size in
   let rec _compress offset len =
-    let (fi,used_in,used_out) = Zlib.deflate strm resp offset len
-      buffout 0 buff_size Zlib.Z_SYNC_FLUSH in
-    Log_.log `Info1 (Printf.sprintf " -- writing compressed data %b %d %d %d %d\n" 
-      fi used_in used_out offset len);
-    Lwt_io.write w (String.sub buffout 0 used_out) >>= fun () ->
+    write_compressed_block w strm resp offset len
+      buffout buff_size >>= fun (fi,used_in,used_out) ->
     let offset = offset + used_in in
     let len = len - used_in in
     if len = 0 then (
       Log_.log `Info1 (Printf.sprintf "<-- compression complete %d %d\n" offset len); 
-      return ()
+      if used_in = used_out then (
+        write_compressed_block w strm "\n" 0 1 buffout 16 >>= fun _ ->
+        return ()
+      ) else
+        return ()
     ) else
       _compress offset len
   in
@@ -131,10 +151,10 @@ let write_resp_untagged compress id writer text =
   write_resp compress id writer (Resp_Untagged text)
 
 let write_resp_untagged_vector compress id w resp =
-  if compress <> None then (
-    let buff = String.concat "" resp in
-    write_resp_untagged compress id w buff
-  ) else (
-    let l = List.concat [["* "];resp;[Regex.crlf]] in
+  let l = List.concat [["* "];resp;[Regex.crlf]] in
+  match compress with
+  | Some (_,strm,_,_) ->
+    let buff = String.concat "" l in
+    write_compressed w strm buff
+  | None ->
     Lwt_list.iter_s (Lwt_io.write w) l
-  )
