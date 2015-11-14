@@ -74,7 +74,7 @@ let is_client_id l name value =
  * compression start 
  *)
 
-let buff_size = 1024
+let buff_size = 4096
 
 let inflate strm oc_pipe inbuff =
   Log_.log `Info1 "### started inflating\n";
