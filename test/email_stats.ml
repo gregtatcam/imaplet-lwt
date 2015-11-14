@@ -20,22 +20,19 @@ let try_close ch =
   catch (fun() -> Lwt_io.close ch) (fun _ -> return())
 
 (* in/out buffer if compression is enabled *)
-let compression = ref false
-let compr_strm = Zlib.deflate_init 6 false
-let uncompr_strm = Zlib.inflate_init false
+let compression : (Zlib.stream * unit Lwt.t) option ref = ref None
 let inbuffer = ref (Buffer.create 100)
-let buff_size = 1024
+let buff_size = 4096
 let resp_chan = ref None
-let uncompr_waiter = ref None
 
 (* continous compression stream for the session's duration *)
-let write_compressed oc buffin =
+let write_compressed strm oc buffin =
   let len_buff = String.length buffin in
-  let buffout = String.create buff_size in
+  let buffout_defl = String.create buff_size in
   let rec _compress offset len =
-    let (fi,used_in,used_out) = Zlib.deflate compr_strm buffin offset len 
-      buffout 0 buff_size Zlib.Z_SYNC_FLUSH in
-      Lwt_io.write oc (String.sub buffout 0 used_out) >>= fun () ->
+    let (fi,used_in,used_out) = Zlib.deflate strm buffin offset len 
+      buffout_defl 0 buff_size Zlib.Z_SYNC_FLUSH in
+      Lwt_io.write oc (String.sub buffout_defl 0 used_out) >>= fun () ->
       let offset = offset + used_in in
       let len = len - used_in in
       if len = 0 then
@@ -45,14 +42,29 @@ let write_compressed oc buffin =
   in
   _compress 0 len_buff
 
+let get_pr str =
+  let str_len = String.length str in
+  if str_len >= 40 then (
+    let head = String.sub str 0 40 in
+    let tail = String.sub str (str_len - 40) 40 in
+    head ^ "..." ^ tail
+  ) else
+    str
+
 (* uncompress *)
-let inflate oc_pipe inbuff =
-  let outbuff = String.create buff_size in
+let inflate strm oc_pipe inbuff =
+  let inbuff_len = String.length inbuff in
+  let buffout_infl = String.create buff_size in
+  (*Printf.fprintf stderr "uncompressing %d\n%!" (String.length inbuff);*)
   let rec _inflate inbuff offset len =
-    let (fi, used_in, used_out) = Zlib.inflate uncompr_strm inbuff offset len 
-      outbuff 0 buff_size Zlib.Z_SYNC_FLUSH in
-    Lwt_io.write oc_pipe (String.sub outbuff 0 used_out) >>
+    let (fi, used_in, used_out) = Zlib.inflate strm inbuff offset len 
+      buffout_infl 0 buff_size Zlib.Z_SYNC_FLUSH in
+    (*Printf.fprintf stderr "decompressed original size %d, %d, writing %d, %s$$$$\n%!" 
+        inbuff_len used_in used_out (get_pr (String.sub buffout_infl 0
+        used_out));*)
+    Lwt_io.write oc_pipe (String.sub buffout_infl 0 used_out) >>
     Lwt_io.flush oc_pipe >>= fun () ->
+    (*Printf.fprintf stderr "uncompressed %d\n%!" used_out;*)
     let offset = offset + used_in in
     let len = len - used_in in
     if fi then ( (* this should not happen? *)
@@ -61,7 +73,7 @@ let inflate oc_pipe inbuff =
       if len <> 0 then (
         Buffer.add_string !inbuffer (String.sub inbuff offset len)
       );
-      Zlib.inflate_end uncompr_strm;
+      Zlib.inflate_end strm;
       return ()
     ) else if len = 0 then ( 
       return ()
@@ -80,17 +92,19 @@ let read_cache ic_net =
     Buffer.clear !inbuffer;
     return (Some contents)
   ) else (
-    let buff = String.create buff_size in
-    Lwt_io.read_into ic_net buff 0 buff_size >>= function
+    let buff_net = String.create buff_size in
+    Lwt_io.read_into ic_net buff_net 0 buff_size >>= function
     | 0 -> 
       Printf.fprintf stderr "##### read size 0\n%!";
       return None
     | size -> 
-      let str = String.sub buff 0 size in
+      (*Printf.fprintf stderr "read %d\n%!" size;*)
+      let str = String.sub buff_net 0 size in
       return (Some str)
   )
 
 let start_async_uncompr ic_net oc_pipe =
+  let strm = Zlib.inflate_init false in
   (* recusevily uncompress chunks of data *)
   let rec read () =
     read_cache ic_net >>= function
@@ -99,7 +113,7 @@ let start_async_uncompr ic_net oc_pipe =
       try_close oc_pipe >>
       try_close (opt_val !resp_chan) 
     | Some buff -> 
-      inflate oc_pipe buff >>
+      inflate strm oc_pipe buff >>
       read ()
   in
   read ()
@@ -112,21 +126,30 @@ let resp_read ?count () =
   let ic = opt_val !resp_chan in
   begin
   match count with 
-  | None -> Lwt_io.read_line ic 
+  | None -> Lwt_io.read_line ic
   | Some count -> 
-    let buff = String.create count in
-    Lwt_io.read_into_exactly ic buff 0 count >>
-    return buff
+    let buff_out = Buffer.create count in
+    let rec _read len =
+      Lwt_io.read ~count:len ic >>= fun buff ->
+      let read_bytes = String.length buff in
+      Buffer.add_string buff_out buff;
+      if read_bytes = len then
+        return (Buffer.contents buff_out)
+      else
+        _read (len - read_bytes)
+    in
+    _read count
   end >>= fun buff ->
-  if !echoterm then
-    Printf.fprintf stderr "%s\n%!" buff;
+  if !echoterm then (
+    let len = String.length buff in
+    let len = if len > 100 then 100 else len in
+    Printf.fprintf stderr "%s\n%!" (String.sub buff 0 len);
+  );
   return buff
 
 let echo_on on =
   Lwt_unix.system (Printf.sprintf "stty %secho" (if on then "" else "-")) >>=
     fun _ -> return ()
-
-let gmail host = if host = "imap.gmail.com" then true else false
 
 let get_arch str =
   let re = Re_posix.compile_pat "^(mbox|maildir|imap|imap-dld):(.+)$" in
@@ -450,10 +473,9 @@ let write oc msg =
   if !echoterm then
     Printf.fprintf stderr "%s%!" msg;
   begin
-  if !compression then 
-    write_compressed oc msg 
-  else 
-    Lwt_io.write oc msg
+  match !compression with
+  | Some (strm,_) -> write_compressed strm oc msg 
+  | None -> Lwt_io.write oc msg
   end >>
   Lwt_io.flush oc
 
@@ -468,6 +490,21 @@ let while_not_ok () =
       _read ()
   in
   _read ()
+
+let ok_no_ex f init =
+  let rec _read acc =
+    resp_read () >>= fun res ->
+    if ok res then
+      return (`Ok acc)
+    else if no res then
+      return `No
+    else if bad res then
+      raise (Failed ("ok_no_ex: " ^ res))
+    else 
+      f acc res >>= fun acc ->
+      _read acc
+  in
+  _read init
 
 (*
  a capability
@@ -489,22 +526,22 @@ let capability oc =
 let compress_deflate ic_net oc_net =
   write oc_net (Printf.sprintf "%s compress deflate\r\n" (next_tag())) >>= fun () ->
   while_not_ok () >>= fun () ->
-  compression := true;
+  let strm = Zlib.deflate_init 6 false in
   let (ic_pipe,oc_pipe) = Lwt_io.pipe () in
   let (waiter,wakener) = Lwt.task () in
   let uncompr = (start_async_uncompr ic_net oc_pipe >>= fun () ->
     wakeup wakener (); waiter) in
-  uncompr_waiter := Some uncompr;
+  compression := Some (strm, waiter);
   async(fun () -> catch(fun() -> uncompr)(fun _ -> return()));
   resp_chan := Some ic_pipe;
   return ()
 
 let cancel_uncompr () =
-  match !uncompr_waiter with
+  match !compression with
   | None -> ()
-  | Some waiter -> 
+  | Some (strm,waiter) -> 
     Lwt.cancel waiter;
-    uncompr_waiter := None
+    compression := None
 
 let login user pswd nocompress ic oc =
   catch (fun() ->
@@ -533,16 +570,18 @@ let logout oc =
 (* STATUS "ATT" (MESSAGES 10) *)
 let status oc mailbox =
   write oc (Printf.sprintf "%s status %s (messages)\r\n" (next_tag()) mailbox) >>= fun () ->
-  resp_read () >>= fun res ->
-  let msgs = 
+  ok_no_ex (fun acc res ->
+    let msgs =
     try
       let re = Re_posix.compile_pat ~opts:[`ICase] "messages ([0-9]+)\\)$" in
       let subs = Re.exec re res in
       Re.get subs 1
-    with Not_found -> "-" 
-  in
-  while_not_ok () >>= fun () ->
-  return msgs
+    with Not_found -> acc 
+    in
+    return msgs
+  ) "0" >>= function
+  | `Ok msgs -> return msgs
+  | `No -> return "0"
 
 let re_postmark = Re_posix.compile_pat ~opts:[`ICase] 
   "^(From [^ \r\n]+ (mon|tue|wed|thu|fri|sat|sun) (jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec))"
@@ -601,31 +640,34 @@ let checkresume unique = function
    * LIST (\HasChildren) "/" "Cambridge"
    * LIST (\HasNoChildren) "/" "Cambridge/Entertainment"
  *)
-let list host resume oc = 
+let list resume oc = 
   write oc (Printf.sprintf "%s list \"\" *\r\n" (next_tag())) >>= fun () ->
     let re = Re_posix.compile_pat ~opts:[`ICase] "^\\* list \\(([^)]+)\\) [^ ]+ ((\"[^\"]+\")|([^\t ]+))$" in
   Printf.fprintf stderr "mailboxes to process:\n%!";
-  let rec _read l =
+  let rec _read isgmail l =
     resp_read () >>= fun res ->
     if ok res then
-      return l
+      return (isgmail,l)
     else (
       let subs = Re.exec re res in
       let mailbox = Re.get subs 2 in
       let attrs = Re.split (Re_posix.compile_pat " ") (Re.get subs 1) in
-      if List.exists (fun attr -> (String.lowercase attr) = "\\noselect") attrs ||
+      let gmail = 
           mailbox = "\"[Gmail]/All Mail\"" || mailbox = "\"[Gmail]/Important\"" || 
-          mailbox = "\"[Gmail]/Starred\"" then
-        _read l
+          mailbox = "\"[Gmail]/Starred\"" || mailbox = "\"[Gmail]/Sent Mail\"" || 
+          mailbox = "\"[Gmail]/Trash\"" in
+      if List.exists (fun attr -> (String.lowercase attr) = "\\noselect") attrs || gmail then
+        _read (if gmail then true else isgmail) l 
       else (
-        _read (mailbox :: l)
+        _read  isgmail (mailbox :: l)
       )
     )
   in 
-  _read [] >>= fun l ->
+  _read false [] >>= fun (isgmail,l) ->
   let l = List.sort String.compare l in
   let l = 
-    if gmail host then List.concat [l;["\"[Gmail]/Important\"";"\"[Gmail]/All Mail\""]] else l
+    if isgmail then List.concat [l;["\"[Gmail]/Sent Mail\""; "\"[Gmail]/Trash\""; 
+        "\"[Gmail]/Important\"";"\"[Gmail]/All Mail\""]] else l
   in
   let total = ref 0 in
   Lwt_list.map_s (fun m ->
@@ -688,10 +730,7 @@ let get_literal_data res =
 let get_part () =
   resp_read () >>= fun res ->
   get_literal_data res >>= fun (_,msg) ->
-  resp_read () >>= fun res -> (* \r\n after the literal *)
-  if res <> ")" then raise (Failed ("get_part:" ^ res));
-  resp_read () >>= fun res -> (* closing parenth *)
-  if ok res = false then raise (Failed ("get_part ok:" ^ res));
+  while_not_ok () >>= fun res ->
   return msg
 
 let fetch_part oc i part =
@@ -702,6 +741,14 @@ let messageid_from_headers headers =
   let re = Re_posix.compile_pat ~opts:[`ICase] "message-id: ([^ \r\n]+)" in
   try
     let subs = (Re.exec re headers) in
+    Re.get subs 1
+  with Not_found -> ""
+
+let messageid_from_message message =
+  let len = if String.length message > 3000 then 3000 else String.length message in
+  let re = Re_posix.compile_pat ~opts:[`ICase] "[\n]message-id: ([^ \r\n]+)" in
+  try
+    let subs = (Re.exec re ~pos:0 ~len message) in
     Re.get subs 1
   with Not_found -> ""
 
@@ -729,6 +776,7 @@ let fetch_unique_all oc start mailbox cnt f =
   if !start >= cnt then
     return ()
   else (
+    Printf.fprintf stderr "analyzing %s\n%!" (opt_val mailbox);
     write_fetch oc (`Start !start) `HeaderMessageID >>= fun () ->
     let rec _read seq =
       resp_read () >>= fun res ->
@@ -736,6 +784,7 @@ let fetch_unique_all oc start mailbox cnt f =
         return seq
       ) else if Re.execp re_fetch res then (
         get_literal_data res >>= fun (id,headers) ->
+        Printf.fprintf stderr "%d\r%!" id;
         let msgid = messageid_from_headers headers in
         if msgid <> "" && Hashtbl.mem !messageid msgid then (
           _read seq
@@ -748,6 +797,8 @@ let fetch_unique_all oc start mailbox cnt f =
       )
     in
     _read [] >>= fun seq ->
+      Printf.fprintf stderr "downloading unique (%d) %s messages\n%!" 
+        (List.length seq) (opt_val mailbox);
     Lwt_list.fold_right_s (fun s _ ->
       fetch_part oc s `Body >>= fun message ->
       f s mailbox message >>= fun () ->
@@ -756,7 +807,7 @@ let fetch_unique_all oc start mailbox cnt f =
     ) seq ()
   )
 
-let fetch oc start mailbox cnt f =
+let fetch oc start mailbox cnt unique f =
   if start >= cnt then
     return ()
   else (
@@ -767,6 +818,10 @@ let fetch oc start mailbox cnt f =
       return () 
     ) else if Re.execp re_fetch res then (
       get_literal_data res >>= fun (id,msg) ->
+      if unique then (
+        let msgid = messageid_from_message msg in
+        let _ = get_messageid msgid in ()
+      );
       f id mailbox msg >>= fun () ->
       _read ()
     ) else  (
@@ -830,6 +885,12 @@ let imap_fold host port nocompress resume unique download f =
   let connected = ref false in
   Printf.fprintf stderr "Please enter user name:%!";
   Lwt_io.read_line Lwt_io.stdin >>= fun user ->
+  let user = 
+    try
+      let subs = Re.exec (Re_posix.compile_pat "^([^@]+)@.+$") user in
+      Re.get subs 1
+    with Not_found -> user 
+  in
   Printf.fprintf stderr "Please enter password:%!";
   echo_on false >>= fun () ->
   Lwt_io.read_line Lwt_io.stdin >>= fun pswd -> 
@@ -867,12 +928,12 @@ let imap_fold host port nocompress resume unique download f =
       start (fun ic oc ->
         Printf.fprintf stderr "connected to %s:%d\n%!" ip port;
         connected := true;
-        compression := false;
+        compression := None;
         resp_chan := Some ic;
         login user pswd nocompress ic oc >>= fun () ->
         begin
         if mailboxes = [] then
-          list host resume oc
+          list resume oc
         else
           return mailboxes
         end >>= fun mailboxes ->
@@ -890,19 +951,23 @@ let imap_fold host port nocompress resume unique download f =
           ) else (
             select oc mailbox >>= fun msgs ->
             Printf.fprintf stderr "%s, %d messages\n%!" mailbox msgs;
-            if mailbox = "\"[Gmail]/All Mail\"" && unique then
+            if (mailbox = "\"[Gmail]/All Mail\"" || mailbox =
+              "\"[Gmail]/Important\"") && unique then
               fetch_unique_all oc start (Some mailbox) cnt f
             else
-              fetch oc !start (Some mailbox) cnt f
+              fetch oc !start (Some mailbox) cnt unique f
           )
         ) mailboxes >>= fun() ->
+        cancel_uncompr ();
         logout oc 
       ) >>= fun () ->
       return true
     ) 
     (fun ex -> 
       cancel_uncompr ();
-      if ex <> LoginFailed && !connected && attempts < 10 then (
+      if ex = LoginFailed then
+        raise ex
+      else if ex <> LoginFailed && !connected && attempts < 10 then (
         Printf.fprintf stderr "retrying %d\n%!" attempts; 
         run ip port ssl mailboxes (attempts + 1) 
       ) else 
@@ -914,7 +979,6 @@ let imap_fold host port nocompress resume unique download f =
       run ip port ssl [] 1
     )
   ) [true,ports] >>= fun res ->
-  cancel_uncompr ();
   if res = false then
     Printf.fprintf stderr "failed to get messages\n%!";
   return ()
