@@ -130,6 +130,7 @@ let starttls config sock () =
   return (Tls_lwt.of_t srv)
 
 let cancel_compression_waiter compression =
+  Log_.log `Info1 "### cancelling compress thread\n";
   match compression with 
   | None -> ()
   | Some (_,_,waiter,_) -> 
@@ -145,7 +146,6 @@ let create config =
   validate_config config >>= function
   | `Ok ->
     begin
-    let compression = ref (ref None) in
     let (strm,push_append_strm) = Lwt_stream.create () in
     async (fun () -> Amailbox.async_append strm);
     async (fun () -> Imap_cmd.maintenance config);
@@ -155,6 +155,7 @@ let create config =
       let id = next_id () in
       f (
         fun () ->
+        let compression = ref (ref None) in
         let user_logout = Lwt_mutex.create () in
         catch(
           fun () ->
