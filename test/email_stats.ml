@@ -62,9 +62,8 @@ let inflate strm oc_pipe inbuff =
     (*Printf.fprintf stderr "decompressed original size %d, %d, writing %d, %s$$$$\n%!" 
         inbuff_len used_in used_out (get_pr (String.sub buffout_infl 0
         used_out));*)
-    Lwt_io.write oc_pipe (String.sub buffout_infl 0 used_out) >>
+    Lwt_io.write oc_pipe (String.sub buffout_infl 0 used_out) >>= fun () ->
     Lwt_io.flush oc_pipe >>= fun () ->
-    (*Printf.fprintf stderr "uncompressed %d\n%!" used_out;*)
     let offset = offset + used_in in
     let len = len - used_in in
     if fi then ( (* this should not happen? *)
@@ -97,7 +96,6 @@ let read_cache ic_net =
       Printf.fprintf stderr "##### read size 0\n%!";
       return None
     ) else (
-      (*Printf.fprintf stderr "read %d\n%!" size;*)
       return (Some str)
     )
   )
@@ -109,10 +107,10 @@ let start_async_uncompr ic_net oc_pipe =
     read_cache ic_net >>= function
     | None -> 
       Printf.fprintf stderr "##### reading from cache failed\n%!";
-      try_close oc_pipe >>
+      try_close oc_pipe >>= fun () ->
       try_close (opt_val !resp_chan) 
     | Some buff -> 
-      inflate strm oc_pipe buff >>
+      inflate strm oc_pipe buff >>= fun () ->
       read ()
   in
   read ()
@@ -179,26 +177,27 @@ let get_arch str =
       `ImapDld (host,port)
   | _ -> raise InvalidCommand
 
-let rec args i archive echo nocompress outfile unique =
+let rec args i archive echo nocompress outfile unique ssl =
   if i >= Array.length Sys.argv then
-    archive,echo,nocompress,outfile,unique
+    archive,echo,nocompress,outfile,unique,ssl
   else
     match Sys.argv.(i) with 
-    | "-archive" -> args (i+2) (Some (get_arch Sys.argv.(i+1))) echo nocompress outfile unique
-    | "-echo" -> args (i+1) archive true nocompress outfile unique
-    | "-no-compress" -> args (i+1) archive echo true outfile unique
-    | "-outfile" -> args (i+2) archive echo nocompress (Some Sys.argv.(i+1)) unique
-    | "-unique" -> args (i+1) archive echo nocompress outfile true
+    | "-archive" -> args (i+2) (Some (get_arch Sys.argv.(i+1))) echo nocompress outfile unique ssl
+    | "-echo" -> args (i+1) archive true nocompress outfile unique ssl
+    | "-no-compress" -> args (i+1) archive echo true outfile unique ssl
+    | "-outfile" -> args (i+2) archive echo nocompress (Some Sys.argv.(i+1)) unique ssl
+    | "-unique" -> args (i+1) archive echo nocompress outfile true ssl
+    | "-no-ssl" -> args (i+1) archive echo nocompress outfile unique false
     | _ -> raise InvalidCommand
 
 let usage () =
   Printf.printf 
     "usage: email_stats -archive [mbox:file|imap[-dld]:server:port] [-outfile
-    [[resume:]file]] [-echo] [-no-compress] [-unique]\n%!"
+    [[resume:]file]] [-echo] [-no-compress] [-unique] [-no-ssl]\n%!"
 
 let commands f =
   try 
-    let archive,echo,nocompress,outfile,unique = args 1 None false false None false in
+    let archive,echo,nocompress,outfile,unique,ssl = args 1 None false false None false true in
     let resume =
     match outfile with
     | Some file ->
@@ -210,7 +209,7 @@ let commands f =
       )
     | None -> None
     in
-    f (opt_val archive) echo nocompress outfile resume unique
+    f (opt_val archive) echo nocompress outfile resume unique ssl
   with 
     | Failed _ -> usage()|InvalidCommand -> usage()
     | _ -> ()
@@ -409,13 +408,14 @@ let rec walk outc email id part multipart =
     )
   | `Message _ -> assert (false)
   | `Multipart elist ->
-    write (sprf "start multipart %d %d:\n%!" id (List.length elist)) >>
+    write (sprf "start multipart %d %d:\n%!" id (List.length elist)) >>= fun ()
+    ->
     Lwt_list.fold_left_s (fun part email ->
       walk outc email (id+1) part true >>= fun () ->
       return (part + 1)
     ) 0 elist >>= fun _ ->
     write (sprf "end multipart %d\n%!" id)
-  end >> Lwt_io.flush outc
+  end >>= fun () -> Lwt_io.flush outc
 
 let mailboxes_init () =
   let _ = get_mailbox "inbox" in
@@ -475,7 +475,7 @@ let write oc msg =
   match !compression with
   | Some (strm,_) -> write_compressed strm oc msg 
   | None -> Lwt_io.write oc msg
-  end >>
+  end >>= fun () ->
   Lwt_io.flush oc
 
 let while_not_ok () =
@@ -641,32 +641,32 @@ let checkresume unique = function
  *)
 let list resume oc = 
   write oc (Printf.sprintf "%s list \"\" *\r\n" (next_tag())) >>= fun () ->
-    let re = Re_posix.compile_pat ~opts:[`ICase] "^\\* list \\(([^)]+)\\) [^ ]+ ((\"[^\"]+\")|([^\t ]+))$" in
+  let re = Re_posix.compile_pat ~opts:[`ICase] "^\\* list \\(([^)]+)\\) \"?([^\" ]+)\"? ((\"[^\"]+\")|([^\t ]+))$" in
   Printf.fprintf stderr "mailboxes to process:\n%!";
-  let rec _read isgmail l =
+  let gmail_mb sep mb = String.concat "" ["\"";"[Gmail]";sep;mb;"\"";] in
+  let rec _read sep isgmail l =
     resp_read () >>= fun res ->
     if ok res then
-      return (isgmail,l)
+      return (sep,isgmail,l)
     else (
       let subs = Re.exec re res in
-      let mailbox = Re.get subs 2 in
+      let sep = Re.get subs 2 in
+      let mailbox = Re.get subs 3 in
       let attrs = Re.split (Re_posix.compile_pat " ") (Re.get subs 1) in
-      let gmail = 
-          mailbox = "\"[Gmail]/All Mail\"" || mailbox = "\"[Gmail]/Important\"" || 
-          mailbox = "\"[Gmail]/Starred\"" || mailbox = "\"[Gmail]/Sent Mail\"" || 
-          mailbox = "\"[Gmail]/Trash\"" in
+      let re = Re_posix.compile_pat "^\"?[[]Gmail[]].(Important|Starred|(Sent Mail)|Trash|(All Mail))\"?$" in
+      let gmail = Re.execp re mailbox in
       if List.exists (fun attr -> (String.lowercase attr) = "\\noselect") attrs || gmail then
-        _read (if gmail then true else isgmail) l 
+        _read sep (if gmail then true else isgmail) l 
       else (
-        _read  isgmail (mailbox :: l)
+        _read sep isgmail (mailbox :: l)
       )
     )
   in 
-  _read false [] >>= fun (isgmail,l) ->
+  _read "/" false [] >>= fun (sep,isgmail,l) ->
   let l = List.sort String.compare l in
   let l = 
-    if isgmail then List.concat [l;["\"[Gmail]/Sent Mail\""; "\"[Gmail]/Trash\""; 
-        "\"[Gmail]/Important\"";"\"[Gmail]/All Mail\""]] else l
+    if isgmail then List.concat [l;[gmail_mb sep "Sent Mail"; gmail_mb sep "Trash"; 
+        gmail_mb sep "Important"; gmail_mb sep "All Mail"]] else l
   in
   let total = ref 0 in
   Lwt_list.map_s (fun m ->
@@ -733,7 +733,7 @@ let get_part () =
   return msg
 
 let fetch_part oc i part =
-  write_fetch oc (`Single i) part >>
+  write_fetch oc (`Single i) part >>= fun () ->
   get_part () 
 
 let messageid_from_headers headers =
@@ -879,7 +879,7 @@ let start_tls ip port f =
 let maildir_fold dir f =
   return ()
 
-let imap_fold host port nocompress resume unique download f =
+let imap_fold host port _ssl nocompress resume unique download f =
   let open Socket_utils in
   let connected = ref false in
   Printf.fprintf stderr "Please enter user name:%!";
@@ -950,8 +950,8 @@ let imap_fold host port nocompress resume unique download f =
           ) else (
             select oc mailbox >>= fun msgs ->
             Printf.fprintf stderr "%s, %d messages\n%!" mailbox msgs;
-            if (mailbox = "\"[Gmail]/All Mail\"" || mailbox =
-              "\"[Gmail]/Important\"") && unique then
+            let re = Re_posix.compile_pat "^\"?[[]Gmail[]].(Important|(All Mail))\"?$" in
+            if (Re.execp re mailbox) && unique then
               fetch_unique_all oc start (Some mailbox) cnt f
             else
               fetch oc !start (Some mailbox) cnt unique f
@@ -977,7 +977,7 @@ let imap_fold host port nocompress resume unique download f =
     loop ports (fun ip port ->
       run ip port ssl [] 1
     )
-  ) [true,ports] >>= fun res ->
+  ) [_ssl,ports] >>= fun res ->
   if res = false then
     Printf.fprintf stderr "failed to get messages\n%!";
   return ()
@@ -999,7 +999,7 @@ let labels_from_mailbox mailbox =
 
 let () =
   let open Parsemail.Mailbox in
-  commands (fun arch echo nocompress outfile resume unique ->
+  commands (fun arch echo nocompress outfile resume unique ssl ->
   echoterm := echo;
   Lwt_main.run (
     let flags = [Unix.O_NONBLOCK;Unix.O_CREAT;Unix.O_WRONLY] in
@@ -1023,11 +1023,11 @@ let () =
         return (mbox_fold file,false,st.Unix.st_size)
     | `Imap (host,port) -> 
       let resume = Hashtbl.create 0 in
-      return (imap_fold host port nocompress resume unique false,false,0)
+      return (imap_fold host port ssl nocompress resume unique false,false,0)
     | `ImapDld (host,port) -> 
       checkresume unique resume >>= fun (resume,offset) ->
       (if Int64.compare offset Int64.zero > 0 then Lwt_io.set_position outc offset else return ()) >>= fun () ->
-      return (imap_fold host port nocompress resume unique true,true,0)
+      return (imap_fold host port ssl nocompress resume unique true,true,0)
     | `Maildir _ -> raise InvalidCommand
     end >>= fun (fold,download,size) ->
     if download = false then init_hashtbl_all 50_000;
@@ -1045,24 +1045,25 @@ let () =
           (* select required headers, update if more stats is needed *)
           let headers_m = headers_to_map headers_l in
           if messageid_unique headers_m then (
-            write "--> start\n" >>
-            write (sprf "Full Message: %d %d\n" (String.length message_s) (len_compressed message_s)) >>
-            write "Hdrs\n" >>
-            write (sprf "from: %s\n" (_from headers_m)) >>
-            write (sprf "to: %s\n" (_to headers_m)) >>
-            write (sprf "cc: %s\n" (_cc headers_m)) >>
-            write (sprf "date: %s\n" (get_header_m headers_m "date")) >>
-            write (sprf "subject: %s\n" (_subject headers_m)) >>
+            write "--> start\n" >>= fun () ->
+            write (sprf "Full Message: %d %d\n" (String.length message_s) (len_compressed message_s)) >>= fun () ->
+            write "Hdrs\n" >>= fun () ->
+            write (sprf "from: %s\n" (_from headers_m)) >>= fun () ->
+            write (sprf "to: %s\n" (_to headers_m)) >>= fun () ->
+            write (sprf "cc: %s\n" (_cc headers_m)) >>= fun () ->
+            write (sprf "date: %s\n" (get_header_m headers_m "date")) >>= fun ()
+            ->
+            write (sprf "subject: %s\n" (_subject headers_m)) >>= fun () ->
             begin
             match mailbox with
             | Some mailbox -> write (sprf "mailbox: %s\n" (labels_from_mailbox mailbox))
             | None -> write (sprf "labels: %s\n" (_gmail_labels headers_m))
-            end >>
-            write (sprf "messageid: %s\n" (_messageid headers_m)) >>
-            write (sprf "inreplyto: %s\n" (_inreplyto headers_m)) >>
-            write "Parts:\n" >>
-            walk outc email 0 0 false >>
-            write "<-- end\n" >>
+            end >>= fun () ->
+            write (sprf "messageid: %s\n" (_messageid headers_m)) >>= fun () ->
+            write (sprf "inreplyto: %s\n" (_inreplyto headers_m)) >>= fun () ->
+            write "Parts:\n" >>= fun () ->
+            walk outc email 0 0 false >>= fun () ->
+            write "<-- end\n" >>= fun () ->
             Lwt_io.flush outc
           ) else (
             return ()
@@ -1071,19 +1072,19 @@ let () =
           Printf.fprintf stderr "%d %d     \r%!" cnt (String.length message_s);
           begin
           if Re.execp re_postmark message_s = false then (
-            write (sprf "%s\r\n" (Utils.make_postmark message_s)) >>
+            write (sprf "%s\r\n" (Utils.make_postmark message_s)) >>= fun () ->
             write (sprf "X-Gmail-Labels: %s\r\n" (opt_val mailbox))
           ) else (
             return ()
           )
-          end >>
-          write message_s >>
+          end >>= fun () ->
+          write message_s >>= fun () ->
           begin
           if String.get message_s (String.length message_s - 1) <> '\n' then
             write "\r\n"
           else
             return ()
-          end >>
+          end >>= fun () ->
           Lwt_io.flush outc
         )
       ) (fun ex -> if download = false then write (sprf "<-- end failed to process: %s\n%!"
