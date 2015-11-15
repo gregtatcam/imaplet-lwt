@@ -120,11 +120,7 @@ let write_compressed w strm resp =
     let len = len - used_in in
     if len = 0 then (
       Log_.log `Info1 (Printf.sprintf "<-- compression complete %d %d\n" offset len); 
-      if used_in = used_out then (
-        write_compressed_block w strm "\n" 0 1 buffout 16 >>= fun _ ->
-        return ()
-      ) else
-        return ()
+      return ()
     ) else
       _compress offset len
   in
