@@ -31,6 +31,9 @@ open Lwt
  met can preceed the first command
  *)
 
+let _dovecot = ref false
+let _echo = ref false
+
 module MapStr = Map.Make(String)
 
 (* metadata - stores timers and echo to the terminal *)
@@ -55,21 +58,23 @@ let get_user str =
   with Not_found -> raise InvalidCommand
 
 (* process command line *)
-let rec args i script addr port ssl user =
+let rec args i script addr port ssl user dovecot echo =
   if i >= Array.length Sys.argv then
-    script,addr,port,ssl,user
+    script,addr,port,ssl,user,dovecot,echo
   else
     match Sys.argv.(i) with 
-    | "-script" -> args (i+2) Sys.argv.(i+1) addr port ssl user
-    | "-address" -> args (i+2) script Sys.argv.(i+1) port ssl user
-    | "-port" -> args (i+2) script addr (int_of_string (Sys.argv.(i+1))) ssl user
-    | "-ssl" -> args (i+2) script addr port (bool_of_string (Sys.argv.(i+1))) user
-    | "-user" -> args (i+2) script addr port ssl (get_user Sys.argv.(i+1))
+    | "-script" -> args (i+2) Sys.argv.(i+1) addr port ssl user dovecot echo
+    | "-address" -> args (i+2) script Sys.argv.(i+1) port ssl user dovecot echo
+    | "-port" -> args (i+2) script addr (int_of_string (Sys.argv.(i+1))) ssl user dovecot echo
+    | "-ssl" -> args (i+2) script addr port (bool_of_string (Sys.argv.(i+1))) user dovecot echo
+    | "-user" -> args (i+2) script addr port ssl (get_user Sys.argv.(i+1)) dovecot echo
+    | "-dovecot" -> args (i+1) script addr port ssl user true echo
+    | "-echo" -> args (i+1) script addr port ssl user dovecot true
     | _ -> raise InvalidCommand
 
 let usage () =
   Printf.fprintf stderr "usage: client -script [path] -address [address] \
-  -port [port] [-ssl [true|false]] [-user [user:pswd]]\n%!"
+  -port [port] [-ssl [true|false]] [-user [user:pswd]] [-dovecot] [-echo]\n%!"
 
 (* script meta line contains start/stop timers and server response echo to the terminal *)
 let process_meta line = 
@@ -129,9 +134,9 @@ let get_script file user =
 (* parse command line arguments and pass to the callback *)
 let commands f =
   try 
-    let script,addr,port,ssl,user = args 1 "" "127.0.0.1" 993 true None in
+    let script,addr,port,ssl,user,dovecot,echo = args 1 "" "127.0.0.1" 993 true None false false in
       try 
-        f script addr port ssl user
+        f script addr port ssl user dovecot echo
       with ex -> Printf.printf "%s\n%!" (Printexc.to_string ex)
   with _ -> usage ()
 
@@ -240,14 +245,14 @@ let read_net_echo ?count ic =
   zip_read ?count ic >>= function
   | None -> return None
   | Some line ->
-    if !Meta.echo then
+    if !_echo || !Meta.echo then
       Printf.printf "%s\n%!" line;
     return (Some line)
 
 (* write command to the server, echo to the terminal if echo is on *)
 let write_echo oc command =
   let command = command ^ "\r\n" in
-  if !Meta.echo then
+  if !_echo || !Meta.echo then
     Printf.printf "%s%!" command;
   let command = if !compression then Imap_crypto.do_compress command else command in
   Lwt_io.write oc command >> Lwt_io.flush oc
@@ -257,9 +262,9 @@ let write_echo oc command =
 let handle_append ic oc mailbox msgfile =
   Utils.fold_email_with_file msgfile (fun cnt message ->
     Printf.printf "appending %d\r%!" cnt;
-    (* dovecot needs + 1 *)
+    let sz = if !_dovecot then 1 else 2 in
     let cmd = 
-      Printf.sprintf "A%d APPEND %s {%d+}" cnt mailbox (String.length message + 2) in
+      Printf.sprintf "A%d APPEND %s {%d+}" cnt mailbox (String.length message + sz) in
     write_echo oc cmd >>
     write_echo oc message >>
     read_net_echo ic >>
@@ -338,7 +343,9 @@ let output_meta () =
   ) !Meta.timers
 
 let () =
-  commands (fun script addr port ssl user ->
+  commands (fun script addr port ssl user dovecot echo ->
+    _dovecot := dovecot;
+    _echo := echo;
     Lwt_main.run (catch(fun() ->
         (* recursively execute stream commands *)
         let rec exec strm ic oc =
