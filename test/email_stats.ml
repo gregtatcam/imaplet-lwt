@@ -81,7 +81,7 @@ let inflate strm oc_pipe inbuff =
       _inflate inbuff offset len
     )
   in
-  _inflate inbuff 0 (String.length inbuff)
+  _inflate inbuff 0 inbuff_len
 
 (* reading/uncompression is done in chunks and
  * part of the chunk could be next compressed data stream
@@ -92,15 +92,14 @@ let read_cache ic_net =
     Buffer.clear !inbuffer;
     return (Some contents)
   ) else (
-    let buff_net = String.create buff_size in
-    Lwt_io.read_into ic_net buff_net 0 buff_size >>= function
-    | 0 -> 
+    Lwt_io.read ~count:buff_size ic_net >>= fun str ->
+    if str = "" then (
       Printf.fprintf stderr "##### read size 0\n%!";
       return None
-    | size -> 
+    ) else (
       (*Printf.fprintf stderr "read %d\n%!" size;*)
-      let str = String.sub buff_net 0 size in
       return (Some str)
+    )
   )
 
 let start_async_uncompr ic_net oc_pipe =
