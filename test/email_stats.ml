@@ -219,6 +219,7 @@ let attachments = ref (Hashtbl.create 0)
 let mailboxes = ref (Hashtbl.create 0)
 let subject = ref (Hashtbl.create 0)
 let messageid = ref (Hashtbl.create 0)
+let inreplyto = ref (Hashtbl.create 0)
 
 let init_hashtbl_all size =
   email_addr := Hashtbl.create size;
@@ -258,7 +259,7 @@ let get_messageid key =
 
 let headers_to_map headers =
   List.fold_left (fun tbl (n,v) ->
-    let n = String.lowercase n in
+    let n = String.trim (String.lowercase n) in
     if n = "from" || n = "to" || n = "cc" || n = "subject" || n = "object-id" || 
         n = "in-reply-to" || n = "x-gmail-labels" || n = "content-type" || 
         n = "date" || n = "message-id" then (
@@ -327,13 +328,21 @@ let _messageid headers =
 
 let messageid_unique headers =
   let h = get_header_m headers "message-id" in
-  let res = ((Hashtbl.mem !messageid h) = false) in
+  let inmsgid = Hashtbl.mem !messageid h in
+  let inreply = Hashtbl.mem !inreplyto h in
+  let res = (h = "" || inmsgid = false || inreply = true) in
+  if inreply then
+    Hashtbl.remove !inreplyto h;
   res
 
 let _inreplyto headers =
   let h = get_header_m headers "in-reply-to" in
   let l = Re.split (Re_posix.compile_pat "[ \n\r]+]") h in
-  String.concat "," (List.map (fun h -> get_messageid h) l)
+  String.concat "," (List.map (fun h -> 
+    if Hashtbl.mem !messageid h = false then
+      Hashtbl.add !inreplyto h 0;
+    get_messageid h
+  ) l)
 
 let re_subject = Re_posix.compile_pat ~opts:[`ICase] "(re|fw|fwd): "
 let _subject headers =
@@ -744,7 +753,7 @@ let messageid_from_headers headers =
   with Not_found -> ""
 
 let messageid_from_message message =
-  let len = if String.length message > 3000 then 3000 else String.length message in
+  let len = if String.length message > 5000 then 5000 else String.length message in
   let re = Re_posix.compile_pat ~opts:[`ICase] "[\n]message-id: ([^ \r\n]+)" in
   try
     let subs = (Re.exec re ~pos:0 ~len message) in
