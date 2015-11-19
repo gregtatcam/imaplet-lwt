@@ -198,7 +198,6 @@ let rec args i archive echo nocompress outfile unique ssl cmd =
       "then you can just enter the name.");
       let archive = Some (get_arch 
         (Scanf.bscanf Scanf.Scanning.stdin "%s" (fun s -> "imap-dld:" ^ s))) in
-      let unique = true in
       let outfile = Some (Printf.sprintf "%f.mbox" (Unix.gettimeofday())) in
       args (i+1) archive false false outfile true true true
     | _ -> raise InvalidCommand
@@ -1131,9 +1130,11 @@ let () =
       Printf.fprintf stderr "--- processing downloaded email archive ---\n%!";
       let file = Printf.sprintf "%f.stats.out" (Unix.gettimeofday()) in
       _run (`Mbox (opt_val outfile)) (Some file) >>= fun () ->
+      let dir = Sys.getcwd () in
       Printf.fprintf stderr 
-        "--- Your email is downloaded into %s, the statistics file is generated into %s ---\n%!" 
-          (opt_val outfile) file;
+        "--- Your email is downloaded into %s/%s,\nthe statistics file is
+ generated into %s/%s ---\n%!" 
+          dir (opt_val outfile) dir file;
       return ()
     ) else (
       return ()
