@@ -177,27 +177,41 @@ let get_arch str =
       `ImapDld (host,port)
   | _ -> raise InvalidCommand
 
-let rec args i archive echo nocompress outfile unique ssl =
+let rec args i archive echo nocompress outfile unique ssl cmd =
   if i >= Array.length Sys.argv then
-    archive,echo,nocompress,outfile,unique,ssl
+    archive,echo,nocompress,outfile,unique,ssl,cmd
   else
     match Sys.argv.(i) with 
-    | "-archive" -> args (i+2) (Some (get_arch Sys.argv.(i+1))) echo nocompress outfile unique ssl
-    | "-echo" -> args (i+1) archive true nocompress outfile unique ssl
-    | "-no-compress" -> args (i+1) archive echo true outfile unique ssl
-    | "-outfile" -> args (i+2) archive echo nocompress (Some Sys.argv.(i+1)) unique ssl
-    | "-unique" -> args (i+1) archive echo nocompress outfile true ssl
-    | "-no-ssl" -> args (i+1) archive echo nocompress outfile unique false
+    | "-archive" -> args (i+2) (Some (get_arch Sys.argv.(i+1))) echo nocompress
+    outfile unique ssl cmd
+    | "-echo" -> args (i+1) archive true nocompress outfile unique ssl cmd
+    | "-no-compress" -> args (i+1) archive echo true outfile unique ssl cmd
+    | "-outfile" -> args (i+2) archive echo nocompress (Some Sys.argv.(i+1))
+    unique ssl cmd
+    | "-unique" -> args (i+1) archive echo nocompress outfile true ssl cmd
+    | "-no-ssl" -> args (i+1) archive echo nocompress outfile unique false cmd
+    | "-cmd" -> 
+      Printf.fprintf stderr "%s\n%!" 
+      ("Please enter your email provider's IMAP address and port.\n" ^
+      "For instance: imap.provider.net:993. If your provider is any of\n" ^ 
+      "gmail,yahoo,icloud,outlook,hermes,mail,aol\n" ^
+      "then you can just enter the name.");
+      let archive = Some (get_arch 
+        (Scanf.bscanf Scanf.Scanning.stdin "%s" (fun s -> "imap-dld:" ^ s))) in
+      let unique = true in
+      let outfile = Some (Printf.sprintf "%f.mbox" (Unix.gettimeofday())) in
+      args (i+1) archive false false outfile true true true
     | _ -> raise InvalidCommand
 
 let usage () =
   Printf.printf 
     "usage: email_stats -archive [mbox:file|imap[-dld]:server:port] [-outfile
-    [[resume:]file]] [-echo] [-no-compress] [-unique] [-no-ssl]\n%!"
+    [[resume:]file]] [-echo] [-no-compress] [-unique] [-no-ssl] [-cmd]\n%!"
 
 let commands f =
   try 
-    let archive,echo,nocompress,outfile,unique,ssl = args 1 None false false None false true in
+    let archive,echo,nocompress,outfile,unique,ssl,cmd = args 1 None false false
+    None false true false in
     let resume =
     match outfile with
     | Some file ->
@@ -209,7 +223,7 @@ let commands f =
       )
     | None -> None
     in
-    f (opt_val archive) echo nocompress outfile resume unique ssl
+    f (opt_val archive) echo nocompress outfile resume unique ssl cmd
   with 
     | Failed _ -> usage()|InvalidCommand -> usage()
     | _ -> ()
@@ -563,7 +577,7 @@ let login user pswd nocompress ic oc =
         Printf.fprintf stderr "compression enabled\n%!";
         return ()
       ) else (
-        Printf.fprintf stderr "compression is not supported or failed to enable\n%!";
+        Printf.fprintf stderr "compression is not enabled\n%!";
         return ()
       )
     ) else (
@@ -949,7 +963,7 @@ let imap_fold host port _ssl nocompress resume unique download f =
           let total = List.fold_left (fun acc (_,cnt,_) -> acc+cnt) 0 mailboxes in
           messageid := Hashtbl.create total
         );
-        Printf.fprintf stderr "--- started processing ---\n%!";
+        Printf.fprintf stderr "--- started downloading ---\n%!";
         Lwt_list.iter_s (fun (start,cnt,mailbox) ->
           if cnt = 0 then (
             Printf.fprintf stderr "%s, 0 messages\n%!" mailbox;
@@ -967,7 +981,8 @@ let imap_fold host port _ssl nocompress resume unique download f =
           )
         ) mailboxes >>= fun() ->
         cancel_uncompr ();
-        logout oc 
+        logout oc >>= fun () ->
+        return ()
       ) >>= fun () ->
       return true
     ) 
@@ -1008,9 +1023,10 @@ let labels_from_mailbox mailbox =
 
 let () =
   let open Parsemail.Mailbox in
-  commands (fun arch echo nocompress outfile resume unique ssl ->
+  commands (fun arch echo nocompress outfile resume unique ssl cmd ->
   echoterm := echo;
   Lwt_main.run (
+    let _run arch outfile =
     let flags = [Unix.O_NONBLOCK;Unix.O_CREAT;Unix.O_WRONLY] in
     let flags = if resume = None then Unix.O_TRUNC :: flags else flags in
     let with_file = 
@@ -1100,9 +1116,27 @@ let () =
           (Printexc.to_string ex)) else (Printf.fprintf stderr "failed to parse the
           message\n%!"; return ()))
     ) >>= fun () ->
-    Printf.fprintf stderr "processing time: %d seconds\n%!" 
-      (int_of_float (Unix.gettimeofday() -. t));
+    let lapse = (Unix.gettimeofday() -. t) in
+    begin
+    if download then
+      Printf.fprintf stderr "--- download time: %.01f seconds ---\n%!" lapse 
+    else
+      Printf.fprintf stderr "--- processing time: %.01f seconds ---\n%!" lapse 
+    end;
     return ()
+    )
+    in
+    _run arch outfile >>= fun () ->
+    if cmd then (
+      Printf.fprintf stderr "--- processing downloaded email archive ---\n%!";
+      let file = Printf.sprintf "%f.stats.out" (Unix.gettimeofday()) in
+      _run (`Mbox (opt_val outfile)) (Some file) >>= fun () ->
+      Printf.fprintf stderr 
+        "--- Your email is downloaded into %s, the statistics file is generated into %s ---\n%!" 
+          (opt_val outfile) file;
+      return ()
+    ) else (
+      return ()
     )
   ) 
   )
