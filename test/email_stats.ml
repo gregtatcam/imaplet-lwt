@@ -168,6 +168,17 @@ let get_arch str =
       | "icloud" -> "imap.mail.me.com"
       | "mail" -> "imap.mail.com"
       | "hermes" -> "imap.hermes.cam.ac.uk"
+      | "inbox" -> "imap.inbox.com"
+      | "zoho" -> "imap.zoho.com"
+      | "yandex" -> "imap.yandex.com"
+      | "rambler" -> "imap.rambler.ru"
+      | "gmx" -> "imap.gmx.com"
+      | "optimum" -> "imap.optimum.net"
+      | "comcast" -> "imap.comcast.net"
+      | "att" -> "imap.mail.att.net"
+      | "cox" -> "imap.cox.net"
+      | "163" -> "imap.163.com"
+      | "yeah" -> "imap.yeah.net"
       | other -> other
     in
     let port = try Some (int_of_string (Re.get subs 3)) with Not_found -> None in
@@ -350,7 +361,7 @@ let messageid_unique headers =
 
 let _inreplyto headers =
   let h = get_header_m headers "in-reply-to" in
-  let l = Re.split (Re_posix.compile_pat "[ \n\r]+]") h in
+  let l = Re.split (Re_posix.compile_pat "[ \n\r]+") h in
   String.concat "," (List.map (fun h -> 
     if Hashtbl.mem !messageid h = false then
       Hashtbl.add !inreplyto h 0;
