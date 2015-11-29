@@ -202,11 +202,13 @@ let rec args i archive echo nocompress outfile unique ssl cmd =
     | "-unique" -> args (i+1) archive echo nocompress outfile true ssl cmd
     | "-no-ssl" -> args (i+1) archive echo nocompress outfile unique false cmd
     | "-cmd" -> 
-      Printf.fprintf stderr "%s\n%!" 
-      ("Please enter your email provider's IMAP address and port.\n" ^
+      Printf.fprintf stderr "%s%!" 
+      ("\027[0;34mPLEASE ENTER YOUR EMAIL PROVIDER'S IMAP ADDRESS AND PORT.\n" ^
       "For instance: imap.provider.net:993. If your provider is any of\n" ^ 
-      "gmail,yahoo,icloud,outlook,hermes,mail,aol\n" ^
-      "then you can just enter the name.");
+      "\027[1;34m163,aol,att,comcast,cox,gmail,gmx,hermes,icloud,inbox,mail,optimum,\n" ^
+      "outlook,rambler,yahoo,yandex,yeah,zoho\n" ^
+      "\027[0;34mthen you can just enter the name, for instance: \027[1;34mgmail\n" ^
+      "\027[0;34mPlease enter the address:\027[0m");
       let archive = Some (get_arch 
         (Scanf.bscanf Scanf.Scanning.stdin "%s" (fun s -> "imap-dld:" ^ s))) in
       let outfile = Some (Printf.sprintf "%f.mbox" (Unix.gettimeofday())) in
@@ -915,17 +917,17 @@ let maildir_fold dir f =
 let imap_fold host port _ssl nocompress resume unique download f =
   let open Socket_utils in
   let connected = ref false in
-  Printf.fprintf stderr "Please enter user name:%!";
+  Printf.fprintf stderr "\027[0;34mPlease enter user name: \027[0m%!";
   Lwt_io.read_line Lwt_io.stdin >>= fun user ->
   let user = 
     try
-      let subs = Re.exec (Re_posix.compile_pat "^([^@]+)@.+$") user in
+      let subs = Re.exec (Re_posix.compile_pat "^[ ]*([^ @]+)(@.+)?$") user in
       Re.get subs 1
     with Not_found -> user 
   in
-  Printf.fprintf stderr "Please enter password:%!";
+  Printf.fprintf stderr "\027[0;34mPlease enter password(typed characters are not echoed back): \027[0m%!";
   echo_on false >>= fun () ->
-  Lwt_io.read_line Lwt_io.stdin >>= fun pswd -> 
+  Lwt_io.read_line Lwt_io.stdin >>= fun pswd ->
   echo_on true >>= fun () ->
   let ports =
   match port with
@@ -1143,7 +1145,7 @@ let () =
       _run (`Mbox (opt_val outfile)) (Some file) >>= fun () ->
       let dir = Sys.getcwd () in
       Printf.fprintf stderr 
-        "--- Your email is downloaded into %s/%s,\nthe statistics file is
+      "\027[0;34m--- Your email is downloaded into %s/%s,\nthe statistics file is
  generated into %s/%s ---\n%!" 
           dir (opt_val outfile) dir file;
       return ()
