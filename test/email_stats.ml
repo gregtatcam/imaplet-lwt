@@ -203,11 +203,11 @@ let rec args i archive echo nocompress outfile unique ssl cmd =
     | "-no-ssl" -> args (i+1) archive echo nocompress outfile unique false cmd
     | "-cmd" -> 
       Printf.fprintf stderr "%s%!" 
-      ("\027[0;34mPLEASE ENTER YOUR EMAIL PROVIDER'S IMAP ADDRESS AND PORT.\n" ^
-      "For instance: imap.provider.net:993. If your provider is any of\n" ^ 
+      ("\027[0;34mPLEASE ENTER YOUR EMAIL PROVIDER'S IMAP ADDRESS AND PORT AS provider:port.\n" ^
+      "For instance: imap.mail.com:993. But if your provider is any of\n" ^ 
       "\027[1;34m163,aol,att,comcast,cox,gmail,gmx,hermes,icloud,inbox,mail,optimum,\n" ^
       "outlook,rambler,yahoo,yandex,yeah,zoho\n" ^
-      "\027[0;34mthen you can just enter the name, for instance: \027[1;34mgmail\n" ^
+      "\027[0;34mthen you can just enter the name without the port, for instance: \027[1;34mgmail\n" ^
       "\027[0;34mPlease enter the address:\027[0m");
       let archive = Some (get_arch 
         (Scanf.bscanf Scanf.Scanning.stdin "%s" (fun s -> "imap-dld:" ^ s))) in
@@ -387,8 +387,14 @@ let _subject headers =
   )
 
 let get_hdr_attrs headers =
-  List.fold_left (fun (attach,rfc822) (n,v) ->
+  List.fold_left (fun (attach,rfc822,content_type) (n,v) ->
     if Re.execp (Re_posix.compile_pat ~opts:[`ICase] "Content-Type") n then (
+      let content_type = 
+        try 
+          let subs = Re.exec (Re_posix.compile_pat "^[ ]*([^ \t;]+)") v in
+          Re.get subs 1
+        with Not_found -> v
+      in
       let rfc822 =
         if Re.execp (Re_posix.compile_pat ~opts:[`ICase] "message/rfc822") v then
           true
@@ -401,10 +407,10 @@ let get_hdr_attrs headers =
         else
           attach
       in
-      attach,rfc822
+      attach,rfc822,content_type
     ) else
-      attach,rfc822
-  ) (false,false) headers
+      attach,rfc822,content_type
+  ) (false,false,"text/plain") headers
 
 let email_raw_content email =
   match (Email.raw_content email) with
@@ -421,10 +427,11 @@ let rec walk outc email id part multipart =
   let write = Lwt_io.write outc in
   let headers = Header.to_list (Email.header email) in
   let headers_s = headers_to_string (Email.header email) in
-  let attach,rfc822 = get_hdr_attrs headers in
+  let attach,rfc822,content_type = get_hdr_attrs headers in
   write (sprf "part: %d\n" part) >>= fun () ->
   write (sprf "headers: %d %d %d\n" (List.length headers) (String.length headers_s) 
     (len_compressed headers_s)) >>= fun () ->
+  write (sprf "contenttype: %s\n" content_type) >>= fun () ->
   begin
   match Email.content email with
   | `Data _ ->
@@ -1024,7 +1031,7 @@ let mbox_fold file f =
     return (`Ok (cnt + 1,mailbox))
   ) (1,None) >>= fun (cnt,_) ->
   Printf.fprintf stderr "total messages processed: %d\n%!" cnt;
-  return ()
+  return()
 
 let labels_from_mailbox mailbox =
   if Re.execp (Re_posix.compile_pat "[[]Gmail[]]") mailbox = false then (
@@ -1055,7 +1062,8 @@ let () =
     begin
     match arch with
     | `Mbox file ->
-        Lwt_unix.stat file >>= fun st ->
+        catch (fun() -> Lwt_unix.stat file) (fun ex -> Printf.fprintf stderr 
+          "Archive %s doesn't exist or access denied\n%!" file;raise ex) >>= fun st ->
         write (sprf "archive size: %l\n%!" st.Unix.st_size) >>= fun () ->
         return (mbox_fold file,false,st.Unix.st_size)
     | `Imap (host,port) -> 
