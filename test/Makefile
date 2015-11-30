@@ -23,4 +23,10 @@ clean:
 	rm -rf *.cmx *.cmi *.o *.native _build 
 
 email_stats: email_stats.ml
-	ocamlfind ocamlopt -thread -o email_stats -linkpkg -package imaplet,imaplet.commands,imaplet.parsemail,lwt,lwt.syntax,lwt.unix,re,re.posix email_stats.ml
+	ocamlfind ocamlopt -verbose -linkall -thread -o email_stats -linkpkg -package imaplet,imaplet.commands,imaplet.parsemail,lwt,lwt.syntax,lwt.unix,re,re.posix email_stats.ml
+
+filter_message: filter_message.ml
+	ocamlfind ocamlopt -thread -o filter_message -linkpkg -package imaplet,imaplet.commands,imaplet.parsemail,lwt,lwt.syntax,lwt.unix,re,re.posix filter_message.ml
+
+test_stats: test_stats.ml
+	ocamlfind ocamlopt -linkall -thread -o test_stats -linkpkg -package imaplet,imaplet.commands,imaplet.parsemail,lwt,lwt.syntax,lwt.unix,re,re.posix test_stats.ml
