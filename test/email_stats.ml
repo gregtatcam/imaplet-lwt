@@ -108,7 +108,6 @@ let read_cache ic_net =
   ) else (
     Lwt_io.read ~count:buff_size ic_net >>= fun str ->
     if str = "" then (
-      Printf.fprintf stderr "##### read size 0\n%!";
       return None
     ) else (
       return (Some str)
@@ -121,7 +120,6 @@ let start_async_uncompr ic_net oc_pipe =
   let rec read () =
     read_cache ic_net >>= function
     | None -> 
-      Printf.fprintf stderr "##### reading from cache failed\n%!";
       try_close oc_pipe >>= fun () ->
       try_close (opt_val !resp_chan) 
     | Some buff -> 
@@ -1169,7 +1167,7 @@ let () =
       let dir = Sys.getcwd () in
       Printf.fprintf stderr 
       "\027[0;34m--- Your email is downloaded into %s/%s,\nthe statistics file is
- generated into %s/%s ---\n%!" 
+ generated into %s/%s ---\027[0m\n%!" 
           dir (opt_val outfile) dir file;
       return ()
     ) else (
