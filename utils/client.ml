@@ -269,7 +269,7 @@ let handle_append ic oc mailbox msgfile =
     write_echo oc message >>
     read_net_echo ic >>
     return (`Ok (cnt + 1))
-  ) 0 >>= fun _ ->
+  ) 1 >>= fun _ ->
   return ()
 
 (* check if compression command *)
@@ -284,11 +284,17 @@ let exec_command strm ic oc =
   read_script strm >>= function
   | None -> return `Done
   | Some command -> 
-    let re = Re_posix.compile_pat "^append[ \t]+(([^ \t]+)|(\"[^\"]+\"))[ \t]+([^ \t]+)$" in
-    if Re.execp re command then (
-      let subs = Re.exec re command in
+    let re_append = Re_posix.compile_pat "^append[ \t]+(([^ \t]+)|(\"[^\"]+\"))[ \t]+([^ \t]+)$" in
+    let re_sleep = Re_posix.compile_pat "^sleep[ \t]+([0-9]+)$" in
+    if Re.execp re_append command then (
+      let subs = Re.exec re_append command in
       handle_append ic oc (Re.get subs 1) (Re.get subs 4) >>
       return `OkAppend
+    ) else if Re.execp re_sleep command then (
+      Printf.fprintf stderr "%s\n%!" command;
+      let subs = Re.exec re_sleep command in
+      Lwt_unix.sleep (float_of_string (Re.get subs 1)) >>
+      return `OkSleep
     ) else (
       write_echo oc command >> return (`Ok (is_compression command))
     )
@@ -351,7 +357,7 @@ let () =
         let rec exec strm ic oc =
           exec_command strm ic oc >>= function
           | `Done -> return () (* done reading stream *)
-          | `OkAppend -> exec strm ic oc (* append is special, reads from a file *)
+          | `OkAppend | `OkSleep -> exec strm ic oc (* append is special, reads from a file *)
           | `Ok compr -> 
             read_response strm ic >>= function
             | `Done -> return ()
