@@ -128,6 +128,12 @@ let start_async_uncompr ic_net oc_pipe =
   in
   read ()
 
+let read_line_timeout ic =
+  Lwt_unix.with_timeout 180. (fun () -> Lwt_io.read_line ic)
+
+let read_into_exactly_timeout ic buff count =
+  Lwt_unix.with_timeout 180. (fun () -> Lwt_io.read_into_exactly ic buff 0 count)
+
 (* read either from the network or from the uncompressed pipe 
  * if count is not requested then read the line otherwise 
  * read the specified count
@@ -136,19 +142,11 @@ let resp_read ?count () =
   let ic = opt_val !resp_chan in
   begin
   match count with 
-  | None -> Lwt_io.read_line ic
+  | None -> read_line_timeout ic
   | Some count -> 
-    let buff_out = Buffer.create count in
-    let rec _read len =
-      Lwt_io.read ~count:len ic >>= fun buff ->
-      let read_bytes = String.length buff in
-      Buffer.add_string buff_out buff;
-      if read_bytes = len then
-        return (Buffer.contents buff_out)
-      else
-        _read (len - read_bytes)
-    in
-    _read count
+    let buff = String.create count in
+    read_into_exactly_timeout ic buff count >>= fun () ->
+    return buff
   end >>= fun buff ->
   if !echoterm then (
     let len = String.length buff in
@@ -186,7 +184,7 @@ let get_arch str =
       | "yandex" -> "imap.yandex.com"
       | "rambler" -> "imap.rambler.ru"
       | "gmx" -> "imap.gmx.com"
-      | "optimum" -> "imap.optimum.net"
+      | "optimum" -> "mail.optimum.net"
       | "comcast" -> "imap.comcast.net"
       | "att" -> "imap.mail.att.net"
       | "cox" -> "imap.cox.net"
@@ -237,35 +235,34 @@ let commands f =
   try 
     let archive,echo,nocompress,outfile,unique,ssl,cmd = args 1 None false false
     None false true false in
-    let resume =
+    let (resume,outfile) =
     match outfile with
     | Some file ->
       if String.sub file 0 7 = "resume:" then (
         let file = String.sub file 7 (String.length file - 7) in
-        Some file
+        Some file,Some file
       ) else (
-        None
+        None,Some file
       )
-    | None -> None
+    | None -> None,None
     in
     f (opt_val archive) echo nocompress outfile resume unique ssl cmd
   with 
     | Failed _ -> usage()|InvalidCommand -> usage()
     | _ -> ()
 
-let email_addr = ref (Hashtbl.create 0)
-let attachments = ref (Hashtbl.create 0)
 let mailboxes = ref (Hashtbl.create 0)
 let subject = ref (Hashtbl.create 0)
 let messageid = ref (Hashtbl.create 0)
 let inreplyto = ref (Hashtbl.create 0)
 
 let init_hashtbl_all size =
-  email_addr := Hashtbl.create size;
-  attachments := Hashtbl.create size;
   mailboxes := Hashtbl.create size;
   subject := Hashtbl.create size;
   messageid := Hashtbl.create size
+
+let sha key =
+  Imap_crypto.get_hash ~hash:`Sha1 key
 
 let get_unique key tbl =
   if key = "" then
@@ -280,11 +277,7 @@ let get_unique key tbl =
     )
   )
 
-let get_addr key =
-  get_unique key email_addr
-
-let get_attach key =
-  get_unique key attachments 
+let get_addr key = sha key
 
 let get_mailbox key =
   let key = Re.replace_string (Re_posix.compile_pat "^\"|\"$") ~by:"" key in
@@ -299,7 +292,7 @@ let get_messageid key =
 let headers_to_map headers =
   List.fold_left (fun tbl (n,v) ->
     let n = String.trim (String.lowercase n) in
-    if n = "from" || n = "to" || n = "cc" || n = "subject" || n = "object-id" || 
+    if n = "from" || n = "to" || n = "cc" || n = "subject" ||
         n = "in-reply-to" || n = "x-gmail-labels" || n = "content-type" || 
         n = "date" || n = "message-id" then (
       Hashtbl.add tbl n (String.trim v);
@@ -313,7 +306,7 @@ let get_header_m headers name =
     Hashtbl.find headers name
   with Not_found -> ""
 
-let re_addr = Re_posix.compile_pat "([^<@]+@[^>]+)"
+let re_addr = Re_posix.compile_pat "([^ <@:[]+@[^] :<>\"\r\n]+)";;
 
 let get_email_addr addr =
   if addr <> "" then (
@@ -363,7 +356,8 @@ let _gmail_labels headers =
 
 let _messageid headers =
   let h = get_header_m headers "message-id" in
-  (get_messageid h)
+  let _ = get_messageid h in
+  sha h
 
 let messageid_unique headers =
   let h = get_header_m headers "message-id" in
@@ -380,7 +374,8 @@ let _inreplyto headers =
   String.concat "," (List.map (fun h -> 
     if Hashtbl.mem !messageid h = false then
       Hashtbl.add !inreplyto h 0;
-    get_messageid h
+    let _ = get_messageid h in
+    sha h
   ) l)
 
 let re_subject = Re_posix.compile_pat ~opts:[`ICase] "(re|fw|fwd): "
@@ -456,7 +451,7 @@ let rec walk outc email id part multipart =
       write (sprf "end rfc822: %d\n" id)
     ) else if attach then (
       let sha = Imap_crypto.get_hash ~hash:`Sha1 content in
-      write (sprf "attachment: %s %d %d\n" (get_attach sha) 
+      write (sprf "attachment: %s %d %d\n" sha 
         (String.length content) (len_compressed content))
     ) else (
       write (sprf "body: %d %d\n" (String.length content) (len_compressed content))
@@ -862,10 +857,10 @@ let fetch_unique_all oc start mailbox cnt f =
   )
 
 let fetch oc start mailbox cnt unique f =
-  if start >= cnt then
+  if !start >= cnt then
     return ()
   else (
-  write_fetch oc (`Start start) `Body >>= fun () ->
+  write_fetch oc (`Start !start) `Body >>= fun () ->
   let rec _read () =
     resp_read () >>= fun res ->
     if ok_ex res then (
@@ -877,6 +872,7 @@ let fetch oc start mailbox cnt unique f =
         let _ = get_messageid msgid in ()
       );
       f id mailbox msg >>= fun () ->
+      start := id;
       _read ()
     ) else  (
       _read ()
@@ -917,7 +913,11 @@ let start_tls ip port f =
   Printf.fprintf stderr "connecting tls\n%!";
   X509_lwt.authenticator `No_authentication_I'M_STUPID >>= fun authenticator ->
   let config = Tls.Config.(client ~authenticator ~ciphers:Ciphers.supported()) in
-  Tls_lwt.connect_ext config (ip,port) >>= fun (ic,oc) -> 
+  catch (fun () ->
+    Tls_lwt.connect_ext config (ip,port)
+  ) (fun ex -> 
+    Printf.fprintf stderr "starttls: connect %s\n%!" (Printexc.to_string ex); raise ex
+  ) >>= fun (ic,oc) ->
   catch (fun() ->
     Lwt_io.read_line ic >>= fun _ -> (* capabilities *)
     f ic oc
@@ -937,15 +937,18 @@ let maildir_fold dir f =
 let imap_fold host port _ssl nocompress resume unique download f =
   let open Socket_utils in
   let connected = ref false in
-  Printf.fprintf stderr "\027[0;34mPlease enter user name: \027[0m%!";
+  Printf.fprintf stderr "\027[0;34mPlease enter user name and type enter, for instance jon.dow@hotmail.com: \027[0m%!";
   Lwt_io.read_line Lwt_io.stdin >>= fun user ->
   let user = 
+  if host = ".outlook.com" then (
     try
       let subs = Re.exec (Re_posix.compile_pat "^[ ]*([^ @]+)(@.+)?$") user in
       Re.get subs 1
     with Not_found -> user 
+  ) else
+    user
   in
-  Printf.fprintf stderr "\027[0;34mPlease enter password(typed characters are not echoed back): \027[0m%!";
+  Printf.fprintf stderr "\027[0;34mPlease enter password enclosed in double quotes and type enter,\nfor instance \"Uhj!t$s\"(typed characters are not echoed back): \027[0m%!";
   echo_on false >>= fun () ->
   Lwt_io.read_line Lwt_io.stdin >>= fun pswd ->
   echo_on true >>= fun () ->
@@ -986,13 +989,14 @@ let imap_fold host port _ssl nocompress resume unique download f =
         resp_chan := Some ic;
         login user pswd nocompress ic oc >>= fun () ->
         begin
-        if mailboxes = [] then
+        if !mailboxes = [] then
           list resume oc
         else
-          return mailboxes
-        end >>= fun mailboxes ->
+          return !mailboxes
+        end >>= fun _mailboxes ->
+        mailboxes := _mailboxes;
         if unique && download && Hashtbl.length !messageid = 0 then (
-          let total = List.fold_left (fun acc (_,cnt,_) -> acc+cnt) 0 mailboxes in
+          let total = List.fold_left (fun acc (_,cnt,_) -> acc+cnt) 0 !mailboxes in
           messageid := Hashtbl.create total
         );
         Printf.fprintf stderr "--- started downloading ---\n%!";
@@ -1009,9 +1013,9 @@ let imap_fold host port _ssl nocompress resume unique download f =
             if (Re.execp re mailbox) && unique then
               fetch_unique_all oc start (Some mailbox) cnt f
             else
-              fetch oc !start (Some mailbox) cnt unique f
+              fetch oc start (Some mailbox) cnt unique f
           )
-        ) mailboxes >>= fun() ->
+        ) !mailboxes >>= fun() ->
         cancel_uncompr ();
         logout oc >>= fun () ->
         return ()
@@ -1019,19 +1023,25 @@ let imap_fold host port _ssl nocompress resume unique download f =
       return true
     ) 
     (fun ex -> 
+      let (sofar,total) = List.fold_left (fun (sofar,total) (start,cnt,_) -> 
+        (sofar + !start,total + cnt)) (0,0) !mailboxes in
+      let notdone = sofar < total && sofar > attempts in
+      let attempts = sofar in
       cancel_uncompr ();
-      if ex = LoginFailed then
-        raise ex
-      else if ex <> LoginFailed && !connected && attempts < 10 then (
-        Printf.fprintf stderr "retrying %d\n%!" attempts; 
+      match ex with
+      | Unix.Unix_error (e,f,a) when e = Unix.ENETDOWN ->
+        Lwt_unix.sleep 120. >>= fun () ->
         run ip port ssl mailboxes (attempts + 1) 
-      ) else 
-        return false
+      | ex when ex <> LoginFailed && !connected && notdone ->
+        Printf.fprintf stderr "retrying, downloaded so far %d of %d\n%!" sofar total; 
+        run ip port ssl mailboxes (attempts + 1) 
+      | _ -> raise ex
     )
   in
+  let mailboxes = ref [] in
   Lwt_list.exists_s (fun (ssl,ports) ->
     loop ports (fun ip port ->
-      run ip port ssl [] 1
+      run ip port ssl mailboxes 0
     )
   ) [_ssl,ports] >>= fun res ->
   if res = false then
