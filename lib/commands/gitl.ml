@@ -182,11 +182,11 @@ let cache_exists cache sha k =
       let (_,v) = MapStr.find k !gcache in
       Some v
     ) else (
-      Log_.log `Info1 (Printf.sprintf "cache doesn't exist %s\n" k);
+      Log_.log `Info2 (Printf.sprintf "cache doesn't exist %s\n" k);
       None
     )
   ) else (
-    Log_.log `Info1 (Printf.sprintf "cache doesn't exist %s\n" k);
+    Log_.log `Info2 (Printf.sprintf "cache doesn't exist %s\n" k);
     None
   )
 
@@ -585,7 +585,7 @@ struct
       write_ ?compress:t.compress ~file content
     ) (function |Unix.Unix_error (e,f,a) when e = Unix.ENOENT ->
       let dir = Filename.dirname file in
-      Lwt_unix.mkdir dir 0o751 >>= fun () ->
+      Lwt_unix.system("mkdir -p -m 751 " ^ dir) >>= fun _ ->
       write_ ?compress:t.compress ~file content
       | e -> raise e
     ) >>= fun () ->
@@ -757,7 +757,7 @@ let create ?compress ~repo () =
     let lock = Imap_lock.create pool_mutex acct_lock_pool in
     Imap_lock.with_lock lock root (fun () ->
       Head.create repo) >>= fun head ->
-    Log_.log `Info1 (Printf.sprintf "read head %s\n" (Sha.to_string head.sha));
+    Log_.log `Info2 (Printf.sprintf "read head %s\n" (Sha.to_string head.sha));
     if Sha.is_empty head.sha then (
       return {root;head;commit=Commit.empty;compress;cache=ref MapStr.empty}
     ) else (
@@ -929,7 +929,7 @@ let commit t ~author ~message =
   * with the latest commit, if different then load the latest commit, merge,
   * write new commit with update parent, update HEAD, unlock HEAD TBD
   *)
-  Log_.log `Info1 "### Committing\n";
+  Log_.log `Info2 "### Committing\n";
   if author = "" || message = "" then
     raise (InvalidArgument "commit, author or message empty");
   let obj = Object.create ?compress:t.compress t.root in
@@ -956,10 +956,10 @@ let commit t ~author ~message =
     {parent=t.head.sha;commit=commit_sha;author;message;postfix="";date;utc="+0000"} >>= fun () ->
   (* should be safe to delete the previous cache, if single client, multiple
    * clients TBD *)
-  Log_.log `Info1 (Printf.sprintf "deleting from global cache %s\n" (Sha.to_string t.commit.tree));
+  Log_.log `Info2 (Printf.sprintf "deleting from global cache %s\n" (Sha.to_string t.commit.tree));
   let gcache = MapStr.find (Sha.to_string t.commit.tree) !global_cache in
   global_cache := MapStr.remove (Sha.to_string t.commit.tree) !global_cache;
-  Log_.log `Info1 (Printf.sprintf "adding to global cache for %s\n" (Sha.to_string root_sha));
+  Log_.log `Info2 (Printf.sprintf "adding to global cache for %s\n" (Sha.to_string root_sha));
   global_cache := MapStr.add (Sha.to_string root_sha) gcache !global_cache;
   return {t with head;commit}
 
