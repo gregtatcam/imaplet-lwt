@@ -1,19 +1,21 @@
 open Lwt
+open Sexplib.Std
 
 exception MultipartNoBoundary
 
 type ctype = 
-  [`Audio|`Video|`Image|`Application|`Text|`Multipart|`Message|`Other of string] 
+  [`Audio|`Video|`Image|`Application|`Text|`Multipart|`Message|`Other of string]
+  with sexp
 type stype = 
-  [`Plain|`Rfc822|`Digest|`Alternative|`Parallel|`Mixed|`Other of string]
-type entity = {offset:int; size:int}
-type boundary = {bopen:string;bclose:string}
+  [`Plain|`Rfc822|`Digest|`Alternative|`Parallel|`Mixed|`Other of string] with sexp
+type entity = {offset:int; size:int} with sexp
+type boundary = {bopen:string;bclose:string} with sexp
 type lightheaders = {position:entity;content_type:ctype; content_subtype:stype; 
-  boundary:boundary option;}
+  boundary:boundary option;} with sexp
 type content = {position:entity;content:
   [`Data|`Message of lightmail |`Multipart of lightmail list]}
-and lightmail = {position:entity;headers:lightheaders; content: content}
-type lightmessage = {position:entity;postmark:entity;email:lightmail}
+and lightmail = {position:entity;headers:lightheaders; content: content} with sexp
+type lightmessage = {position:entity;postmark:entity;email:lightmail} with sexp
 
 module MemReader :
 sig
@@ -70,6 +72,9 @@ end
 let get_size reader position =
   (MemReader.position reader) - position
 
+let mk_position reader offset =
+  {offset;size = get_size reader offset}
+
 let adjust_for_boundary reader line_size =
   let current = MemReader.position reader in
   MemReader.last_crlf_size reader >>= fun crlf1 ->
@@ -121,25 +126,24 @@ struct
   type t = lightheaders
   let re_content = Re_posix.compile_pat ~opts:[`ICase]
     "^content-type: ([^/ ]+)/([^; ]+)(.*)$"
-  let get_type t = match t with
+  let get_type t = match (String.lowercase t) with
     | "audio"->`Audio|"video"->`Video|"image"->`Image|"application"->`Application
     | "text"->`Text|"multipart"->`Multipart|"message"->`Message|t -> `Other t
-  let get_subtype s = match s with
+  let get_subtype s = match (String.lowercase s) with
     |"plain"->`Plain|"rfc822"->`Rfc822|"digest"->`Digest|"alternative"->`Alternative
     |"parallel"->`Parallel|"mixed"->`Mixed|s->`Other s
   let parse ?(content_type=`Text) ?(content_subtype=`Plain) reader =
+    let offset = MemReader.position reader in
     let rec read found_content_type boundary_required (header:lightheaders) = 
       MemReader.read_line_opt reader >>= function
       | None -> 
-        return (`Eof,{header with position=
-          {header.position with size = get_size reader header.position.offset}})
+        return (`Eof,{header with position=mk_position reader offset})
       | Some line -> 
-        if line = "" then (
+        if line = "" then ( (* done parsing, next is body part *)
           if boundary_required && header.boundary = None then
             raise MultipartNoBoundary
           else
-            return (`Ok, {header with position=
-              {header.position with size = get_size reader header.position.offset}})
+            return (`Ok, {header with position=mk_position reader offset})
         ) else if found_content_type && boundary_required && header.boundary = None then (
           read found_content_type boundary_required 
             {header with boundary = Boundary.parse line}
@@ -155,7 +159,7 @@ struct
                 None
             in
             read true (content_type = `Multipart) 
-              {header with content_type;content_subtype;boundary}
+              {header with content_type;content_subtype;boundary;}
           )(function Not_found -> read found_content_type boundary_required header
             | ex -> raise ex)
         ) else
@@ -167,8 +171,9 @@ struct
       else
         content_type,content_subtype
     in
-    let position = {offset = MemReader.position reader; size = 0} in
-    let header = {content_type;content_subtype;boundary=None;position} in
+    let position = {offset; size = 0} in
+    let header =
+      {content_type;content_subtype;boundary=None;position;} in
     read false false header
 end
 
@@ -181,14 +186,21 @@ end =
 struct
   type t = content
   let parse ?(content_type=`Text) ?(content_subtype=`Plain) ?boundary reader =
-    let position = {offset=MemReader.position reader;size=0} in
-    let mk_content ?(adj=0) content =
-      {position={position with size = (get_size reader position.offset)-adj};content} in
+    let offset = MemReader.position reader in
+    let mk_content ?adj reader res content =
+      begin
+      match adj with
+      | None -> return 0
+      | Some line ->
+        adjust_for_boundary reader (String.length line)
+      end >>= fun adj ->
+      return (res,{position=mk_position reader (offset-adj);content})
+    in
     if content_type = `Multipart then (
       let rec read contents =
         MemReader.read_line_opt reader >>= function
         | None ->
-          return (`Eof,mk_content (`Multipart (List.rev contents)))
+          mk_content reader `Eof (`Multipart (List.rev contents))
         | Some line -> 
           if Boundary.is_open boundary line then (
             let rec consume_multipart contents =
@@ -201,11 +213,11 @@ struct
                 match email.content.content with
                 | `Multipart _ -> read contents
                 | _ ->
-                  return (res,mk_content (`Multipart (List.rev contents)))
+                  mk_content reader res (`Multipart (List.rev contents))
             in
             consume_multipart contents
           ) else if Boundary.is_close boundary line then (
-            return (`OkMultipart, mk_content (`Multipart (List.rev contents)))
+            mk_content reader `OkMultipart (`Multipart (List.rev contents))
           ) else
             read contents
       in
@@ -213,11 +225,11 @@ struct
     ) else if content_type = `Message then (
       Email.parse ~content_type ~content_subtype ?boundary 
         reader >>= fun (res,email) ->
-      return (res, mk_content (`Message email))
+      mk_content reader res (`Message email)
     ) else (
       let rec read () =
         MemReader.read_line_opt reader >>= function
-        | None -> return (`Eof, mk_content `Data)
+        | None -> mk_content reader `Eof `Data
         | Some line ->
           match boundary with
           | None -> read ()
@@ -229,11 +241,9 @@ struct
              * boundary
              *)
             if Boundary.is_open boundary line then (
-              adjust_for_boundary reader (String.length line) >>= fun adj ->
-              return (`Ok, mk_content ~adj `Data)
+              mk_content ~adj:line reader `Ok `Data
             ) else if Boundary.is_close boundary line then (
-              adjust_for_boundary reader (String.length line) >>= fun adj ->
-              return (`OkMultipart, mk_content ~adj `Data)
+              mk_content ~adj:line reader `OkMultipart `Data
             ) else
               read ()
       in
@@ -250,17 +260,16 @@ end =
 struct
   type t = lightmail
   let parse ?(content_type=`Text) ?(content_subtype=`Plain) ?boundary reader =
-    let position = {offset = MemReader.position reader; size = 0} in
+    let offset = MemReader.position reader in
     Headers.parse ~content_type ~content_subtype reader >>= fun (_,headers) ->
     let boundary =
       match headers.boundary with
       | None -> boundary
       | Some boundary -> Some boundary
     in
-    Content.parse ~content_type ~content_subtype ?boundary 
-      reader >>= fun (res,content) ->
-    let position = {position with size = get_size reader position.offset} in
-    return (res,{position;headers;content})
+    Content.parse ~content_type:headers.content_type
+      ~content_subtype:headers.content_subtype ?boundary reader >>= fun (res,content) ->
+    return (res,{position=mk_position reader offset;headers;content})
 end
 
 module Postmark :
