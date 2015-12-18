@@ -110,6 +110,7 @@ Library commands
                     Lazy_maildir_message,
                     Lazy_message,
                     Lex,
+                    Lightparsemail,
                     Log_,
                     Mailbox_storage,
                     Maildir_storage,
@@ -142,6 +143,7 @@ Library commands
                     mstruct,
                     irmin.unix,
                     nocrypto,
+                    zip,
                     imaplet.parsemail
 
 Executable parse_restore
