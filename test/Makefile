@@ -28,5 +28,11 @@ email_stats: email_stats.ml
 filter_message: filter_message.ml
 	ocamlfind ocamlopt -thread -o filter_message -linkpkg -package imaplet,imaplet.commands,imaplet.parsemail,lwt,lwt.syntax,lwt.unix,re,re.posix filter_message.ml
 
+unique_message: unique_message.ml
+	ocamlfind ocamlopt -thread -o unique_message -linkpkg -package imaplet,imaplet.commands,imaplet.parsemail,lwt,lwt.syntax,lwt.unix,re,re.posix unique_message.ml
+
 test_stats: test_stats.ml
 	ocamlfind ocamlopt -linkall -thread -o test_stats -linkpkg -package imaplet,imaplet.commands,imaplet.parsemail,lwt,lwt.syntax,lwt.unix,re,re.posix test_stats.ml
+
+test_lightparse: test_lightparse.ml
+	ocamlfind ocamlopt -linkall -thread -o test_lightparse -linkpkg -package imaplet,imaplet.parsemail,imaplet.commands,lwt,lwt.syntax,lwt.unix,re,re.posix,sexplib.syntax test_lightparse.ml

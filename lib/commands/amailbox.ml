@@ -313,6 +313,8 @@ let find_fl flags fl =
   Utils.list_find flags (fun f -> f = fl)
 
 let append_message mailboxt mailbox message size flags date =
+  (*Lightparsemail.Message.parse message >>= fun light ->
+  let sexp = Lightparsemail.sexp_of_lightmessage light in*)
   factory mailboxt mailbox >>= fun (module Mailbox) ->
   let flags = 
   match flags with
@@ -369,9 +371,11 @@ let append mailboxt mailbox reader writer push_append_strm compression flags dat
   | `Folder -> return `NotSelectable
   | `Mailbox -> 
   get_message_from_client reader writer compression literal >>= fun (message,size) ->
-  (*push_append_strm (Some (mailboxt,mailbox,message,size,flags,date));*)
-  append_message mailboxt mailbox message size flags date >>
-  return `Ok
+  match push_append_strm with
+  | Some push_append_strm -> 
+    push_append_strm (Some (mailboxt,mailbox,message,size,flags,date));
+    return `Ok
+  | None -> append_message mailboxt mailbox message size flags date >> return `Ok
 
 (* close selected mailbox *)
 let close mailboxt =

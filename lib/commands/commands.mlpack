@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: 5b4e28cb6c2bb130f7aaea14203add9b)
+# DO NOT EDIT (digest: 7e12147008b763c9191a33530ed460a0)
 Account
 Amailbox
 Configuration
@@ -23,6 +23,7 @@ Interpreter
 Lazy_maildir_message
 Lazy_message
 Lex
+Lightparsemail
 Log_
 Mailbox_storage
 Maildir_storage

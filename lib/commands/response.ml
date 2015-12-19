@@ -102,7 +102,7 @@ let get_pr str =
 let write_compressed_block w strm buff_in offset_in len_in buff_out len_out =
   let (fi,used_in,used_out) = Zlib.deflate strm buff_in offset_in len_in
       buff_out 0 len_out Zlib.Z_SYNC_FLUSH in
-  Log_.log `Info1 (Printf.sprintf " -- writing compressed data %b %d %d %d %d\n" 
+  Log_.log `Info2 (Printf.sprintf " -- writing compressed data %b %d %d %d %d\n" 
       fi used_in used_out offset_in len_in);
   Lwt_io.write w (String.sub buff_out 0 used_out) >>
   Lwt_io.flush w >>
@@ -110,8 +110,8 @@ let write_compressed_block w strm buff_in offset_in len_in buff_out len_out =
 
 let write_compressed w strm resp =
   let len_resp = String.length resp in
-    Log_.log `Info1 (Printf.sprintf "--> writing compressed data:start %d\n" len_resp); 
-  Log_.log `Info1 (Printf.sprintf "--> un-compressed data:start %s$$$$\n%!" (get_pr resp));
+    Log_.log `Info2 (Printf.sprintf "--> writing compressed data:start %d\n" len_resp); 
+  Log_.log `Info2 (Printf.sprintf "--> un-compressed data:start %s$$$$\n%!" (get_pr resp));
   let buffout = String.create buff_size in
   let rec _compress offset len =
     write_compressed_block w strm resp offset len
@@ -119,7 +119,7 @@ let write_compressed w strm resp =
     let offset = offset + used_in in
     let len = len - used_in in
     if len = 0 then (
-      Log_.log `Info1 (Printf.sprintf "<-- compression complete %d %d\n" offset len); 
+      Log_.log `Info2 (Printf.sprintf "<-- compression complete %d %d\n" offset len); 
       return ()
     ) else
       _compress offset len

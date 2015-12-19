@@ -146,8 +146,10 @@ let create config =
   validate_config config >>= function
   | `Ok ->
     begin
+    (*
     let (strm,push_append_strm) = Lwt_stream.create () in
-    async (fun () -> Amailbox.async_append strm);
+    async (fun () -> Amailbox.async_append strm);*)
+    let push_append_strm = None in
     async (fun () -> Imap_cmd.maintenance config);
     init_all config >>= fun (cert,sock,unix_sock) ->
     let rec connect f msgt sock cert =

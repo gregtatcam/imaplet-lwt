@@ -32,5 +32,5 @@ type context = {
   user_logout: Lwt_mutex.t;
   compression: (Imaplet_types.compressionAlgrthm * Zlib.stream * unit Lwt.t *
     Lwt_io.input_channel) option ref;
-  push_append_strm: (Amailbox.append_strm_type option -> unit)
+  push_append_strm: (Amailbox.append_strm_type option -> unit) option
 }

@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: 5dd8ab3f4bdca7ef2684d11c1d7210c1)
+# DO NOT EDIT (digest: a77fead19cfc224bbe64b6b26e49db9c)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -73,6 +73,7 @@ true: annot, bin_annot
 "lib/commands/lazy_maildir_message.cmx": for-pack(Commands)
 "lib/commands/lazy_message.cmx": for-pack(Commands)
 "lib/commands/lex.cmx": for-pack(Commands)
+"lib/commands/lightparsemail.cmx": for-pack(Commands)
 "lib/commands/log_.cmx": for-pack(Commands)
 "lib/commands/mailbox_storage.cmx": for-pack(Commands)
 "lib/commands/maildir_storage.cmx": for-pack(Commands)
@@ -108,6 +109,7 @@ true: annot, bin_annot
 <lib/commands/*.ml{,i,y}>: pkg_str
 <lib/commands/*.ml{,i,y}>: pkg_threads
 <lib/commands/*.ml{,i,y}>: pkg_tls.lwt
+<lib/commands/*.ml{,i,y}>: pkg_zip
 <lib/commands/*.ml{,i,y}>: use_parsemail
 # Library imaplet
 "lib/imaplet.cmxs": use_imaplet
@@ -130,6 +132,7 @@ true: annot, bin_annot
 <lib/*.ml{,i,y}>: pkg_str
 <lib/*.ml{,i,y}>: pkg_threads
 <lib/*.ml{,i,y}>: pkg_tls.lwt
+<lib/*.ml{,i,y}>: pkg_zip
 <lib/*.ml{,i,y}>: use_commands
 <lib/*.ml{,i,y}>: use_parsemail
 # Executable parse_restore
@@ -151,6 +154,7 @@ true: annot, bin_annot
 "test/parse_restore.native": pkg_str
 "test/parse_restore.native": pkg_threads
 "test/parse_restore.native": pkg_tls.lwt
+"test/parse_restore.native": pkg_zip
 "test/parse_restore.native": use_commands
 "test/parse_restore.native": use_imaplet
 "test/parse_restore.native": use_parsemail
@@ -173,6 +177,7 @@ true: annot, bin_annot
 "test/dedup.native": pkg_str
 "test/dedup.native": pkg_threads
 "test/dedup.native": pkg_tls.lwt
+"test/dedup.native": pkg_zip
 "test/dedup.native": use_commands
 "test/dedup.native": use_imaplet
 "test/dedup.native": use_parsemail
@@ -195,6 +200,7 @@ true: annot, bin_annot
 "servers/imaplet_configure.native": pkg_str
 "servers/imaplet_configure.native": pkg_threads
 "servers/imaplet_configure.native": pkg_tls.lwt
+"servers/imaplet_configure.native": pkg_zip
 "servers/imaplet_configure.native": use_commands
 "servers/imaplet_configure.native": use_imaplet
 "servers/imaplet_configure.native": use_parsemail
@@ -217,6 +223,7 @@ true: annot, bin_annot
 "servers/imaplet_server.native": pkg_str
 "servers/imaplet_server.native": pkg_threads
 "servers/imaplet_server.native": pkg_tls.lwt
+"servers/imaplet_server.native": pkg_zip
 "servers/imaplet_server.native": use_commands
 "servers/imaplet_server.native": use_imaplet
 "servers/imaplet_server.native": use_parsemail
@@ -239,6 +246,7 @@ true: annot, bin_annot
 "servers/imaplet_create_account.native": pkg_str
 "servers/imaplet_create_account.native": pkg_threads
 "servers/imaplet_create_account.native": pkg_tls.lwt
+"servers/imaplet_create_account.native": pkg_zip
 "servers/imaplet_create_account.native": use_commands
 "servers/imaplet_create_account.native": use_imaplet
 "servers/imaplet_create_account.native": use_parsemail
@@ -261,6 +269,7 @@ true: annot, bin_annot
 "deploy/imaplet_deploy.native": pkg_str
 "deploy/imaplet_deploy.native": pkg_threads
 "deploy/imaplet_deploy.native": pkg_tls.lwt
+"deploy/imaplet_deploy.native": pkg_zip
 "deploy/imaplet_deploy.native": use_commands
 "deploy/imaplet_deploy.native": use_imaplet
 "deploy/imaplet_deploy.native": use_parsemail
@@ -282,6 +291,7 @@ true: annot, bin_annot
 <deploy/*.ml{,i,y}>: pkg_str
 <deploy/*.ml{,i,y}>: pkg_threads
 <deploy/*.ml{,i,y}>: pkg_tls.lwt
+<deploy/*.ml{,i,y}>: pkg_zip
 <deploy/*.ml{,i,y}>: use_commands
 <deploy/*.ml{,i,y}>: use_imaplet
 <deploy/*.ml{,i,y}>: use_parsemail
@@ -304,6 +314,7 @@ true: annot, bin_annot
 "servers/imaplet_lmtp.native": pkg_str
 "servers/imaplet_lmtp.native": pkg_threads
 "servers/imaplet_lmtp.native": pkg_tls.lwt
+"servers/imaplet_lmtp.native": pkg_zip
 "servers/imaplet_lmtp.native": use_commands
 "servers/imaplet_lmtp.native": use_imaplet
 "servers/imaplet_lmtp.native": use_parsemail
@@ -326,6 +337,7 @@ true: annot, bin_annot
 "servers/smtplet.native": pkg_str
 "servers/smtplet.native": pkg_threads
 "servers/smtplet.native": pkg_tls.lwt
+"servers/smtplet.native": pkg_zip
 "servers/smtplet.native": use_commands
 "servers/smtplet.native": use_imaplet
 "servers/smtplet.native": use_parsemail
@@ -349,6 +361,7 @@ true: annot, bin_annot
 "servers/imaplet_irmin_read.native": pkg_str
 "servers/imaplet_irmin_read.native": pkg_threads
 "servers/imaplet_irmin_read.native": pkg_tls.lwt
+"servers/imaplet_irmin_read.native": pkg_zip
 "servers/imaplet_irmin_read.native": use_commands
 "servers/imaplet_irmin_read.native": use_parsemail
 # Executable imaplet_irmin_build
@@ -370,6 +383,7 @@ true: annot, bin_annot
 "servers/imaplet_irmin_build.native": pkg_str
 "servers/imaplet_irmin_build.native": pkg_threads
 "servers/imaplet_irmin_build.native": pkg_tls.lwt
+"servers/imaplet_irmin_build.native": pkg_zip
 "servers/imaplet_irmin_build.native": use_commands
 "servers/imaplet_irmin_build.native": use_parsemail
 # Executable imaplet_maildir_index
@@ -434,6 +448,7 @@ true: annot, bin_annot
 "utils/imaplet_init_maildir.native": pkg_str
 "utils/imaplet_init_maildir.native": pkg_threads
 "utils/imaplet_init_maildir.native": pkg_tls.lwt
+"utils/imaplet_init_maildir.native": pkg_zip
 "utils/imaplet_init_maildir.native": use_commands
 "utils/imaplet_init_maildir.native": use_imaplet
 "utils/imaplet_init_maildir.native": use_parsemail
@@ -456,6 +471,7 @@ true: annot, bin_annot
 "utils/get_messages.native": pkg_str
 "utils/get_messages.native": pkg_threads
 "utils/get_messages.native": pkg_tls.lwt
+"utils/get_messages.native": pkg_zip
 "utils/get_messages.native": use_commands
 "utils/get_messages.native": use_imaplet
 "utils/get_messages.native": use_parsemail
@@ -469,7 +485,6 @@ true: annot, bin_annot
 "utils/client.native": pkg_threads
 "utils/client.native": pkg_tls.lwt
 "utils/client.native": pkg_zip
-<utils/*.ml{,i,y}>: pkg_zip
 # Executable smtp_client
 "utils/smtp_client.native": pkg_cstruct.unix
 "utils/smtp_client.native": pkg_dns
@@ -489,6 +504,7 @@ true: annot, bin_annot
 "utils/smtp_client.native": pkg_str
 "utils/smtp_client.native": pkg_threads
 "utils/smtp_client.native": pkg_tls.lwt
+"utils/smtp_client.native": pkg_zip
 "utils/smtp_client.native": use_commands
 "utils/smtp_client.native": use_imaplet
 "utils/smtp_client.native": use_parsemail
@@ -512,6 +528,7 @@ true: annot, bin_annot
 "test/test_gitl.native": pkg_threads
 "test/test_gitl.native": pkg_tls.lwt
 "test/test_gitl.native": pkg_unix
+"test/test_gitl.native": pkg_zip
 "test/test_gitl.native": use_commands
 "test/test_gitl.native": use_imaplet
 "test/test_gitl.native": use_parsemail
@@ -535,6 +552,7 @@ true: annot, bin_annot
 "test/maildir_read.native": pkg_threads
 "test/maildir_read.native": pkg_tls.lwt
 "test/maildir_read.native": pkg_unix
+"test/maildir_read.native": pkg_zip
 "test/maildir_read.native": use_commands
 "test/maildir_read.native": use_imaplet
 "test/maildir_read.native": use_parsemail
@@ -558,6 +576,7 @@ true: annot, bin_annot
 "test/irvsfsio.native": pkg_threads
 "test/irvsfsio.native": pkg_tls.lwt
 "test/irvsfsio.native": pkg_unix
+"test/irvsfsio.native": pkg_zip
 "test/irvsfsio.native": use_commands
 "test/irvsfsio.native": use_imaplet
 "test/irvsfsio.native": use_parsemail
@@ -587,6 +606,7 @@ true: annot, bin_annot
 "test/email_server.native": pkg_threads
 "test/email_server.native": pkg_tls.lwt
 "test/email_server.native": pkg_unix
+"test/email_server.native": pkg_zip
 "test/email_server.native": use_commands
 "test/email_server.native": use_imaplet
 "test/email_server.native": use_parsemail
@@ -610,6 +630,7 @@ true: annot, bin_annot
 "test/email_stats.native": pkg_threads
 "test/email_stats.native": pkg_tls.lwt
 "test/email_stats.native": pkg_unix
+"test/email_stats.native": pkg_zip
 "test/email_stats.native": use_commands
 "test/email_stats.native": use_imaplet
 "test/email_stats.native": use_parsemail
@@ -632,6 +653,7 @@ true: annot, bin_annot
 <test/*.ml{,i,y}>: pkg_threads
 <test/*.ml{,i,y}>: pkg_tls.lwt
 <test/*.ml{,i,y}>: pkg_unix
+<test/*.ml{,i,y}>: pkg_zip
 <test/*.ml{,i,y}>: use_commands
 <test/*.ml{,i,y}>: use_imaplet
 <test/*.ml{,i,y}>: use_parsemail
@@ -654,6 +676,7 @@ true: annot, bin_annot
 "utils/stun.native": pkg_str
 "utils/stun.native": pkg_threads
 "utils/stun.native": pkg_tls.lwt
+"utils/stun.native": pkg_zip
 "utils/stun.native": use_commands
 "utils/stun.native": use_imaplet
 "utils/stun.native": use_parsemail
@@ -675,6 +698,7 @@ true: annot, bin_annot
 <utils/*.ml{,i,y}>: pkg_str
 <utils/*.ml{,i,y}>: pkg_threads
 <utils/*.ml{,i,y}>: pkg_tls.lwt
+<utils/*.ml{,i,y}>: pkg_zip
 <utils/*.ml{,i,y}>: use_commands
 <utils/*.ml{,i,y}>: use_imaplet
 <utils/*.ml{,i,y}>: use_parsemail
