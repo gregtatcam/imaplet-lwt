@@ -252,13 +252,10 @@ let commands f =
     | _ -> ()
 
 let mailboxes = ref (Hashtbl.create 0)
-let subject = ref (Hashtbl.create 0)
 let messageid = ref (Hashtbl.create 0)
-let inreplyto = ref (Hashtbl.create 0)
 
 let init_hashtbl_all size =
   mailboxes := Hashtbl.create size;
-  subject := Hashtbl.create size;
   messageid := Hashtbl.create size
 
 let sha key =
@@ -280,14 +277,19 @@ let get_unique key tbl =
 let get_addr key = sha key
 
 let get_mailbox key =
-  let key = Re.replace_string (Re_posix.compile_pat "^\"|\"$") ~by:"" key in
+  let key = Re.replace_string (Re_posix.compile_pat "^\"|\"$") ~by:"" (String.lowercase key) in
   get_unique key mailboxes 
 
-let get_subject key =
-  get_unique key subject
-
 let get_messageid key =
-  get_unique key messageid
+  if key = "" then
+    key
+  else if Hashtbl.mem !messageid key then
+    Hashtbl.find !messageid key 
+  else (
+    let hash = sha key in
+    Hashtbl.add !messageid key hash;
+    hash
+  )
 
 let headers_to_map headers =
   List.fold_left (fun tbl (n,v) ->
@@ -343,10 +345,10 @@ let _gmail_labels headers =
         let m = Re.split (Re_posix.compile_pat "/") h in
         if List.length m > 1 then (
           String.concat "/" (List.map (fun m ->
-            get_mailbox (String.lowercase m)
+            get_mailbox m
           ) m)
         ) else (
-          get_mailbox (String.lowercase h)
+          get_mailbox h
         )
       ) else
         get_mailbox h
@@ -356,43 +358,30 @@ let _gmail_labels headers =
 
 let _messageid headers =
   let h = get_header_m headers "message-id" in
-  let _ = get_messageid h in
-  sha h
+  get_messageid h
 
 let messageid_unique headers =
   let h = get_header_m headers "message-id" in
-  let inmsgid = Hashtbl.mem !messageid h in
-  let inreply = Hashtbl.mem !inreplyto h in
-  let res = (h = "" || inmsgid = false || inreply = true) in
-  if inreply then
-    Hashtbl.remove !inreplyto h;
-  res
+  h = "" || Hashtbl.mem !messageid h = false
 
 let _inreplyto headers =
   let h = get_header_m headers "in-reply-to" in
   let l = Re.split (Re_posix.compile_pat "[ \n\r]+") h in
   String.concat "," (List.map (fun h -> 
-    if Hashtbl.mem !messageid h = false then
-      Hashtbl.add !inreplyto h 0;
-    let _ = get_messageid h in
-    sha h
+    if Hashtbl.mem !messageid h then
+      Hashtbl.find !messageid h
+    else
+      sha h
   ) l)
 
-let re_subject = Re_posix.compile_pat ~opts:[`ICase] "(re|fw|fwd): "
+let re_subject = Re_posix.compile_pat ~opts:[`ICase] "(re|fw|fwd): (.*)$"
 let _subject headers =
   let h = get_header_m headers "subject" in
-  let l = Re.split re_subject h in
-  let len = List.length l in
-  if len = 0 then
-    ""
-  else (
-  let s = List.nth l (len - 1) in
-  let s = get_subject s in
-  if len > 1 then
-    "re/fw: " ^ s
-  else
-    s
-  )
+  try
+    let subs = Re.exec re_subject h in
+    let subject = sha (Re.get subs 2) in
+    "re/fw: " ^ subject
+  with Not_found -> sha h
 
 let get_hdr_attrs headers =
   List.fold_left (fun (attach,rfc822,content_type) (n,v) ->
@@ -450,8 +439,7 @@ let rec walk outc email id part multipart =
       walk outc email (id+1) 0 multipart >>= fun () ->
       write (sprf "end rfc822: %d\n" id)
     ) else if attach then (
-      let sha = Imap_crypto.get_hash ~hash:`Sha1 content in
-      write (sprf "attachment: %s %d %d\n" sha 
+      write (sprf "attachment: %s %d %d\n" (sha content) 
         (String.length content) (len_compressed content))
     ) else (
       write (sprf "body: %d %d\n" (String.length content) (len_compressed content))
@@ -1059,7 +1047,7 @@ let mbox_fold file f =
 let labels_from_mailbox mailbox =
   if Re.execp (Re_posix.compile_pat "[[]Gmail[]]") mailbox = false then (
     let l = Re.split (Re_posix.compile_pat "/") mailbox in
-    String.concat "," (List.map get_mailbox l)
+    String.concat "/" (List.map get_mailbox l)
   ) else 
     get_mailbox mailbox
 
@@ -1125,7 +1113,7 @@ let () =
             begin
             match mailbox with
             | Some mailbox -> write (sprf "mailbox: %s\n" (labels_from_mailbox mailbox))
-            | None -> write (sprf "labels: %s\n" (_gmail_labels headers_m))
+            | None -> write (sprf "mailbox: %s\n" (_gmail_labels headers_m))
             end >>= fun () ->
             write (sprf "messageid: %s\n" (_messageid headers_m)) >>= fun () ->
             write (sprf "inreplyto: %s\n" (_inreplyto headers_m)) >>= fun () ->
