@@ -8,7 +8,7 @@ type ctype =
   with sexp
 type stype = 
   [`Plain|`Rfc822|`Digest|`Alternative|`Parallel|`Mixed|`Other of string] with sexp
-type entity = {offset:int; size:int} with sexp
+type entity = {message:string;offset:int; size:int} with sexp
 type boundary = {bopen:string;bclose:string} with sexp
 type lightheaders = {position:entity;content_type:ctype; content_subtype:stype; 
   boundary:boundary option;} with sexp
@@ -28,15 +28,16 @@ sig
   val read_line_opt : t -> string option Lwt.t
   val read_char : t -> char Lwt.t
   val last_crlf_size : t -> int Lwt.t
+  val message : t -> string
 end =
 struct
-  type t = {ic:Lwt_io.input_channel;length:int}
+  type t = {message:string;ic:Lwt_io.input_channel;length:int}
   let of_string str =
     let bytes = Lwt_bytes.of_string str in
     let ic = Lwt_io.of_bytes ~mode:Lwt_io.Input bytes in
     Lwt_io.length ic >>= fun length ->
     let length = Int64.to_int length in
-    return {ic;length}
+    return {message=str;ic;length}
   let length t = t.length
   let position t =
     t.length + (Int64.to_int (Lwt_io.position t.ic))
@@ -67,13 +68,15 @@ struct
       | _ -> size (cnt - 1)
     in
     rewind false false 1
+  let message t = t.message
 end
 
 let get_size reader position =
   (MemReader.position reader) - position
 
-let mk_position reader offset =
-  {offset;size = get_size reader offset}
+let mk_position ?(adj=0) reader offset =
+  let size = (get_size reader offset) - adj in
+  {message=MemReader.message reader;offset;size}
 
 let adjust_for_boundary reader line_size =
   let current = MemReader.position reader in
@@ -121,6 +124,7 @@ sig
   type t = lightheaders
   val parse : ?content_type:ctype -> ?content_subtype:stype -> MemReader.t -> 
     ([`Ok|`Eof] * t) Lwt.t
+  val to_string : t -> string
 end =
 struct
   type t = lightheaders
@@ -142,8 +146,13 @@ struct
         if line = "" then ( (* done parsing, next is body part *)
           if boundary_required && header.boundary = None then
             raise MultipartNoBoundary
-          else
-            return (`Ok, {header with position=mk_position reader offset})
+          else (
+            (* crlf following the headers is not part of the headers and not
+             * part of the body either *)
+            MemReader.last_crlf_size reader >>= fun adj ->
+            let position = mk_position ~adj reader offset in
+            return (`Ok, {header with position})
+          )
         ) else if found_content_type && boundary_required && header.boundary = None then (
           read found_content_type boundary_required 
             {header with boundary = Boundary.parse line}
@@ -171,10 +180,12 @@ struct
       else
         content_type,content_subtype
     in
-    let position = {offset; size = 0} in
+    let position = {message=MemReader.message reader;offset; size = 0} in
     let header =
       {content_type;content_subtype;boundary=None;position;} in
     read false false header
+  let to_string (t:lightheaders) =
+    String.sub t.position.message t.position.offset t.position.size
 end
 
 module rec Content:
@@ -182,6 +193,7 @@ sig
   type t = content
   val parse : ?content_type:ctype -> ?content_subtype:stype ->
     ?boundary:boundary -> MemReader.t -> ([`Ok|`Eof|`OkMultipart] * t) Lwt.t
+  val to_string: t -> string
 end =
 struct
   type t = content
@@ -194,7 +206,7 @@ struct
       | Some line ->
         adjust_for_boundary reader (String.length line)
       end >>= fun adj ->
-      return (res,{position=mk_position reader (offset-adj);content})
+      return (res,{position=mk_position ~adj reader offset;content})
     in
     if content_type = `Multipart then (
       let rec read contents =
@@ -203,6 +215,12 @@ struct
           mk_content reader `Eof (`Multipart (List.rev contents))
         | Some line -> 
           if Boundary.is_open boundary line then (
+            (* consume all parts consisting of header (optional) and content the
+             * boundary token delimets the part, the close boundary completes
+             * multipart parsing; content in the multipart is reponsible for
+             * consuming it's delimeter (end), exception is the last part which
+             * is also multipart
+             *)
             let rec consume_multipart contents =
               Email.parse ~content_type ~content_subtype ?boundary 
                 reader >>= fun (res,email) ->
@@ -210,6 +228,10 @@ struct
               match res with
               | `Ok -> consume_multipart contents
               | _ ->
+                (* if the last part is a multipart itself then it doesn't
+                 * consume the close boundary or more parts, continue parsing
+                 * until all parts and close boundary are consumed
+                 *)
                 match email.content.content with
                 | `Multipart _ -> read contents
                 | _ ->
@@ -249,6 +271,8 @@ struct
       in
       read ()
     )
+  let to_string (t:content) =
+    String.sub t.position.message t.position.offset t.position.size
 end
 and 
 Email:
@@ -256,6 +280,8 @@ sig
   type t = lightmail
   val parse : ?content_type:ctype -> ?content_subtype:stype ->
     ?boundary:boundary -> MemReader.t -> ([`Ok|`Eof|`OkMultipart] * t) Lwt.t
+  val to_string : t -> string
+  val content : t -> content
 end =
 struct
   type t = lightmail
@@ -269,13 +295,24 @@ struct
     in
     Content.parse ~content_type:headers.content_type
       ~content_subtype:headers.content_subtype ?boundary reader >>= fun (res,content) ->
-    return (res,{position=mk_position reader offset;headers;content})
+    (* can't calc the size based on the current reader's position since it includes
+     * the boundary, use returned content's position instead, which doesn't
+     * include the boundary
+     *)
+  let size = (content.position.offset + content.position.size) - offset in
+  let position = {message = MemReader.message reader; offset; size} in
+    return (res,{position;headers;content})
+  let to_string (t:lightmail) =
+    String.sub t.position.message t.position.offset t.position.size
+  let content (t:lightmail) =
+    t.content
 end
 
 module Postmark :
 sig
   type t = entity
   val parse : MemReader.t -> t Lwt.t
+  val to_string : t -> string
 end = struct
   type t = entity
   let re_postmark = Re_posix.compile_pat ~opts:[`ICase] 
@@ -283,12 +320,15 @@ end = struct
     "(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec) ([^\r\n]+))$")
   let parse reader =
     MemReader.read_line reader >>= fun line ->
+    let message = MemReader.message reader in
     if Re.execp re_postmark line then
-      return {offset = 0; size = String.length line}
+      return {message;offset = 0; size = String.length line}
     else (
       MemReader.set_position reader 0 >>
-      return {offset = 0; size = 0}
+      return {message;offset = 0; size = 0}
     )
+  let to_string (t:entity) =
+    String.sub t.message t.offset t.size
 end
 
 (* assume single, complete message *)
@@ -296,6 +336,7 @@ module Message :
 sig
   type t = lightmessage
   val parse : string -> t Lwt.t
+  val to_string : t -> string
 end =
 struct
   type t = lightmessage
@@ -303,5 +344,7 @@ struct
    MemReader.of_string message >>= fun reader ->
    Postmark.parse reader >>= fun postmark ->
    Email.parse reader >>= fun (res,email) ->
-   return {position={offset=0;size=String.length message}; postmark; email}
+     return {position={message;offset=0;size=String.length message}; postmark; email}
+  let to_string (t:lightmessage) =
+    String.sub t.position.message t.position.offset t.position.size
 end
