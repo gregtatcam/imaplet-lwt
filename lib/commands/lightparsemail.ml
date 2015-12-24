@@ -14,40 +14,58 @@ type entity = {message:string;offset:int; size:int} with sexp
 type boundary = {bopen:string;bclose:string} with sexp
 type lightheaders = {position:entity;content_type:ctype; content_subtype:stype; 
   boundary:boundary option;} with sexp
-type content = {position:entity;content:
+type lightcontent = {position:entity;content:
   [`Data|`Message of lightmail |`Multipart of lightmail list]}
-and lightmail = {position:entity;headers:lightheaders; content: content} with sexp
+and lightmail = {position:entity;headers:lightheaders; body: lightcontent} with sexp
 type lightmessage = {position:entity;postmark:entity;email:lightmail} with sexp
 
+(* wrapper for Lwt_io.read* methods to read in-memory bytes *)
 module MemReader :
 sig
   type t
+  (* create instance from the string *)
   val of_string : string -> t Lwt.t
+  (* get current position *)
   val position : t -> int
+  (* get stream length *)
   val length : t -> int
+  (* set stream position *)
   val set_position : t -> int -> unit Lwt.t
+  (* read line *)
   val read_line : t -> string Lwt.t
+  (* read line *)
   val read_line_opt : t -> string option Lwt.t
+  (* read character *)
   val read_char : t -> char Lwt.t
+  (* get the size of the last crlf *)
   val last_crlf_size : t -> int Lwt.t
+  (* get underlying message *)
   val message : t -> string
 end =
 struct
   type t = {message:string;ic:Lwt_io.input_channel;length:int}
+
   let of_string str =
     let bytes = Lwt_bytes.of_string str in
     let ic = Lwt_io.of_bytes ~mode:Lwt_io.Input bytes in
     Lwt_io.length ic >>= fun length ->
     let length = Int64.to_int length in
     return {message=str;ic;length}
+
   let length t = t.length
+
   let position t =
     t.length + (Int64.to_int (Lwt_io.position t.ic))
+
   let set_position t p =
     Lwt_io.set_position t.ic (Int64.of_int p)
+
   let read_line t = Lwt_io.read_line t.ic
+
   let read_line_opt t = Lwt_io.read_line_opt t.ic
+
   let read_char t = Lwt_io.read_char t.ic
+
   let last_crlf_size t =
     let current = position t in
     let size cnt =
@@ -70,16 +88,20 @@ struct
       | _ -> size (cnt - 1)
     in
     rewind false false 1
+
   let message t = t.message
 end
 
+(* get the size for the given position to the current position *)
 let get_size reader position =
   (MemReader.position reader) - position
 
+(* create entity instance *)
 let mk_position ?(adj=0) reader offset =
   let size = (get_size reader offset) - adj in
   {message=MemReader.message reader;offset;size}
 
+(* get the size of the boundary + preceding and following crlf *)
 let adjust_for_boundary reader line_size =
   let current = MemReader.position reader in
   MemReader.last_crlf_size reader >>= fun crlf1 ->
@@ -88,17 +110,23 @@ let adjust_for_boundary reader line_size =
   MemReader.set_position reader current >>
   return (crlf1 + crlf2 + line_size)
 
+(* define operation on Boundary *)
 module Boundary :
 sig
   type t = boundary
+  (* parse the boundary *)
   val parse : string -> t option
+  (* is open boundary *)
   val is_open : t option -> string -> bool
+  (* is close boundary *)
   val is_close : t option -> string -> bool
 end =
 struct
   type t = boundary
+
   let re_boundary = Re_posix.compile_pat ~opts:[`ICase]
     "boundary=((\"([^\" ]+)\")|([^\" ]+))"
+
   let parse line =
     try
       let subs = Re.exec re_boundary line in
@@ -109,11 +137,13 @@ struct
       let bclose = bopen ^ "--" in
       Some {bopen;bclose}
     with Not_found -> None
+
   let is_open (t:boundary option) line =
     match t with
     |Some b ->
       (String.trim line) = b.bopen
     | None -> false
+
   let is_close t line =
     match t with
     | Some b ->
@@ -121,25 +151,34 @@ struct
     | None -> false
 end
 
+(* email headers *)
 module Headers :
 sig
   type t = lightheaders
+  (* parse headers *)
   val parse : ?content_type:ctype -> ?content_subtype:stype -> MemReader.t -> 
     ([`Ok|`Eof] * t) Lwt.t
+  (* get headers as the string *)
   val to_string : t -> string
+  (* get headers as the list *)
   val to_list : t -> (string * string ) list Lwt.t
+  (* get headers as the map *)
   val to_map : t -> string Map.Make(String).t Lwt.t
 end =
 struct
   type t = lightheaders
+
   let re_content = Re_posix.compile_pat ~opts:[`ICase]
     "^content-type: ([^/ ]+)/([^; ]+)(.*)$"
+
   let get_type t = match (String.lowercase t) with
     | "audio"->`Audio|"video"->`Video|"image"->`Image|"application"->`Application
     | "text"->`Text|"multipart"->`Multipart|"message"->`Message|t -> `Other t
+
   let get_subtype s = match (String.lowercase s) with
     |"plain"->`Plain|"rfc822"->`Rfc822|"digest"->`Digest|"alternative"->`Alternative
     |"parallel"->`Parallel|"mixed"->`Mixed|s->`Other s
+
   let parse ?(content_type=`Text) ?(content_subtype=`Plain) reader =
     let offset = MemReader.position reader in
     let rec read found_content_type boundary_required (header:lightheaders) = 
@@ -188,8 +227,10 @@ struct
     let header =
       {content_type;content_subtype;boundary=None;position;} in
     read false false header
+
   let to_string (t:lightheaders) =
     String.sub t.position.message t.position.offset t.position.size
+
   let get_headers t cb init =
     let re = Re_posix.compile_pat "^([^\t :]+):[ ]*(.*)$" in
     let bytes = Lwt_bytes.of_string (to_string t) in
@@ -230,25 +271,31 @@ struct
         acc
     in
     return acc
+
   let to_list t =
     get_headers t (fun acc name value ->
       (name,value) :: acc) [] >>= fun l ->
     return (List.rev l)
+
   let to_map t =
     get_headers t (fun acc name value ->
       MapStr.add name value acc
     ) MapStr.empty
 end
 
+(* define body content part *)
 module rec Content:
 sig
-  type t = content
+  type t = lightcontent
+  (* parse content *)
   val parse : ?content_type:ctype -> ?content_subtype:stype ->
     ?boundary:boundary -> MemReader.t -> ([`Ok|`Eof|`OkMultipart] * t) Lwt.t
+  (* get content string *)
   val to_string: t -> string
 end =
 struct
-  type t = content
+  type t = lightcontent
+
   let parse ?(content_type=`Text) ?(content_subtype=`Plain) ?boundary reader =
     let offset = MemReader.position reader in
     let mk_content ?adj reader res content =
@@ -284,7 +331,7 @@ struct
                  * consume the close boundary or more parts, continue parsing
                  * until all parts and close boundary are consumed
                  *)
-                match email.content.content with
+                match email.body.content with
                 | `Multipart _ -> read contents
                 | _ ->
                   mk_content reader res (`Multipart (List.rev contents))
@@ -323,20 +370,28 @@ struct
       in
       read ()
     )
-  let to_string (t:content) =
+
+  let to_string (t:lightcontent) =
     String.sub t.position.message t.position.offset t.position.size
 end
 and 
+(* define email *)
 Email:
 sig
   type t = lightmail
+  (* parse email *)
   val parse : ?content_type:ctype -> ?content_subtype:stype ->
     ?boundary:boundary -> MemReader.t -> ([`Ok|`Eof|`OkMultipart] * t) Lwt.t
+  (* get email string headers+body *)
   val to_string : t -> string
-  val content : t -> content
+  (* get body *)
+  val body : t -> lightcontent
+  (* get headers *)
+  val headers : t -> lightheaders
 end =
 struct
   type t = lightmail
+
   let parse ?(content_type=`Text) ?(content_subtype=`Plain) ?boundary reader =
     let offset = MemReader.position reader in
     Headers.parse ~content_type ~content_subtype reader >>= fun (_,headers) ->
@@ -351,25 +406,35 @@ struct
      * the boundary, use returned content's position instead, which doesn't
      * include the boundary
      *)
-  let size = (content.position.offset + content.position.size) - offset in
-  let position = {message = MemReader.message reader; offset; size} in
-    return (res,{position;headers;content})
+    let size = (content.position.offset + content.position.size) - offset in
+    let position = {message = MemReader.message reader; offset; size} in
+    return (res,{position;headers;body=content})
+
   let to_string (t:lightmail) =
     String.sub t.position.message t.position.offset t.position.size
-  let content (t:lightmail) =
-    t.content
+
+  let body (t:lightmail) =
+    t.body
+
+  let headers (t:lightmail) =
+    t.headers
 end
 
+(* define postmark *)
 module Postmark :
 sig
   type t = entity
+  (* parse postmark *)
   val parse : MemReader.t -> t Lwt.t
+  (* get postmark as string *)
   val to_string : t -> string
 end = struct
   type t = entity
+
   let re_postmark = Re_posix.compile_pat ~opts:[`ICase] 
     ("^(From [^ \r\n]+ (mon|tue|wed|thu|fri|sat|sun) " ^
     "(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec) ([^\r\n]+))$")
+
   let parse reader =
     MemReader.read_line reader >>= fun line ->
     let message = MemReader.message reader in
@@ -379,24 +444,29 @@ end = struct
       MemReader.set_position reader 0 >>
       return {message;offset = 0; size = 0}
     )
+
   let to_string (t:entity) =
     String.sub t.message t.offset t.size
 end
 
-(* assume single, complete message *)
+(* define message postmark+email *)
 module Message :
 sig
   type t = lightmessage
+  (* parse message *)
   val parse : string -> t Lwt.t
+  (* get message as string *)
   val to_string : t -> string
 end =
 struct
   type t = lightmessage
+
   let parse message =
    MemReader.of_string message >>= fun reader ->
    Postmark.parse reader >>= fun postmark ->
    Email.parse reader >>= fun (res,email) ->
      return {position={message;offset=0;size=String.length message}; postmark; email}
+
   let to_string (t:lightmessage) =
     String.sub t.position.message t.position.offset t.position.size
 end
