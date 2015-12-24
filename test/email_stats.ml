@@ -199,6 +199,35 @@ let get_arch str =
       `ImapDld (host,port)
   | _ -> raise InvalidCommand
 
+let hinter = "hinter_1596.idx"
+
+let get_outfile provider =
+  let fd = Unix.openfile hinter [O_RDWR;O_CREAT] 0o666 in
+  let buff = String.create 1024 in
+  let read = Unix.read fd buff 0 1024 in
+  let default_outfile = Printf.sprintf "%f.mbox" (Unix.gettimeofday()) in
+  let resume,outfile =
+  if read <> 0 then (
+    let line = String.sub buff 0 read in
+    let re = Re_posix.compile_pat "^([^ ]+) (.+)$" in
+    try
+      let subs = Re.exec re line in
+      let _provider = Re.get subs 1 in
+      let outfile = Re.get subs 2 in
+      if _provider = provider then
+        true,outfile
+      else
+        false,default_outfile
+    with Not_found -> false,default_outfile
+  ) else
+    false,default_outfile
+  in
+  Unix.ftruncate fd 0;
+  let buff = Printf.sprintf "%s %s" provider outfile in
+  let written = Unix.write fd buff 0 (String.length buff) in
+  Unix.close fd;
+  Some (if resume then "resume:" ^ outfile else outfile)
+
 let rec args i archive echo nocompress outfile unique ssl cmd =
   if i >= Array.length Sys.argv then
     archive,echo,nocompress,outfile,unique,ssl,cmd
@@ -220,9 +249,10 @@ let rec args i archive echo nocompress outfile unique ssl cmd =
       "outlook,rambler,yahoo,yandex,yeah,zoho\n" ^
       "\027[0;34mthen you can just enter the name without the port, for instance: \027[1;34mgmail\n" ^
       "\027[0;34mPlease enter the address:\027[0m");
-      let archive = Some (get_arch 
-        (Scanf.bscanf Scanf.Scanning.stdin "%s" (fun s -> "imap-dld:" ^ s))) in
-      let outfile = Some (Printf.sprintf "%f.mbox" (Unix.gettimeofday())) in
+      let provider = Scanf.bscanf Scanf.Scanning.stdin "%s" 
+        (fun s -> s) in
+      let archive = Some (get_arch ("imap-dld:" ^ provider)) in
+      let outfile = get_outfile provider in
       args (i+1) archive false false outfile true true true
     | _ -> raise InvalidCommand
 
@@ -383,7 +413,9 @@ let _subject headers =
     "re/fw: " ^ subject
   with Not_found -> sha h
 
-let get_hdr_attrs headers =
+let get_hdr_attrs headers digest =
+  let (rfc822,content_type) = if digest then (true,"message/rfc822") 
+    else (false,"text/plain") in
   List.fold_left (fun (attach,rfc822,content_type) (n,v) ->
     if Re.execp (Re_posix.compile_pat ~opts:[`ICase] "Content-Type") n then (
       let content_type = 
@@ -407,7 +439,7 @@ let get_hdr_attrs headers =
       attach,rfc822,content_type
     ) else
       attach,rfc822,content_type
-  ) (false,false,"text/plain") headers
+  ) (false,rfc822,content_type) headers
 
 let email_raw_content email =
   match (Email.raw_content email) with
@@ -420,11 +452,11 @@ let headers_to_string headers =
 let len_compressed content = 
   String.length (Imap_crypto.do_compress ~header:true content)
 
-let rec walk outc email id part multipart =
+let rec walk outc email id part multipart digest =
   let write = Lwt_io.write outc in
   let headers = Header.to_list (Email.header email) in
   let headers_s = headers_to_string (Email.header email) in
-  let attach,rfc822,content_type = get_hdr_attrs headers in
+  let attach,rfc822,content_type = get_hdr_attrs headers digest in
   write (sprf "part: %d\n" part) >>= fun () ->
   write (sprf "headers: %d %d %d\n" (List.length headers) (String.length headers_s) 
     (len_compressed headers_s)) >>= fun () ->
@@ -436,7 +468,7 @@ let rec walk outc email id part multipart =
     if multipart && rfc822 then (
       write (sprf "start rfc822: %d\n" id) >>= fun () ->
       let email = Email.of_string content in
-      walk outc email (id+1) 0 multipart >>= fun () ->
+      walk outc email (id+1) 0 multipart digest >>= fun () ->
       write (sprf "end rfc822: %d\n" id)
     ) else if attach then (
       write (sprf "attachment: %s %d %d\n" (sha content) 
@@ -448,8 +480,9 @@ let rec walk outc email id part multipart =
   | `Multipart elist ->
     write (sprf "start multipart %d %d:\n%!" id (List.length elist)) >>= fun ()
     ->
+    let digest = if content_type = "multipart/digest" then true else digest in
     Lwt_list.fold_left_s (fun part email ->
-      walk outc email (id+1) part true >>= fun () ->
+      walk outc email (id+1) part true digest >>= fun () ->
       return (part + 1)
     ) 0 elist >>= fun _ ->
     write (sprf "end multipart %d\n%!" id)
@@ -1008,6 +1041,7 @@ let imap_fold host port _ssl nocompress resume unique download f =
         logout oc >>= fun () ->
         return ()
       ) >>= fun () ->
+      Lwt_unix.unlink hinter >>= fun () ->
       return true
     ) 
     (fun ex -> 
@@ -1118,7 +1152,7 @@ let () =
             write (sprf "messageid: %s\n" (_messageid headers_m)) >>= fun () ->
             write (sprf "inreplyto: %s\n" (_inreplyto headers_m)) >>= fun () ->
             write "Parts:\n" >>= fun () ->
-            walk outc email 0 0 false >>= fun () ->
+            walk outc email 0 0 false false >>= fun () ->
             write "<-- end\n" >>= fun () ->
             Lwt_io.flush outc
           ) else (
