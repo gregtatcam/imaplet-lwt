@@ -36,3 +36,6 @@ test_stats: test_stats.ml
 
 test_lightparse: test_lightparse.ml
 	ocamlfind ocamlopt -linkall -thread -o test_lightparse -linkpkg -package imaplet,imaplet.parsemail,imaplet.commands,lwt,lwt.syntax,lwt.unix,re,re.posix,sexplib.syntax test_lightparse.ml
+
+test_parse: test_parse.ml
+	ocamlfind ocamlopt -linkall -thread -o test_parse -linkpkg -package imaplet,imaplet.parsemail,imaplet.commands,lwt,lwt.syntax,lwt.unix,re,re.posix,sexplib.syntax test_parse.ml
