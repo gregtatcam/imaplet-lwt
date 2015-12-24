@@ -3,6 +3,8 @@ open Sexplib.Std
 
 exception MultipartNoBoundary
 
+module MapStr = Map.Make(String)
+
 type ctype = 
   [`Audio|`Video|`Image|`Application|`Text|`Multipart|`Message|`Other of string]
   with sexp
@@ -125,6 +127,8 @@ sig
   val parse : ?content_type:ctype -> ?content_subtype:stype -> MemReader.t -> 
     ([`Ok|`Eof] * t) Lwt.t
   val to_string : t -> string
+  val to_list : t -> (string * string ) list Lwt.t
+  val to_map : t -> string Map.Make(String).t Lwt.t
 end =
 struct
   type t = lightheaders
@@ -186,6 +190,54 @@ struct
     read false false header
   let to_string (t:lightheaders) =
     String.sub t.position.message t.position.offset t.position.size
+  let get_headers t cb init =
+    let re = Re_posix.compile_pat "^([^\t :]+):[ ]*(.*)$" in
+    let bytes = Lwt_bytes.of_string (to_string t) in
+    let ic = Lwt_io.of_bytes ~mode:Lwt_io.Input bytes in
+    let rec read name value acc =
+      Lwt_io.read_line_opt ic >>= function
+      | None -> return (name,value,acc)
+      | Some line ->
+        try
+          let subs = Re.exec re line in
+          let acc = 
+            (* call with last consume header/value. new header means all 
+             * (if any) values with FWS are consumed
+             *)
+            if name != "" then
+              cb acc name value
+            else
+              acc
+          in
+          let name = Re.get subs 1 in
+          let value = Re.get subs 2 in
+          read name value acc
+        with Not_found -> (* must FWS *)
+          let value = 
+            if name <> "" then 
+              String.concat " " [value; String.trim line] 
+            else 
+              value 
+          in
+          read name value acc
+    in
+    read "" "" init >>= fun (name,value,acc) ->
+    Lwt_io.close ic >>= fun () ->
+    let acc =
+      if name <> "" then
+        cb acc name value
+      else
+        acc
+    in
+    return acc
+  let to_list t =
+    get_headers t (fun acc name value ->
+      (name,value) :: acc) [] >>= fun l ->
+    return (List.rev l)
+  let to_map t =
+    get_headers t (fun acc name value ->
+      MapStr.add name value acc
+    ) MapStr.empty
 end
 
 module rec Content:
