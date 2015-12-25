@@ -10,7 +10,7 @@ type ctype =
   with sexp
 type stype = 
   [`Plain|`Rfc822|`Digest|`Alternative|`Parallel|`Mixed|`Other of string] with sexp
-type entity = {offset:int; size:int} with sexp
+type entity = {offset:int; size:int;lines:int} with sexp
 type boundary = {bopen:string;bclose:string} with sexp
 type lightheaders = {position:entity;content_type:ctype; content_subtype:stype; 
   boundary:boundary option;} with sexp
@@ -41,16 +41,18 @@ sig
   val last_crlf_size : t -> int Lwt.t
   (* get underlying message *)
   val to_string : t -> string
+  (* get consumed lines *)
+  val lines : t -> int
 end =
 struct
-  type t = {message:string;ic:Lwt_io.input_channel;length:int}
+  type t = {message:string;ic:Lwt_io.input_channel;length:int;lines:int ref}
 
   let of_string str =
     let bytes = Lwt_bytes.of_string str in
     let ic = Lwt_io.of_bytes ~mode:Lwt_io.Input bytes in
     Lwt_io.length ic >>= fun length ->
     let length = Int64.to_int length in
-    return {message=str;ic;length}
+    return {message=str;ic;length;lines = ref 0}
 
   let length t = t.length
 
@@ -60,9 +62,16 @@ struct
   let set_position t p =
     Lwt_io.set_position t.ic (Int64.of_int p)
 
-  let read_line t = Lwt_io.read_line t.ic
+  let read_line t = 
+    t.lines := t.!lines + 1;
+    Lwt_io.read_line t.ic
 
-  let read_line_opt t = Lwt_io.read_line_opt t.ic
+  let read_line_opt t = 
+    Lwt_io.read_line_opt t.ic >>= function
+    | None -> return None
+    | Some line ->
+      t.lines := t.!lines + 1;
+      return (Some line)
 
   let read_char t = Lwt_io.read_char t.ic
 
@@ -90,6 +99,8 @@ struct
     rewind false false 1
 
   let to_string t = t.message
+
+  let lines t = t.!lines
 end
 
 (* get the size for the given position to the current position *)
@@ -97,9 +108,9 @@ let get_size reader position =
   (MemReader.position reader) - position
 
 (* create entity instance *)
-let mk_position ?(adj=0) reader offset =
+let mk_position ?(adj=0) reader offset ~lines =
   let size = (get_size reader offset) - adj in
-  {offset;size}
+  {offset;size;lines}
 
 (* get the size of the boundary + preceding and following crlf *)
 let adjust_for_boundary reader line_size =
@@ -181,10 +192,12 @@ struct
 
   let parse ?(content_type=`Text) ?(content_subtype=`Plain) reader =
     let offset = MemReader.position reader in
+    let lines = MemReader.lines reader in
     let rec read found_content_type boundary_required (header:lightheaders) = 
       MemReader.read_line_opt reader >>= function
       | None -> 
-        return (`Eof,{header with position=mk_position reader offset})
+        let lines = MemReader.lines reader - lines in
+        return (`Eof,{header with position=mk_position reader offset ~lines})
       | Some line -> 
         if line = "" then ( (* done parsing, next is body part *)
           if boundary_required && header.boundary = None then
@@ -193,12 +206,12 @@ struct
             (* crlf following the headers is not part of the headers and not
              * part of the body either *)
             MemReader.last_crlf_size reader >>= fun adj ->
-            let position = mk_position ~adj reader offset in
+            let lines = MemReader.lines reader - lines - 1 in
+            let position = mk_position ~adj reader offset ~lines in
             return (`Ok, {header with position})
           )
         ) else if found_content_type && boundary_required && header.boundary = None then (
-          read found_content_type boundary_required 
-            {header with boundary = Boundary.parse line}
+          read found_content_type boundary_required {header with boundary = Boundary.parse line}
         ) else if found_content_type = false then (
           catch (fun () ->
             let subs = Re.exec re_content line in
@@ -210,12 +223,11 @@ struct
               else 
                 None
             in
-            read true (content_type = `Multipart) 
-              {header with content_type;content_subtype;boundary;}
+            read true (content_type = `Multipart) {header with content_type;content_subtype;boundary;}
           )(function Not_found -> read found_content_type boundary_required header
             | ex -> raise ex)
         ) else
-          read found_content_type boundary_required header
+          read found_content_type boundary_required header 
     in
     let content_type,content_subtype = 
       if content_type = `Multipart && content_subtype = `Digest then
@@ -223,7 +235,7 @@ struct
       else
         content_type,content_subtype
     in
-    let position = {offset; size = 0} in
+    let position = {offset; size = 0; lines=0} in
     let header =
       {content_type;content_subtype;boundary=None;position;} in
     read false false header
@@ -298,20 +310,21 @@ struct
 
   let parse ?(content_type=`Text) ?(content_subtype=`Plain) ?boundary reader =
     let offset = MemReader.position reader in
-    let mk_content ?adj reader res content =
+    let mk_content ?adj reader res lines content =
       begin
       match adj with
       | None -> return 0
       | Some line ->
         adjust_for_boundary reader (String.length line)
       end >>= fun adj ->
-      return (res,{position=mk_position ~adj reader offset;content})
+      return (res,{position=mk_position ~adj reader offset ~lines;content})
     in
     if content_type = `Multipart then (
+      let lines = MemReader.lines reader in
       let rec read contents =
         MemReader.read_line_opt reader >>= function
         | None ->
-          mk_content reader `Eof (`Multipart (List.rev contents))
+          mk_content reader `Eof lines (`Multipart (List.rev contents))
         | Some line -> 
           if Boundary.is_open boundary line then (
             (* consume all parts consisting of header (optional) and content the
@@ -334,23 +347,28 @@ struct
                 match email.body.content with
                 | `Multipart _ -> read contents
                 | _ ->
-                  mk_content reader res (`Multipart (List.rev contents))
+                  mk_content reader res (MemReader.lines reader - lines) 
+                    (`Multipart (List.rev contents))
             in
             consume_multipart contents
           ) else if Boundary.is_close boundary line then (
-            mk_content reader `OkMultipart (`Multipart (List.rev contents))
+            mk_content reader `OkMultipart (MemReader.lines reader - lines)
+              (`Multipart (List.rev contents))
           ) else
             read contents
       in
       read []
     ) else if content_type = `Message then (
+      let lines = MemReader.lines reader in
       Email.parse ~content_type ~content_subtype ?boundary 
         reader >>= fun (res,email) ->
-      mk_content reader res (`Message email)
+      let lines = MemReader.lines reader - lines in
+      mk_content reader res lines (`Message email)
     ) else (
+      let lines = MemReader.lines reader in
       let rec read () =
         MemReader.read_line_opt reader >>= function
-        | None -> mk_content reader `Eof `Data
+        | None -> mk_content reader `Eof (MemReader.lines reader - lines) `Data
         | Some line ->
           match boundary with
           | None -> read ()
@@ -362,9 +380,11 @@ struct
              * boundary
              *)
             if Boundary.is_open boundary line then (
-              mk_content ~adj:line reader `Ok `Data
+              let lines = MemReader.lines reader - lines - 2 in
+              mk_content ~adj:line reader `Ok lines `Data
             ) else if Boundary.is_close boundary line then (
-              mk_content ~adj:line reader `OkMultipart `Data
+              let lines = MemReader.lines reader - lines - 2 in
+              mk_content ~adj:line reader `OkMultipart lines `Data
             ) else
               read ()
       in
@@ -394,6 +414,7 @@ struct
 
   let parse ?(content_type=`Text) ?(content_subtype=`Plain) ?boundary reader =
     let offset = MemReader.position reader in
+    let lines = MemReader.lines reader in
     Headers.parse ~content_type ~content_subtype reader >>= fun (_,headers) ->
     let boundary =
       match headers.boundary with
@@ -407,7 +428,8 @@ struct
      * include the boundary
      *)
     let size = (content.position.offset + content.position.size) - offset in
-    let position = {offset; size} in
+    let lines = MemReader.lines reader - lines in
+    let position = {offset; size; lines} in
     return (res,{position;headers;body=content})
 
   let to_string (t:lightmail) message =
@@ -438,10 +460,10 @@ end = struct
   let parse reader =
     MemReader.read_line reader >>= fun line ->
     if Re.execp re_postmark line then
-      return {offset = 0; size = String.length line}
+      return {offset = 0; size = String.length line; lines = 1}
     else (
       MemReader.set_position reader 0 >>
-      return {offset = 0; size = 0}
+      return {offset = 0; size = 0; lines = 0}
     )
 
   let to_string (t:entity) message =
@@ -461,10 +483,12 @@ struct
   type t = lightmessage
 
   let parse message =
-   MemReader.of_string message >>= fun reader ->
-   Postmark.parse reader >>= fun postmark ->
-   Email.parse reader >>= fun (res,email) ->
-     return {position={offset=0;size=String.length message}; postmark; email}
+    MemReader.of_string message >>= fun reader ->
+    let lines = MemReader.lines reader in
+    Postmark.parse reader >>= fun postmark ->
+    Email.parse reader >>= fun (res,email) ->
+    let lines = MemReader.lines reader - lines in
+    return {position={offset=0;size=String.length message;lines}; postmark; email}
 
   let to_string (t:lightmessage) message =
     String.sub message t.position.offset t.position.size
