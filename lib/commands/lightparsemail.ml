@@ -10,7 +10,7 @@ type ctype =
   with sexp
 type stype = 
   [`Plain|`Rfc822|`Digest|`Alternative|`Parallel|`Mixed|`Other of string] with sexp
-type entity = {message:string;offset:int; size:int} with sexp
+type entity = {offset:int; size:int} with sexp
 type boundary = {bopen:string;bclose:string} with sexp
 type lightheaders = {position:entity;content_type:ctype; content_subtype:stype; 
   boundary:boundary option;} with sexp
@@ -40,7 +40,7 @@ sig
   (* get the size of the last crlf *)
   val last_crlf_size : t -> int Lwt.t
   (* get underlying message *)
-  val message : t -> string
+  val to_string : t -> string
 end =
 struct
   type t = {message:string;ic:Lwt_io.input_channel;length:int}
@@ -89,7 +89,7 @@ struct
     in
     rewind false false 1
 
-  let message t = t.message
+  let to_string t = t.message
 end
 
 (* get the size for the given position to the current position *)
@@ -99,7 +99,7 @@ let get_size reader position =
 (* create entity instance *)
 let mk_position ?(adj=0) reader offset =
   let size = (get_size reader offset) - adj in
-  {message=MemReader.message reader;offset;size}
+  {offset;size}
 
 (* get the size of the boundary + preceding and following crlf *)
 let adjust_for_boundary reader line_size =
@@ -159,11 +159,11 @@ sig
   val parse : ?content_type:ctype -> ?content_subtype:stype -> MemReader.t -> 
     ([`Ok|`Eof] * t) Lwt.t
   (* get headers as the string *)
-  val to_string : t -> string
+  val to_string : t -> string -> string
   (* get headers as the list *)
-  val to_list : t -> (string * string ) list Lwt.t
+  val to_list : t -> string -> (string * string ) list Lwt.t
   (* get headers as the map *)
-  val to_map : t -> string Map.Make(String).t Lwt.t
+  val to_map : t -> string -> string Map.Make(String).t Lwt.t
 end =
 struct
   type t = lightheaders
@@ -223,17 +223,17 @@ struct
       else
         content_type,content_subtype
     in
-    let position = {message=MemReader.message reader;offset; size = 0} in
+    let position = {offset; size = 0} in
     let header =
       {content_type;content_subtype;boundary=None;position;} in
     read false false header
 
-  let to_string (t:lightheaders) =
-    String.sub t.position.message t.position.offset t.position.size
+  let to_string (t:lightheaders) message =
+    String.sub message t.position.offset t.position.size
 
-  let get_headers t cb init =
+  let get_headers t message cb init =
     let re = Re_posix.compile_pat "^([^\t :]+):[ ]*(.*)$" in
-    let bytes = Lwt_bytes.of_string (to_string t) in
+    let bytes = Lwt_bytes.of_string (to_string t message) in
     let ic = Lwt_io.of_bytes ~mode:Lwt_io.Input bytes in
     let rec read name value acc =
       Lwt_io.read_line_opt ic >>= function
@@ -272,13 +272,13 @@ struct
     in
     return acc
 
-  let to_list t =
-    get_headers t (fun acc name value ->
+  let to_list t message =
+    get_headers t message (fun acc name value ->
       (name,value) :: acc) [] >>= fun l ->
     return (List.rev l)
 
-  let to_map t =
-    get_headers t (fun acc name value ->
+  let to_map t message =
+    get_headers t message (fun acc name value ->
       MapStr.add name value acc
     ) MapStr.empty
 end
@@ -291,7 +291,7 @@ sig
   val parse : ?content_type:ctype -> ?content_subtype:stype ->
     ?boundary:boundary -> MemReader.t -> ([`Ok|`Eof|`OkMultipart] * t) Lwt.t
   (* get content string *)
-  val to_string: t -> string
+  val to_string: t -> string -> string
 end =
 struct
   type t = lightcontent
@@ -371,8 +371,8 @@ struct
       read ()
     )
 
-  let to_string (t:lightcontent) =
-    String.sub t.position.message t.position.offset t.position.size
+  let to_string (t:lightcontent) message =
+    String.sub message t.position.offset t.position.size
 end
 and 
 (* define email *)
@@ -383,7 +383,7 @@ sig
   val parse : ?content_type:ctype -> ?content_subtype:stype ->
     ?boundary:boundary -> MemReader.t -> ([`Ok|`Eof|`OkMultipart] * t) Lwt.t
   (* get email string headers+body *)
-  val to_string : t -> string
+  val to_string : t -> string -> string
   (* get body *)
   val body : t -> lightcontent
   (* get headers *)
@@ -407,11 +407,11 @@ struct
      * include the boundary
      *)
     let size = (content.position.offset + content.position.size) - offset in
-    let position = {message = MemReader.message reader; offset; size} in
+    let position = {offset; size} in
     return (res,{position;headers;body=content})
 
-  let to_string (t:lightmail) =
-    String.sub t.position.message t.position.offset t.position.size
+  let to_string (t:lightmail) message =
+    String.sub message t.position.offset t.position.size
 
   let body (t:lightmail) =
     t.body
@@ -427,7 +427,7 @@ sig
   (* parse postmark *)
   val parse : MemReader.t -> t Lwt.t
   (* get postmark as string *)
-  val to_string : t -> string
+  val to_string : t -> string -> string
 end = struct
   type t = entity
 
@@ -437,16 +437,15 @@ end = struct
 
   let parse reader =
     MemReader.read_line reader >>= fun line ->
-    let message = MemReader.message reader in
     if Re.execp re_postmark line then
-      return {message;offset = 0; size = String.length line}
+      return {offset = 0; size = String.length line}
     else (
       MemReader.set_position reader 0 >>
-      return {message;offset = 0; size = 0}
+      return {offset = 0; size = 0}
     )
 
-  let to_string (t:entity) =
-    String.sub t.message t.offset t.size
+  let to_string (t:entity) message =
+    String.sub message t.offset t.size
 end
 
 (* define message postmark+email *)
@@ -456,7 +455,7 @@ sig
   (* parse message *)
   val parse : string -> t Lwt.t
   (* get message as string *)
-  val to_string : t -> string
+  val to_string : t -> string -> string
 end =
 struct
   type t = lightmessage
@@ -465,8 +464,8 @@ struct
    MemReader.of_string message >>= fun reader ->
    Postmark.parse reader >>= fun postmark ->
    Email.parse reader >>= fun (res,email) ->
-     return {position={message;offset=0;size=String.length message}; postmark; email}
+     return {position={offset=0;size=String.length message}; postmark; email}
 
-  let to_string (t:lightmessage) =
-    String.sub t.position.message t.position.offset t.position.size
+  let to_string (t:lightmessage) message =
+    String.sub message t.position.offset t.position.size
 end
