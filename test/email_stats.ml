@@ -23,7 +23,13 @@ exception InvalidCommand
 exception Failed of string
 exception LoginFailed
 
+module MapStr = Map.Make(String)
+
 let echoterm = ref false
+
+let no_hash = ref false
+
+let folder = ref "x-gmail-labels"
 
 let opt_val = function
   | None -> raise (Failed "opt_val")
@@ -43,7 +49,7 @@ let resp_chan = ref None
 (* continous compression stream for the session's duration *)
 let write_compressed strm oc buffin =
   let len_buff = String.length buffin in
-  let buffout_defl = String.create buff_size in
+  let buffout_defl = Bytes.create buff_size in
   let rec _compress offset len =
     let (fi,used_in,used_out) = Zlib.deflate strm buffin offset len 
       buffout_defl 0 buff_size Zlib.Z_SYNC_FLUSH in
@@ -69,7 +75,7 @@ let get_pr str =
 (* uncompress *)
 let inflate strm oc_pipe inbuff =
   let inbuff_len = String.length inbuff in
-  let buffout_infl = String.create buff_size in
+  let buffout_infl = Bytes.create buff_size in
   (*Printf.fprintf stderr "uncompressing %d\n%!" (String.length inbuff);*)
   let rec _inflate inbuff offset len =
     let (fi, used_in, used_out) = Zlib.inflate strm inbuff offset len 
@@ -144,7 +150,7 @@ let resp_read ?count () =
   match count with 
   | None -> read_line_timeout ic
   | Some count -> 
-    let buff = String.create count in
+    let buff = Bytes.create count in
     read_into_exactly_timeout ic buff count >>= fun () ->
     return buff
   end >>= fun buff ->
@@ -202,8 +208,8 @@ let get_arch str =
 let hinter = "hinter_1596.idx"
 
 let get_outfile provider =
-  let fd = Unix.openfile hinter [O_RDWR;O_CREAT] 0o666 in
-  let buff = String.create 1024 in
+  let fd = Unix.openfile hinter [Unix.O_RDWR;Unix.O_CREAT] 0o666 in
+  let buff = Bytes.create 1024 in
   let read = Unix.read fd buff 0 1024 in
   let default_outfile = Printf.sprintf "%f.mbox" (Unix.gettimeofday()) in
   let resume,outfile =
@@ -228,19 +234,28 @@ let get_outfile provider =
   Unix.close fd;
   Some (if resume then "resume:" ^ outfile else outfile)
 
-let rec args i archive echo nocompress outfile unique ssl cmd =
+let get_exclude arg =
+  let arg = Re.replace_string (Re_posix.compile_pat "\"") ~by:"" arg in
+  List.fold_left (fun exclude folder -> MapStr.add folder "" exclude)
+    MapStr.empty (Re.split (Re_posix.compile_pat ",") arg)
+
+let rec args i archive echo nocompress outfile unique ssl cmd exclude =
   if i >= Array.length Sys.argv then
-    archive,echo,nocompress,outfile,unique,ssl,cmd
+    archive,echo,nocompress,outfile,unique,ssl,cmd,exclude
   else
     match Sys.argv.(i) with 
     | "-archive" -> args (i+2) (Some (get_arch Sys.argv.(i+1))) echo nocompress
-    outfile unique ssl cmd
+    outfile unique ssl cmd exclude
     | "-echo" -> args (i+1) archive true nocompress outfile unique ssl cmd
+    exclude
     | "-no-compress" -> args (i+1) archive echo true outfile unique ssl cmd
+    exclude
     | "-outfile" -> args (i+2) archive echo nocompress (Some Sys.argv.(i+1))
-    unique ssl cmd
+    unique ssl cmd exclude
     | "-unique" -> args (i+1) archive echo nocompress outfile true ssl cmd
+    exclude
     | "-no-ssl" -> args (i+1) archive echo nocompress outfile unique false cmd
+    exclude
     | "-cmd" -> 
       Printf.fprintf stderr "%s%!" 
       ("\027[0;34mPLEASE ENTER YOUR EMAIL PROVIDER'S IMAP ADDRESS AND PORT AS provider:port.\n" ^
@@ -253,18 +268,29 @@ let rec args i archive echo nocompress outfile unique ssl cmd =
         (fun s -> s) in
       let archive = Some (get_arch ("imap-dld:" ^ provider)) in
       let outfile = get_outfile provider in
-      args (i+1) archive false false outfile true true true
-    | _ -> raise InvalidCommand
+      args (i+1) archive false false outfile true true true exclude
+    | "-no-hash" -> 
+      no_hash := true;
+      args (i+1) archive echo nocompress outfile unique false cmd exclude
+    | "-folder" ->
+        folder := Sys.argv.(i+1);
+        args (i+2) archive echo nocompress outfile unique ssl cmd exclude
+    | "-exclude" -> args (i+2) archive echo nocompress outfile unique ssl cmd 
+        (get_exclude Sys.argv.(i+1))
+    | arg -> 
+      Printf.fprintf stderr "invalid argument: %s\n%!" arg;
+      raise InvalidCommand
 
 let usage () =
   Printf.printf 
     "usage: email_stats -archive [mbox:file|imap[-dld]:server:port] [-outfile
-    [[resume:]file]] [-echo] [-no-compress] [-unique] [-no-ssl] [-cmd]\n%!"
+    [[resume:]file]] [-echo] [-no-compress] [-unique] [-no-ssl] [-cmd] [-no-hash]
+    [-folder folder] [-exclude [\"folder1,folder1..\"]\n%!"
 
 let commands f =
   try 
-    let archive,echo,nocompress,outfile,unique,ssl,cmd = args 1 None false false
-    None false true false in
+    let archive,echo,nocompress,outfile,unique,ssl,cmd,exclude = 
+      args 1 None false false None false true false MapStr.empty in
     let (resume,outfile) =
     match outfile with
     | Some file ->
@@ -276,7 +302,7 @@ let commands f =
       )
     | None -> None,None
     in
-    f (opt_val archive) echo nocompress outfile resume unique ssl cmd
+    f (opt_val archive) echo nocompress outfile resume unique ssl cmd exclude
   with 
     | Failed _ -> usage()|InvalidCommand -> usage()
     | _ -> ()
@@ -304,11 +330,19 @@ let get_unique key tbl =
     )
   )
 
-let get_addr key = sha key
+let get_addr key = 
+  if !no_hash = true then
+    key
+  else
+    sha key
 
 let get_mailbox key =
-  let key = Re.replace_string (Re_posix.compile_pat "^\"|\"$") ~by:"" (String.lowercase key) in
-  get_unique key mailboxes 
+  if !no_hash = true then
+    key
+  else (
+    let key = Re.replace_string (Re_posix.compile_pat "^\"|\"$") ~by:"" (String.lowercase key) in
+    get_unique key mailboxes 
+  )
 
 let get_messageid key =
   if key = "" then
@@ -325,7 +359,7 @@ let headers_to_map headers =
   List.fold_left (fun tbl (n,v) ->
     let n = String.trim (String.lowercase n) in
     if n = "from" || n = "to" || n = "cc" || n = "subject" ||
-        n = "in-reply-to" || n = "x-gmail-labels" || n = "content-type" || 
+        n = "in-reply-to" || n = !folder || n = "content-type" || 
         n = "date" || n = "message-id" then (
       Hashtbl.add tbl n (String.trim v);
       tbl
@@ -341,7 +375,9 @@ let get_header_m headers name =
 let re_addr = Re_posix.compile_pat "([^ <@:[]+@[^] :<>\"\r\n]+)";;
 
 let get_email_addr addr =
-  if addr <> "" then (
+  if !no_hash = true then
+    addr
+  else if addr <> "" then (
     try 
       let subs = Re.exec re_addr addr in
       Re.get subs 1
@@ -364,7 +400,7 @@ let _cc headers =
   String.concat "," (List.map (fun h -> get_addr (get_email_addr h)) hl)
 
 let _gmail_labels headers =
-  let h = get_header_m headers "x-gmail-labels" in
+  let h = get_header_m headers !folder in
   begin
   if h = "" then
     get_mailbox "inbox"
@@ -407,11 +443,15 @@ let _inreplyto headers =
 let re_subject = Re_posix.compile_pat ~opts:[`ICase] "(re|fw|fwd): (.*)$"
 let _subject headers =
   let h = get_header_m headers "subject" in
-  try
-    let subs = Re.exec re_subject h in
-    let subject = sha (Re.get subs 2) in
-    "re/fw: " ^ subject
-  with Not_found -> sha h
+  if !no_hash = true then
+    h
+  else (
+    try
+      let subs = Re.exec re_subject h in
+      let subject = sha (Re.get subs 2) in
+      "re/fw: " ^ subject
+    with Not_found -> sha h
+  )
 
 let get_hdr_attrs headers digest =
   let (rfc822,content_type) = if digest then (true,"message/rfc822") 
@@ -1085,9 +1125,13 @@ let labels_from_mailbox mailbox =
   ) else 
     get_mailbox mailbox
 
+let pick_folder headers_m = function
+  | Some mailbox -> labels_from_mailbox mailbox
+  | None -> _gmail_labels headers_m
+
 let () =
   let open Parsemail.Mailbox in
-  commands (fun arch echo nocompress outfile resume unique ssl cmd ->
+  commands (fun arch echo nocompress outfile resume unique ssl cmd exclude ->
   echoterm := echo;
   Lwt_main.run (
     let _run arch outfile =
@@ -1134,7 +1178,11 @@ let () =
           let headers_l = Header.to_list headers in
           (* select required headers, update if more stats is needed *)
           let headers_m = headers_to_map headers_l in
-          if messageid_unique headers_m then (
+          let folder = pick_folder headers_m mailbox in
+          (* for instance calendar or contacts in Enron *)
+          if MapStr.mem (String.lowercase folder) exclude then
+            return ()
+          else if messageid_unique headers_m then (
             write "--> start\n" >>= fun () ->
             write (sprf "Full Message: %d %d\n" (String.length message_s) (len_compressed message_s)) >>= fun () ->
             write "Hdrs\n" >>= fun () ->
