@@ -72,6 +72,8 @@ val fold_email_with_file : string -> ('a -> string -> [`Ok of 'a|`Done of 'a] Lw
 
 val fold_email_with_file1 : string -> ('a -> Mailbox.Message.t -> [`Ok of 'a|`Done of 'a] Lwt.t) -> 'a -> 'a Lwt.t
 
+val fold_lightemail_with_file : string -> ('a -> Lightparsemail.Message.t -> [`Ok of 'a|`Done of 'a] Lwt.t) -> 'a -> 'a Lwt.t
+
 val files_of_directory : string -> ('a -> string -> 'a Lwt.t) -> 'a -> [`Ok of 'a |`NoDir] Lwt.t 
 
 (* replace %user% template (or regx) in path with the user, user@domain is

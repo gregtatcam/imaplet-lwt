@@ -340,6 +340,16 @@ let fold_email_with_file1 file f init =
     ) init
   )
 
+let fold_lightemail_with_file file f init =
+  let open Lwt in
+  let open Lightparsemail in
+  Lwt_io.with_file ~mode:Lwt_io.Input file (fun ic ->
+    get_message ic (Buffer.create 100) (fun acc message ->
+      Lightparsemail.Message.parse message >>= fun message ->
+      f acc message
+    ) init
+  )
+
 let files_of_directory path f init =
   let open Lwt in
   exists path Unix.S_DIR >>= fun res ->
