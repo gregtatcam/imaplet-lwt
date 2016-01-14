@@ -16,15 +16,12 @@
 open Lwt
 open Storage_meta
 open Lazy_message
-open Parsemail
+open Lightparsemail
 
 module MapStr = Map.Make(String)
 
 (* message body without the headers *)
-let _raw_content t =
-  match Email.raw_content t with
-  | Some os -> Octet_stream.to_string os
-  | None -> ""
+let _raw_content t = Content.to_string (Email.body t)
 
 (* lazy string returns email message string, lazy email.t returns parsed email
  * message 
@@ -52,6 +49,7 @@ module LazyMaildirEmail : LazyEmail_intf with type c = maildir_email_accessor =
 
     let header ?(incl=`Map MapStr.empty) ?(excl=MapStr.empty) t =
       email_of_t t >>= fun email ->
+      Headers.to_list (Email.headers email) >>= fun headers ->
       return (List.filter (fun (n,_) ->
         let dont_incl =
         match incl with
@@ -62,18 +60,18 @@ module LazyMaildirEmail : LazyEmail_intf with type c = maildir_email_accessor =
         in
         (dont_incl = true ||
           MapStr.is_empty excl = false && MapStr.mem (String.lowercase n) excl = true) = false
-      ) (Header.to_list (Email.header email)))
+      ) headers)
 
     let header_to_str ?(incl=`Map MapStr.empty) ?(excl=MapStr.empty) t =
       header ~incl ~excl t >>= fun headers ->
       return (String.concat "" (List.fold_right (fun (n,v) acc-> List.concat
-        [[n;":";v;Email_parse.crlf];acc]) headers []))
+        [[n;": ";v;Email_parse.crlf];acc]) headers []))
 
     let content t =
       email_of_t t >>= fun email ->
       return (
-        match (Email.content email) with
-        | `Data _ -> `Data (_raw_content email)
+        match (Content.content (Email.body email)) with
+        | `Data content -> `Data (Content.to_string content)
         | `Message m -> `Message (t_of_email m)
         | `Multipart lm -> `Multipart (List.map (fun m -> t_of_email m) lm)
       )
@@ -96,26 +94,26 @@ module LazyMaildirEmail : LazyEmail_intf with type c = maildir_email_accessor =
       )
 
     let lines t =
-      email_of_t t >>= fun email ->
-      return (Utils.lines (_raw_content email))
+      email_of_t t >>= fun (email:Email.t) ->
+      return (email.mail_.body.position.lines)
 
     let size t =
-      email_of_t t >>= fun email ->
-      return (Bytes.length (_raw_content email))
+      email_of_t t >>= fun (email:Email.t) ->
+      return (email.mail_.body.position.size)
 
   end
 
 let _email msg =
   Lazy.force msg >>= fun msg ->
-  return msg.Mailbox.Message.email
+  return (Message.email msg)
 
 let _postmark msg = 
   Lazy.force msg >>= fun msg ->
-  return msg.Mailbox.Message.postmark
+  return (Message.postmark msg)
 
 (* lazy string returns message string w/out postmark, lazy message.t returns parsed message
  *)
-type maildir_accessor = string Lwt.t lazy_t * Parsemail.Mailbox.Message.t Lwt.t lazy_t *
+type maildir_accessor = string Lwt.t lazy_t * Message.t Lwt.t lazy_t *
 mailbox_message_metadata Lwt.t lazy_t
 
 module LazyMaildirMessage : LazyMessage_intf with type c = maildir_accessor =
@@ -128,13 +126,13 @@ module LazyMaildirMessage : LazyMessage_intf with type c = maildir_accessor =
     let get_postmark t =
       let (_,msg,_) = t in
       _postmark msg >>= fun postmark ->
-      return (Mailbox.Postmark.to_string postmark)
+      return (Postmark.to_string postmark)
 
     let get_headers_block t =
       let (_,msg,_) = t in
       _email msg >>= fun email ->
-      let header = Email.header email in
-      return (String_monoid.to_string (Header.to_string_monoid header))
+      let headers = Email.headers email in
+      return (Headers.to_string headers)
 
     let get_content_block t =
       let (_,msg,_) = t in

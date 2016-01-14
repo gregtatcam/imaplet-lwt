@@ -23,7 +23,6 @@ open Utils
 open Sexplib.Conv
 open Lazy_message
 open Lazy_maildir_message
-open Parsemail
 
 exception KeyDoesntExist
 exception DuplicateUID
@@ -953,9 +952,8 @@ module GitMailboxMake
       ) in
       let lazy_message = Lazy.from_fun (fun () ->
         Lazy.force lazy_read >>= fun buffer ->
-        let seq = Mailbox.With_seq.of_string buffer in
-        return (Utils.option_value_exn (Mailbox.With_seq.fold_message seq
-          ~f:(fun _ message -> Some message) ~init:None))) in
+        Lightparsemail.Message.parse buffer >>= fun message ->
+        return message) in
       let lazy_metadata = Lazy.from_fun (fun () -> 
         let t = Unix.gettimeofday() in
         get_message_metadata mbox hash >>= fun meta ->

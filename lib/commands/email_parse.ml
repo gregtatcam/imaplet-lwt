@@ -18,7 +18,7 @@ open Nocrypto
 open Imap_crypto
 open Server_config
 open Regex
-open Parsemail
+open Lightparsemail
 open Sexplib
 open Sexplib.Conv
 
@@ -106,32 +106,23 @@ let headers_str_of_list headers transform =
     acc ^ n ^ ":" ^ v ^ crlf
   ) "" headers))
 
-let email_raw_content email =
-  match (Email.raw_content email) with
-  | Some rc -> Octet_stream.to_string rc
-  | None -> ""
-
-let email_content pub_key config attachment email transform =
-  match (Email.raw_content email) with
-  | Some rc -> 
-    let content = Octet_stream.to_string rc in
-    let content = 
-    if attachment then 
-      transform (`Attachment content) 
-    else 
-      transform (`Body content) 
-    in
-    let size = Bytes.length content in
-    let lines = Utils.lines content in
-    if config.encrypt && attachment then (
-      let (_(*contid*),content) = conv_encrypt ~compress:config.compress_attach content pub_key in
-      return (content,size,lines)
-    ) else if config.compress_attach && attachment then ( (*content compressed separately *)
-      return (do_compress content, size, lines)
-    ) else (
-      return (content,size,lines)
-    )
-  | None -> return ("",0,0) 
+let email_content pub_key config attachment content transform =
+  let content = 
+  if attachment then 
+    transform (`Attachment content) 
+  else 
+    transform (`Body content) 
+  in
+  let size = Bytes.length content in
+  let lines = Utils.lines content in
+  if config.encrypt && attachment then (
+    let (_(*contid*),content) = conv_encrypt ~compress:config.compress_attach content pub_key in
+    return (content,size,lines)
+  ) else if config.compress_attach && attachment then ( (*content compressed separately *)
+    return (do_compress content, size, lines)
+  ) else (
+    return (content,size,lines)
+  )
 
 let do_encrypt pub_key config data =
   if config.encrypt then (
@@ -170,70 +161,65 @@ let do_encrypt_content pub_key config email save_attachment hash transform =
   let content_buff = Buffer.create 100 in
   let headers_buff = Buffer.create 100 in
   let rec walk email multipart last_crlf totsize totlines attachments =
-    let headers = Header.to_list (Email.header email) in
+    Headers.to_list (Email.headers email) >>= fun headers ->
     let (header_part,header_descr) = get_header_descr headers headers_buff transform in
     let boundary,attach,rfc822 = get_hdr_attrs headers in
-    match (Email.content email) with
-    | `Data _ -> 
-      (* it seems that email_message doesn't parse rfc822??? I would have
-       * expected rfc822 in multipart to have `Message type, so here is a hack *)
-      if multipart && rfc822 then (
-        let email = Email.of_string (email_raw_content email) in
-        walk email multipart 2 0 0 attachments >>= fun (content,size,lines,attachments) ->
+    match Content.content (Email.body email) with
+    | `Data data -> 
+      (* don't need to key attachments or other parts by the content hash
+       * all parts have the root key - message hash, then the subkeys are
+       * the count, 0 - postmark, 1 - headers, 2 - content, 3+ - attachments
+       * just need to keep the number of attachments
+       *)
+      email_content pub_key config attach (Content.to_string data) 
+        transform >>= fun (content,size,lines) -> 
+      if attach then ( (* consider adding Content-type: message/external-body...  *)
+        let attach_contid = (string_of_int (3 + attachments)) in
+        save_attachment hash attach_contid content >>= fun () ->
+        (* +1 for crlf - header crlf content *)
         let part = 
-          if multipart then 
-            {size=size;lines=lines}
-          else
-            {size=header_part.size+size+1;lines=header_part.lines+lines+1}
+        if multipart then 
+          {size=size;lines=lines}
+        else
+          {size=header_part.size+size+1;lines=header_part.lines+lines+1}
         in
         return (
           {
             part;
-            header=header_descr; 
-            content = `Message_map content;
-          },totsize+part.size,totlines+part.lines,attachments)
+            header=header_descr;
+            content=`Attach_map attach_contid 
+          },totsize+part.size,totlines+part.lines,1 + attachments)
       ) else (
-        (* don't need to key attachments or other parts by the content hash
-         * all parts have the root key - message hash, then the subkeys are
-         * the count, 0 - postmark, 1 - headers, 2 - content, 3+ - attachments
-         * just need to keep the number of attachments
-         *)
-        email_content pub_key config attach email transform >>= fun (content,size,lines) -> 
-        if attach then ( (* consider adding Content-type: message/external-body...  *)
-          let attach_contid = (string_of_int (3 + attachments)) in
-          save_attachment hash attach_contid content >>= fun () ->
-          (* +1 for crlf - header crlf content *)
-          let part = 
-          if multipart then 
-            {size=size;lines=lines}
-          else
-            {size=header_part.size+size+1;lines=header_part.lines+lines+1}
-          in
-          return (
-            {
-              part;
-              header=header_descr;
-              content=`Attach_map attach_contid 
-            },totsize+part.size,totlines+part.lines,1 + attachments)
-        ) else (
-          let offset = Buffer.length content_buff in
-          let length = Bytes.length content in
-          Buffer.add_string content_buff content;
-          let part = 
-          if multipart then 
-            {size=size;lines=lines}
-          else
-            {size=header_part.size+size+1;lines=header_part.lines+lines+1}
-          in
-          return (
-            {
-              part;
-              header=header_descr;
-              content = `Data_map {offset;length};
-            },totsize+part.size,totlines+part.lines,attachments)
-        )
+        let offset = Buffer.length content_buff in
+        let length = Bytes.length content in
+        Buffer.add_string content_buff content;
+        let part = 
+        if multipart then 
+          {size=size;lines=lines}
+        else
+          {size=header_part.size+size+1;lines=header_part.lines+lines+1}
+        in
+        return (
+          {
+            part;
+            header=header_descr;
+            content = `Data_map {offset;length};
+          },totsize+part.size,totlines+part.lines,attachments)
       )
-    | `Message _ -> assert (false); (* email_parser doesn't make it??? *)
+    | `Message email ->
+      walk email multipart 2 0 0 attachments >>= fun (content,size,lines,attachments) ->
+      let part = 
+        if multipart then 
+          {size=size;lines=lines}
+        else
+          {size=header_part.size+size+1;lines=header_part.lines+lines+1}
+      in
+      return (
+        {
+          part;
+          header=header_descr; 
+          content = `Message_map content;
+        },totsize+part.size,totlines+part.lines,attachments)
     | `Multipart elist ->
       assert (boundary <> "");
       Lwt_list.fold_left_s (fun (map,size,lines,attachments) email ->
@@ -274,10 +260,10 @@ let default_transform = function
 
 let parse ?(transform=default_transform) pub_key config message ~save_message ~save_attachment =
   let hash = Imap_crypto.get_hash message in
-  let message = Utils.make_email_message message in
+  Message.parse message >>= fun message ->
   do_encrypt pub_key config 
-    (transform (`Postmark (Mailbox.Postmark.to_string message.Mailbox.Message.postmark))) >>= fun postmark ->
-  do_encrypt_content pub_key config message.Mailbox.Message.email save_attachment hash transform >>= fun (headers,content, attachments) ->
+    (transform (`Postmark (Postmark.to_string (Message.postmark message)))) >>= fun postmark ->
+  do_encrypt_content pub_key config (Message.email message) save_attachment hash transform >>= fun (headers,content, attachments) ->
   save_message hash postmark headers content attachments >>
   return hash
 
@@ -362,11 +348,7 @@ let restore priv_key config ~get_message ~get_attachment  =
     do_decrypt_headers priv_key config headers >>= fun (map,headers) ->
     do_decrypt_content priv_key config content >>= fun content ->
     reassemble_email priv_key config ~headers ~content ~map ~get_attachment >>= fun email -> 
-    let email = Email.of_string email in
-    return {
-      Mailbox.Message.postmark=Mailbox.Postmark.of_string postmark;
-      Mailbox.Message.email=email
-    }
+    Message.parse (String.concat "" [postmark;email])
   ) (fun ex -> Printf.printf "restore exception %s\n%!" (Printexc.to_string ex); raise ex)
 
 let message_to_blob config keys message =

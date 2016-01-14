@@ -27,12 +27,12 @@ let () =
   Lwt_main.run (
     Utils.fold_email_with_file Sys.argv.(1) (fun cnt message ->
       Printf.fprintf stderr "%d\r%!" cnt;
-      Message.parse message >>= fun (light:lightmessage) ->
+      Message.parse message >>= fun light ->
       Printf.printf "--> start\n%!";
-      Printf.printf "Full message %d\n%!" light.position.size;
-      pr message light.postmark "Postmark";
-      pr message light.email.position "Email";
-      walk message light.email;
+      Printf.printf "Full message %d\n%!" light.message_.position.size;
+      pr message light.message_.postmark "Postmark";
+      pr message light.message_.email.position "Email";
+      walk message light.message_.email;
       Printf.printf "<-- end\n%!";
       return (`Ok (cnt+1))
     ) 1 >>= fun _ ->

@@ -2,8 +2,8 @@ open Lwt
 open Commands
 open Commands.Utils
 open Commands.Lazy_message
-open Parsemail
 open Commands.Email_parse
+open Lightparsemail
 
 module MapStr = Map.Make(String)
 
@@ -15,21 +15,10 @@ let get map key =
 let key s n =
   (string_of_int n) ^ "-" ^ s
 
-let email_content email =
-  match (Email.raw_content email) with
-  | None -> ""
-  | Some content -> Octet_stream.to_string content
-
 let match_re ~str ~re =
   try
     let _ = Str.search_forward (Str.regexp_case_fold re) str 0 in true
   with Not_found -> false
-
-let message_rfc822 email =
-  let headers = Header.to_list (Email.header email) in
-  List.exists (fun (n,v) -> 
-    (String.lowercase n) = "content-type" && match_re ~str:v ~re:"message/rfc822" 
-  ) headers
 
 let rec walk email part =
   begin
@@ -39,17 +28,11 @@ let rec walk email part =
     Printf.fprintf stderr "---------------------------------------- part %d\n%!" part
   end;
   Printf.fprintf stderr "---------------------------------------- header\n%!";
-  Printf.fprintf stderr "%s" 
-  (String_monoid.to_string (Header.to_string_monoid (Email.header email)));
-  match (Email.content email) with
+  Printf.fprintf stderr "%s" (Headers.to_string (Email.headers email));
+  match (Content.content (Email.body email)) with
   | `Data content ->
-    if part <> None && message_rfc822 email then (
-      Printf.fprintf stderr "---------------------------------------- message\n%!";
-      walk (Email.of_string (email_content email)) None
-    ) else (
-      Printf.fprintf stderr "---------------------------------------- content\n%!";
-      Printf.fprintf stderr "%s" (email_content email);
-    )
+    Printf.fprintf stderr "---------------------------------------- content\n%!";
+    Printf.fprintf stderr "%s" (Content.to_string content);
   | `Message message ->
     Printf.fprintf stderr "---------------------------------------- message\n%!";
     walk message None
@@ -204,7 +187,7 @@ let () =
           ~get_attachment:(fun contid -> 
             return (get map (key contid cnt))
           ) >>= fun message ->
-          Printf.printf "%s" (Mailbox.Message.to_string message);
+          Printf.printf "%s" (Message.to_string message);
           return ()
         )) >>= fun () ->
   

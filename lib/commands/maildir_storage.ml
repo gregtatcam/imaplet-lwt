@@ -21,7 +21,6 @@ open Storage_meta
 open Imaplet_types
 open Lazy_message
 open Lazy_maildir_message
-open Parsemail
 open Server_config
 open Mail_file_name
 
@@ -429,19 +428,18 @@ struct
   (* write message to the file *)
   let write_message t file message =
     let open Unix in
+    let open Lightparsemail in
     let tmp_file = MaildirPath.file_path t.mailbox (`Tmp file) in
+    begin
+      if t.config.maildir_parse then
+        Message.to_parsed_message_with_header message
+      else
+        return message
+    end >>= fun message ->
+    let message = encrypt t message in
     Lwt_io.with_file tmp_file ~flags:[O_NONBLOCK;O_CREAT;O_WRONLY] ~mode:Lwt_io.Output
     (fun oc ->
-      begin
-        if t.config.maildir_parse then (
-          Email_parse.message_to_blob t.config t.keys message >>= fun (msg_hash, message) ->
-          return message
-        ) else (
-          return (encrypt t message)
-        )
-      end >>= fun message ->
-      Lwt_io.write oc message
-    ) >>= fun () ->
+      Lwt_io.write oc message) >>= fun () ->
     let cur_file = current t file in
     Lwt_unix.link tmp_file cur_file >>
     Lwt_unix.unlink tmp_file
@@ -499,35 +497,9 @@ struct
       Lwt_unix.unlink (current t file)
     | _ -> return ()
 
-  let assemble_message t lazy_read metadata =
-    let (_,priv) = t.keys in
-    let priv = Utils.option_value_exn ~ex:EmptyPrivateKey priv in
-    Email_parse.message_from_blob t.config t.keys lazy_read 
-    (fun postmark headers content attachment ->
-      return (`Ok (
-        build_lazy_message_inst
-          (module Irmin_core.LazyIrminMessage)
-          ((fun () -> postmark ()),
-          (fun () -> headers ()),
-          (fun () -> content ()),
-          (attachment),
-          (fun () ->
-            return metadata
-          ))
-        )
-      )
-    )
-
   let fetch_ t position uids =
+    let open Lightparsemail in
     Printexc.record_backtrace true;
-    let skip_postmark ci =
-      if t.config.maildir_parse then
-        return ()
-      else (
-        Lwt_io.read_line ci >>= fun _ ->
-        return ()
-      )
-    in
     get_file t position uids >>= function
     | `Ok (_,uid,size,file) ->
       let (internal_date,size,modseq,flags) = message_file_name_to_data t.mailbox file in
@@ -542,19 +514,18 @@ struct
         let msg = decrypt t msg in
         Stats.add_readt (Unix.gettimeofday() -. t1);
         return msg) in
-      if t.config.maildir_parse then (
-          assemble_message t lazy_read metadata
-      ) else (
-        let lazy_message = Lazy.from_fun (fun () ->
-        Lazy.force lazy_read >>= fun buffer ->
-        let seq = Mailbox.With_seq.of_string buffer in
-        return (Utils.option_value_exn 
-            (Mailbox.With_seq.fold_message seq ~f:(fun _ message -> Some
-            message) ~init:None))) in
-        let lazy_metadata = Lazy.from_fun (fun () -> return metadata) in
-        return (`Ok (Lazy_message.build_lazy_message_inst (module LazyMaildirMessage)
-            (lazy_read, lazy_message, lazy_metadata)))
-      )
+      let lazy_message = 
+        Lazy.from_fun (fun () ->
+          Lazy.force lazy_read >>= fun buffer ->
+          if t.config.maildir_parse then
+            return (Message.from_parsed_message_with_header buffer)
+          else
+            Message.parse buffer
+        )
+      in
+      let lazy_metadata = Lazy.from_fun (fun () -> return metadata) in
+      return (`Ok (Lazy_message.build_lazy_message_inst (module LazyMaildirMessage)
+        (lazy_read, lazy_message, lazy_metadata)))
     | `Eof -> return `Eof
     | `NotFound -> return `NotFound
 

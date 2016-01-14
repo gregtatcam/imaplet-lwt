@@ -169,6 +169,12 @@ struct
   (* append message(s) to selected mailbox *)
   let append t message message_metadata =
     let (pub_key,_) = t.keys in
+    begin
+      if t.config.maildir_parse then
+        Lightparsemail.Message.to_parsed_message_with_header message
+      else
+        return message
+    end >>= fun message ->
     Email_parse.do_encrypt pub_key t.config message >>= fun message ->
     if t.config.hybrid then (
       let obj = Object.create ?compress:t.config.compress_repo t.config.irmin_path in
@@ -282,9 +288,11 @@ struct
       ) in
       let lazy_message = Lazy.from_fun (fun () ->
         Lazy.force lazy_read >>= fun buffer ->
-        let seq = Mailbox.With_seq.of_string buffer in
-        return (Utils.option_value_exn (Mailbox.With_seq.fold_message seq
-          ~f:(fun _ message -> Some message) ~init:None))) in
+          if t.config.maildir_parse then
+            return (Lightparsemail.Message.from_parsed_message_with_header buffer)
+          else
+            Lightparsemail.Message.parse buffer
+        ) in
       let lazy_metadata = Lazy.from_fun (fun () -> 
         let tm = Unix.gettimeofday() in
         get_message_metadata t uid sha name >>= fun meta ->
