@@ -42,6 +42,35 @@ let empty_content = {position=empty_position;content=`Data}
 let empty_email =
   {position=empty_position;headers=empty_headers;body=empty_content}
 
+(* parse text stream (into lines for now) *)
+module TextStream :
+sig
+  type t
+  val of_string : string -> t
+  val read_line_opt : t -> string option
+end =
+struct
+  let re_line = Re_posix.compile_pat ~opts:[`Newline] "^([^\r\n]*)([\r\n]*)"
+
+  type t = {text: string; offset: int ref}
+
+  let of_string text = {text; offset = ref 0}
+
+  let read_line_opt t = 
+    try
+      let subs = Re.exec ~pos:t.!offset re_line t.text in
+      let line = Re.get subs 1 in
+      let (ofs,len) = 
+        try
+          Re.get_ofs subs 2
+        with Not_found -> 
+          Re.get_ofs subs 1
+      in  
+      t.offset := len;
+      Some line
+    with Not_found -> None
+end
+
 (* wrapper for Lwt_io.read* methods to read in-memory bytes *)
 module MemReader :
 sig
@@ -197,9 +226,9 @@ sig
   (* get headers as the string *)
   val to_string : t -> string
   (* get headers as the list *)
-  val to_list : t -> (string * string ) list Lwt.t
+  val to_list : t -> (string * string ) list
   (* get headers as the map *)
-  val to_map : t -> string Map.Make(String).t Lwt.t
+  val to_map : t -> string Map.Make(String).t
 end =
 struct
   type t = {message:string;headers_:lightheaders}
@@ -273,11 +302,10 @@ struct
 
   let get_headers t cb init =
     let re = Re_posix.compile_pat "^([^\t :]+):[ ]*(.*)$" in
-    let bytes = Lwt_bytes.of_string (to_string t) in
-    let ic = Lwt_io.of_bytes ~mode:Lwt_io.Input bytes in
+    let ts = TextStream.of_string (to_string t) in
     let rec read name value acc =
-      Lwt_io.read_line_opt ic >>= function
-      | None -> return (name,value,acc)
+      match TextStream.read_line_opt ts with
+      | None -> (name,value,acc)
       | Some line ->
         try
           let subs = Re.exec re line in
@@ -302,20 +330,18 @@ struct
           in
           read name value acc
     in
-    read "" "" init >>= fun (name,value,acc) ->
-    Lwt_io.close ic >>= fun () ->
+    let (name,value,acc) = read "" "" init in
     let acc =
       if name <> "" then
         cb acc name value
       else
         acc
     in
-    return acc
+    acc
 
   let to_list t =
-    get_headers t (fun acc name value ->
-      (name,value) :: acc) [] >>= fun l ->
-    return (List.rev l)
+    List.rev (get_headers t (fun acc name value ->
+      (name,value) :: acc) [])
 
   let to_map t =
     get_headers t (fun acc name value ->

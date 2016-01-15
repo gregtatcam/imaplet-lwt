@@ -161,7 +161,7 @@ let do_encrypt_content pub_key config email save_attachment hash transform =
   let content_buff = Buffer.create 100 in
   let headers_buff = Buffer.create 100 in
   let rec walk email multipart last_crlf totsize totlines attachments =
-    Headers.to_list (Email.headers email) >>= fun headers ->
+    let headers = Headers.to_list (Email.headers email) in
     let (header_part,header_descr) = get_header_descr headers headers_buff transform in
     let boundary,attach,rfc822 = get_hdr_attrs headers in
     match Content.content (Email.body email) with

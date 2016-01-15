@@ -49,7 +49,7 @@ module LazyMaildirEmail : LazyEmail_intf with type c = maildir_email_accessor =
 
     let header ?(incl=`Map MapStr.empty) ?(excl=MapStr.empty) t =
       email_of_t t >>= fun email ->
-      Headers.to_list (Email.headers email) >>= fun headers ->
+      let headers = Headers.to_list (Email.headers email) in
       return (List.filter (fun (n,_) ->
         let dont_incl =
         match incl with
