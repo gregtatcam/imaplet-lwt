@@ -173,7 +173,7 @@ let buff_size = 1024
 
 (* uncompress *)
 let inflate strm inbuff =
-  let outbuff = String.create buff_size in
+  let outbuff = Bytes.create buff_size in
   let rec _inflate inbuff offset len =
     let (fi, orig, size) = Zlib.inflate strm inbuff offset len 
       outbuff 0 buff_size Zlib.Z_SYNC_FLUSH in
@@ -204,7 +204,7 @@ let read_cache ic =
     Buffer.clear !inbuffer;
     return (Some contents)
   ) else (
-    let buff = String.create buff_size in
+    let buff = Bytes.create buff_size in
     Lwt_io.read_into ic buff 0 buff_size >>= function
     | 0 -> return None
     | size -> return (Some (String.sub buff 0 size))
@@ -217,7 +217,7 @@ let zip_read ?count ic =
     match count with 
     | None -> Lwt_io.read_line_opt ic 
     | Some count -> 
-      let buff = String.create count in
+      let buff = Bytes.create count in
       Lwt_io.read_into_exactly ic buff 0 count >>
       return (Some buff)
   ) else (
@@ -257,19 +257,40 @@ let write_echo oc command =
   let command = if !compression then Imap_crypto.do_compress command else command in
   Lwt_io.write oc command >> Lwt_io.flush oc
 
+let send_append ic oc mailbox stream =
+  let rec loop cnt =
+    Lwt_stream.get stream >>= function
+    | Some message ->
+      Printf.printf "appending %d\r%!" cnt;
+      let sz = if !_dovecot then 1 else 2 in
+      let cmd = 
+        Printf.sprintf "A%d APPEND %s {%d+}" cnt mailbox (String.length message + sz) in
+      write_echo oc cmd >>
+      write_echo oc message >>
+      read_net_echo ic >>
+      loop (cnt + 1)
+    | None -> return ()
+  in
+  loop 1
+
 (* send append to the server, append is expaned in that the actuall append data 
  * is referenced by a file *)
 let handle_append ic oc mailbox msgfile =
-  Utils.fold_email_with_file msgfile (fun cnt message ->
-    Printf.printf "appending %d\r%!" cnt;
-    let sz = if !_dovecot then 1 else 2 in
-    let cmd = 
-      Printf.sprintf "A%d APPEND %s {%d+}" cnt mailbox (String.length message + sz) in
-    write_echo oc cmd >>
-    write_echo oc message >>
-    read_net_echo ic >>
-    return (`Ok (cnt + 1))
-  ) 1 >>= fun _ ->
+  let (stream, push_stream) = Lwt_stream.create() in
+  let t = Unix.gettimeofday() in
+  let re = Re_posix.compile_pat ~opts:[`ICase;`Newline] "^message-id: ([^ \r\n]+)" in
+  Utils.fold_email_with_file msgfile (fun _ message ->
+    push_stream (Some message);
+    return (`Ok())
+  ) () >>= fun _ ->
+  push_stream None;
+  let t1 = Unix.gettimeofday() in
+  let d = t1 -. t in
+  (* adjust timers by the load time *)
+  Meta.timers := MapStr.map (fun v -> v +. d) !Meta.timers;
+  Printf.printf "done in-memory load %.02f\n%!" d;
+  send_append ic oc mailbox stream >>= fun () ->
+  Printf.printf "done send %.02f\n%!" (Unix.gettimeofday() -. t1);
   return ()
 
 (* check if compression command *)
