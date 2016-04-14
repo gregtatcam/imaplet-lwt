@@ -278,11 +278,11 @@ let send_append ic oc mailbox stream =
 let handle_append ic oc mailbox msgfile =
   let (stream, push_stream) = Lwt_stream.create() in
   let t = Unix.gettimeofday() in
-  let re = Re_posix.compile_pat ~opts:[`ICase;`Newline] "^message-id: ([^ \r\n]+)" in
-  Utils.fold_email_with_file msgfile (fun _ message ->
+  Utils.fold_email_with_file msgfile (fun cnt message ->
+    Printf.printf "loading %d\r%!" cnt;
     push_stream (Some message);
-    return (`Ok())
-  ) () >>= fun _ ->
+    return (`Ok(cnt+1))
+  ) 1 >>= fun _ ->
   push_stream None;
   let t1 = Unix.gettimeofday() in
   let d = t1 -. t in
