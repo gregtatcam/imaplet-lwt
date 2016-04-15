@@ -33,6 +33,7 @@ open Lwt
 
 let _dovecot = ref false
 let _echo = ref false
+let append_data = ref None
 
 module MapStr = Map.Make(String)
 
@@ -58,23 +59,29 @@ let get_user str =
   with Not_found -> raise InvalidCommand
 
 (* process command line *)
-let rec args i script addr port ssl user dovecot echo =
+let rec args i script addr port ssl user dovecot echo repeat =
   if i >= Array.length Sys.argv then
-    script,addr,port,ssl,user,dovecot,echo
+    script,addr,port,ssl,user,dovecot,echo,repeat
   else
     match Sys.argv.(i) with 
     | "-script" -> args (i+2) Sys.argv.(i+1) addr port ssl user dovecot echo
+      repeat
     | "-address" -> args (i+2) script Sys.argv.(i+1) port ssl user dovecot echo
-    | "-port" -> args (i+2) script addr (int_of_string (Sys.argv.(i+1))) ssl user dovecot echo
-    | "-ssl" -> args (i+2) script addr port (bool_of_string (Sys.argv.(i+1))) user dovecot echo
-    | "-user" -> args (i+2) script addr port ssl (get_user Sys.argv.(i+1)) dovecot echo
-    | "-dovecot" -> args (i+1) script addr port ssl user true echo
-    | "-echo" -> args (i+1) script addr port ssl user dovecot true
+      repeat
+    | "-port" -> args (i+2) script addr (int_of_string (Sys.argv.(i+1))) ssl
+      user dovecot echo repeat
+    | "-ssl" -> args (i+2) script addr port (bool_of_string (Sys.argv.(i+1)))
+      user dovecot echo repeat
+    | "-user" -> args (i+2) script addr port ssl (get_user Sys.argv.(i+1))
+      dovecot echo repeat
+    | "-dovecot" -> args (i+1) script addr port ssl user true echo repeat
+    | "-echo" -> args (i+1) script addr port ssl user dovecot true repeat
+    | "-repeat" -> args (i+2) script addr port ssl user dovecot echo (Some Sys.argv.(i+1))
     | _ -> raise InvalidCommand
 
 let usage () =
   Printf.fprintf stderr "usage: client -script [path] -address [address] \
-  -port [port] [-ssl [true|false]] [-user [user:pswd]] [-dovecot] [-echo]\n%!"
+  -port [port] [-ssl [true|false]] [-user [user:pswd]] [-dovecot] [-echo] [-repeat]\n%!"
 
 (* script meta line contains start/stop timers and server response echo to the terminal *)
 let process_meta line = 
@@ -134,9 +141,10 @@ let get_script file user =
 (* parse command line arguments and pass to the callback *)
 let commands f =
   try 
-    let script,addr,port,ssl,user,dovecot,echo = args 1 "" "127.0.0.1" 993 true None false false in
+    let script,addr,port,ssl,user,dovecot,echo,repeat = args 1 "" "127.0.0.1" 993
+    true None false false None in
       try 
-        f script addr port ssl user dovecot echo
+        f script addr port ssl user dovecot echo repeat
       with ex -> Printf.printf "%s\n%!" (Printexc.to_string ex)
   with _ -> usage ()
 
@@ -257,39 +265,40 @@ let write_echo oc command =
   let command = if !compression then Imap_crypto.do_compress command else command in
   Lwt_io.write oc command >> Lwt_io.flush oc
 
-let send_append ic oc mailbox stream =
-  let rec loop cnt =
-    Lwt_stream.get stream >>= function
-    | Some message ->
-      Printf.printf "appending %d\r%!" cnt;
-      let sz = if !_dovecot then 1 else 2 in
-      let cmd = 
-        Printf.sprintf "A%d APPEND %s {%d+}" cnt mailbox (String.length message + sz) in
-      write_echo oc cmd >>
-      write_echo oc message >>
-      read_net_echo ic >>
-      loop (cnt + 1)
-    | None -> return ()
-  in
-  loop 1
+let send_append ic oc mailbox messages =
+  Lwt_list.fold_right_s (fun message cnt ->
+    Printf.printf "appending %d\r%!" cnt;
+    let sz = if !_dovecot then 1 else 2 in
+    let cmd = 
+      Printf.sprintf "A%d APPEND %s {%d+}" cnt mailbox (String.length message + sz) in
+    write_echo oc cmd >>
+    write_echo oc message >>
+    read_net_echo ic >>
+    return (cnt + 1)
+  ) messages 1
 
 (* send append to the server, append is expaned in that the actuall append data 
  * is referenced by a file *)
 let handle_append ic oc mailbox msgfile =
-  let (stream, push_stream) = Lwt_stream.create() in
-  let t = Unix.gettimeofday() in
-  Utils.fold_email_with_file msgfile (fun cnt message ->
-    Printf.printf "loading %d\r%!" cnt;
-    push_stream (Some message);
-    return (`Ok(cnt+1))
-  ) 1 >>= fun _ ->
-  push_stream None;
+  begin
+  match !append_data with 
+  | None ->
+    let t = Unix.gettimeofday() in
+    Utils.fold_email_with_file msgfile (fun (cnt,messages) message ->
+      Printf.printf "loading %d\r%!" cnt;
+      return (`Ok(cnt+1,message::messages))
+    ) (1,[]) >>= fun (_,messages) ->
+    let t1 = Unix.gettimeofday() in
+    let d = t1 -. t in
+    (* adjust timers by the load time *)
+    Meta.timers := MapStr.map (fun v -> v +. d) !Meta.timers;
+    Printf.printf "done in-memory load %.02f\n%!" d;
+    append_data := Some messages;
+    return messages
+  | Some messages -> return messages
+  end >>= fun messages ->
   let t1 = Unix.gettimeofday() in
-  let d = t1 -. t in
-  (* adjust timers by the load time *)
-  Meta.timers := MapStr.map (fun v -> v +. d) !Meta.timers;
-  Printf.printf "done in-memory load %.02f\n%!" d;
-  send_append ic oc mailbox stream >>= fun () ->
+  send_append ic oc mailbox messages >>= fun _ ->
   Printf.printf "done send %.02f\n%!" (Unix.gettimeofday() -. t1);
   return ()
 
@@ -370,22 +379,32 @@ let output_meta () =
   ) !Meta.timers
 
 let () =
-  commands (fun script addr port ssl user dovecot echo ->
+  commands (fun script addr port ssl user dovecot echo repeat ->
     _dovecot := dovecot;
     _echo := echo;
+    let mutex = Lwt_mutex.create () in
     Lwt_main.run (catch(fun() ->
-        (* recursively execute stream commands *)
-        let rec exec strm ic oc =
-          exec_command strm ic oc >>= function
-          | `Done -> return () (* done reading stream *)
-          | `OkAppend | `OkSleep -> exec strm ic oc (* append is special, reads from a file *)
-          | `Ok compr -> 
-            read_response strm ic >>= function
-            | `Done -> return ()
-            | `Ok -> 
-              compression := compr;
-              exec strm ic oc 
+      begin
+      if repeat <> None then (
+        let _ = Lwt_unix.on_signal 14 (fun _ -> Lwt_mutex.unlock mutex) in
+        Lwt_mutex.lock mutex 
+      ) else 
+        return ()
+      end >>
+      (* recursively execute stream commands *)
+      let rec exec strm ic oc =
+        exec_command strm ic oc >>= function
+        | `Done -> return () (* done reading stream *)
+        | `OkAppend | `OkSleep -> exec strm ic oc (* append is special, reads from a file *)
+        | `Ok compr -> 
+        read_response strm ic >>= function
+        | `Done -> return ()
+        | `Ok -> 
+          compression := compr;
+          exec strm ic oc 
         in
+      let rec loop () =
+        Lwt_mutex.lock mutex >>
         Lwt_io.with_file ~mode:Lwt_io.Input script (fun file ->
           (* read the script file into the stream *)
           get_script file user >>= fun strm ->
@@ -398,7 +417,17 @@ let () =
           (* print the meta, like execution timers *)
           output_meta ();
           return ()
-        )
+        ) >>= fun () ->
+        begin
+        match repeat with
+        | Some flag ->
+          Lwt_unix.system ("echo 1 >> ./" ^ flag) >>= fun _ ->
+          loop ()
+        | None ->
+          return ()
+        end
+      in
+      loop ()
       )
       (fun ex -> Printf.fprintf stderr "client: fatal exception: %s %s"
         (Printexc.to_string ex) (Printexc.get_backtrace()); return()
