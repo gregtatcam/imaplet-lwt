@@ -23,17 +23,20 @@ module MapStr = Map.Make(String)
 
 type ctype = 
   [`Audio|`Video|`Image|`Application|`Text|`Multipart|`Message|`Other of string]
-  with sexp
+  [@@deriving sexp]
 type stype = 
-  [`Plain|`Rfc822|`Digest|`Alternative|`Parallel|`Mixed|`Other of string] with sexp
-type entity = {offset:int; size:int;lines:int} with sexp
-type boundary = {bopen:string;bclose:string} with sexp
+  [`Plain|`Rfc822|`Digest|`Alternative|`Parallel|`Mixed|`Other of string]
+  [@@deriving sexp]
+type entity = {offset:int; size:int;lines:int} [@@deriving sexp]
+type boundary = {bopen:string;bclose:string} [@@deriving sexp]
 type lightheaders = {position:entity;content_type:ctype; content_subtype:stype; 
-  boundary:boundary option;} with sexp
+boundary:boundary option;} [@@deriving sexp]
 type lightcontent_ = [`Data|`Message of lightmail |`Multipart of lightmail list]
 and lightcontent = {position:entity;content:lightcontent_}
-and lightmail = {position:entity;headers:lightheaders; body: lightcontent} with sexp
-type lightmessage = {position:entity;postmark:entity;email:lightmail} with sexp
+and lightmail = {position:entity;headers:lightheaders; body: lightcontent}
+[@@deriving sexp]
+type lightmessage = {position:entity;postmark:entity;email:lightmail}
+[@@deriving sexp]
 
 let empty_position = {offset=0;size=0;lines=0}
 let empty_headers =
@@ -58,7 +61,7 @@ struct
 
   let read_line_opt t = 
     try
-      let subs = Re.exec ~pos:t.!offset re_line t.text in
+      let subs = Re.exec ~pos:!(t.offset) re_line t.text in
       let line = Re.get subs 1 in
       let (ofs,len) = 
         try
@@ -115,14 +118,14 @@ struct
     Lwt_io.set_position t.ic (Int64.of_int p)
 
   let read_line t = 
-    t.lines := t.!lines + 1;
+    t.lines := !(t.lines) + 1;
     Lwt_io.read_line t.ic
 
   let read_line_opt t = 
     Lwt_io.read_line_opt t.ic >>= function
     | None -> return None
     | Some line ->
-      t.lines := t.!lines + 1;
+      t.lines := !(t.lines) + 1;
       return (Some line)
 
   let read_char t = Lwt_io.read_char t.ic
@@ -152,7 +155,7 @@ struct
 
   let to_string t = t.message
 
-  let lines t = t.!lines
+  let lines t = !(t.lines)
 end
 
 (* get the size for the given position to the current position *)

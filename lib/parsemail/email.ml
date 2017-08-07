@@ -13,7 +13,7 @@ module rec Multipart : sig
     epilogue : Octet_stream.t option;
 
     parts    : Message.t list;
-  } with sexp
+  } [@@deriving sexp]
 
   val of_octet_stream : media_type:Media_type.t ->
     Octet_stream.t -> t option
@@ -29,7 +29,7 @@ end = struct
     epilogue : Octet_stream.t sexp_option;
 
     parts    : Message.t list;
-  } with sexp
+  } [@@deriving sexp]
 
   let of_octet_stream ~media_type octet_stream =
     let open Option_.Monad_infix in
@@ -90,7 +90,7 @@ and Content : sig
       Multipart of Multipart.t
     | Data of (Encoding.t * Octet_stream.t)
     | Message of Message.t
-  with sexp
+    [@@deriving sexp]
   ;;
 
   val empty : unit -> t
@@ -115,7 +115,7 @@ end
       Multipart of Multipart.t
     | Data of (Encoding.t * Octet_stream.t)
     | Message of Message.t
-  with sexp
+    [@@deriving sexp]
   ;;
 
   let empty () = Data (Header.Content_transfer_encoding.default, Octet_stream.empty)
@@ -164,7 +164,7 @@ end
   ;;
 end
 and Message : sig
-  type t with sexp;;
+  type t [@@deriving sexp];;
 
   val empty : unit -> t
   (* val create : ?header:Header.t -> ?content:Content.t -> unit -> t *)
@@ -275,7 +275,7 @@ end = struct
     type t = {
       header : Header.t;
       content : Content.t;
-    } with sexp
+    } [@@deriving sexp]
   end
 
   let t'_of_t t  =

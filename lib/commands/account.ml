@@ -108,7 +108,9 @@ let parse_users buff user password =
 
 let b64decode b64 =
    (*let buff = Str.global_replace (Str.regexp "=$") "" b64 in*)
-   Cstruct.to_string (Nocrypto.Base64.decode (Cstruct.of_string b64))
+  match Nocrypto.Base64.decode (Cstruct.of_string b64) with
+  | Some buff -> Cstruct.to_string buff
+  | None -> assert(false);;
 
 let parse_user_b64 b64 =
   let buff = b64decode b64 in (** need to log this if it fails **)

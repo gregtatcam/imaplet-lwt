@@ -26,17 +26,17 @@ type mailboxFlags =
   | Flags_Keyword of string
   | Flags_Extention of string
   | Flags_Template
-  with sexp
+  [@@deriving sexp]
 
 type literal = Literal of int | LiteralPlus of int
 
-type seq_number = Wild | Number of int with sexp
+type seq_number = Wild | Number of int [@@deriving sexp]
 
 type seq_set =
   | SeqNumber of seq_number
-  | SeqRange of seq_number * seq_number with sexp
+  | SeqRange of seq_number * seq_number [@@deriving sexp]
 
-type sequence = seq_set list with sexp
+type sequence = seq_set list [@@deriving sexp]
 
 type responseCode = 
   | RespCode_Alert
@@ -77,7 +77,7 @@ type entryType =
   | Entry_Shared
   | Entry_Priv
   | Entry_All
-  with sexp
+  [@@deriving sexp]
   
 type searchKey = 
   | Search_All (** all messages in the mailbox; the default initial key for ANDing **)
@@ -115,14 +115,14 @@ type searchKey =
   | Search_Unflagged (** messages with \Flagged flag not set **)
   | Search_Unkeyword of string (** message that do not have the specified keyword flag set **)
   | Search_Unseen (** messages with \Seen flag not set **) 
-  with sexp
+  [@@deriving sexp]
 
 type 'a searchKeys =
   | Key of 'a
   | KeyList of 'a searchKeys list
   | OrKey of 'a searchKeys * 'a searchKeys
   | NotKey of 'a searchKeys 
-  with sexp
+  [@@deriving sexp]
   
 type fetchMacro = 
   | Fetch_All

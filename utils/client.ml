@@ -273,7 +273,7 @@ let send_append ic oc mailbox messages =
       Printf.sprintf "A%d APPEND %s {%d+}" cnt mailbox (String.length message + sz) in
     write_echo oc cmd >>
     write_echo oc message >>
-    read_net_echo ic >>
+    read_net_echo ic >>= fun _ ->
     return (cnt + 1)
   ) messages 1
 

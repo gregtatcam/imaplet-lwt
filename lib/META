@@ -1,9 +1,9 @@
 # OASIS_START
-# DO NOT EDIT (digest: 252f7b85fd1e81542026495c1e01ab31)
+# DO NOT EDIT (digest: 1eb84f7c62daaa5d03ac3de993dc12a7)
 version = "0.1.15"
 description = "IMAP server"
 requires =
-"lwt lwt.unix lwt.syntax tls.lwt sexplib.syntax threads str cstruct.unix irmin.unix nocrypto imaplet.parsemail imaplet.commands"
+"lwt lwt.unix lwt.ppx tls.lwt sexplib ppx_sexp_conv threads str cstruct.unix irmin-unix nocrypto imaplet.parsemail imaplet.commands"
 archive(byte) = "imaplet.cma"
 archive(byte, plugin) = "imaplet.cma"
 archive(native) = "imaplet.cmxa"
@@ -24,7 +24,7 @@ package "commands" (
  version = "0.1.15"
  description = "IMAP server"
  requires =
- "lwt lwt.unix lwt.syntax lwt.preemptive tls.lwt dns dns.lwt ipaddr sexplib.syntax threads str cstruct.unix mstruct irmin.unix nocrypto zip imaplet.parsemail"
+ "lwt lwt.unix lwt.ppx lwt.preemptive tls.lwt dns dns-lwt-unix ipaddr sexplib ppx_sexp_conv threads str cstruct.unix mstruct irmin-unix nocrypto zip imaplet.parsemail"
  archive(byte) = "commands.cma"
  archive(byte, plugin) = "commands.cma"
  archive(native) = "commands.cmxa"

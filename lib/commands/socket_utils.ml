@@ -71,11 +71,15 @@ let create_clnt_socket ?(stype=Unix.SOCK_STREAM) ?interface addr =
   end
   in
   if stype = Unix.SOCK_DGRAM then (
+    begin
     match interface with
     | Some intf -> Lwt_unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_of_string intf, 0))
     | None -> Lwt_unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_any, 0))
-  );
-  (socket,sockaddr)
+    end >>
+    return (socket,sockaddr)
+  ) else (
+    return (socket,sockaddr)
+  )
 
 
 let accept_ssl sock cert =
@@ -121,12 +125,12 @@ let starttls_client host sock () =
   Nocrypto.Rng.reseed (Cstruct.of_string "abc");
   X509_lwt.authenticator `No_authentication_I'M_STUPID >>= fun authenticator ->
   Tls_lwt.Unix.client_of_fd
-    (Tls.Config.client ~authenticator ()) host sock >>= fun clnt ->
+    (Tls.Config.client ~authenticator ()) ~host:host sock >>= fun clnt ->
   return (Tls_lwt.of_t clnt)
 
 let client_send addr f init =
   let open Lwt_unix in
-  let (socket,sockaddr) = create_clnt_socket addr in
+  create_clnt_socket addr >>= fun (socket,sockaddr) ->
   Lwt_unix.connect socket sockaddr >>
   let inchan = Lwt_io.of_fd ~mode:Lwt_io.input socket in
   let outchan = Lwt_io.of_fd ~mode:Lwt_io.output socket in
@@ -136,7 +140,7 @@ let client_send addr f init =
   return acc
 
 let client_send_dgram ?interface addr f init =
-  let (socket,sockaddr) = create_clnt_socket ~stype:Unix.SOCK_DGRAM ?interface addr in
+  create_clnt_socket ~stype:Unix.SOCK_DGRAM ?interface addr >>= fun (socket,sockaddr) ->
   let send msg =
     Lwt_unix.sendto socket msg 0 (String.length msg) [] sockaddr in
   let recv msg =

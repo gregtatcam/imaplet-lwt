@@ -218,7 +218,7 @@ end = struct
 end
 
 module Bigbuffer_ : sig
-  type t with sexp_of
+  type t [@@deriving sexp_of]
   val create : int -> t
   val contents : t -> string
   val volatile_contents : t -> Bigstring_.t
@@ -234,7 +234,7 @@ end = struct
     mutable pos : int;
     mutable len : int;
     init : Bigstring_.t;
-  }  with sexp_of
+  }  [@@deriving sexp_of]
 
 
   let resize buf more =

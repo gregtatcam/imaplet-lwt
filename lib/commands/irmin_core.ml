@@ -30,11 +30,12 @@ exception InvalidKey of string
 exception EmptyPrivateKey
 exception InvalidUid of int
 
-module Store = Irmin_git.FS(Irmin.Contents.String)(Irmin.Ref.String)(Irmin.Hash.SHA1)
-module View = Irmin.View(Store)
+module Store = Irmin_unix.Git.FS.KV(Irmin.Contents.String)
+module Tree = Store.Tree
 module MapStr = Map.Make(String)
+let info = Irmin_unix.info
 
-type hashes = {attachments:int} with sexp
+type hashes = {attachments:int} [@@deriving sexp]
 
 type irmin_accessors =
   (unit -> string Lwt.t) * (* postmark *)
@@ -84,13 +85,13 @@ module LazyIrminEmail : LazyEmail_intf with type c = email_irmin_accessors =
         let dont_incl =
         match incl with
         | `Map incl -> 
-          MapStr.is_empty incl = false && MapStr.mem (String.lowercase n) incl = false
+          MapStr.is_empty incl = false && MapStr.mem (String.lowercase_ascii n) incl = false
         | `Regx incl ->
           Regex.match_regex ~case:false ~regx:incl n = false
         in
         (* exclude if it is not on included list or is on excluded list *)
         (dont_incl = true ||
-          MapStr.is_empty excl = false && MapStr.mem (String.lowercase n) excl = true) = false
+          MapStr.is_empty excl = false && MapStr.mem (String.lowercase_ascii n) excl = true) = false
       ) (list_of_sexp (fun sexp -> pair_of_sexp string_of_sexp string_of_sexp sexp) sexp))
 
     let header_to_str ?(incl=`Map MapStr.empty) ?(excl=MapStr.empty) t =
@@ -223,9 +224,9 @@ module Key_ :
     val key_to_workpath : t -> string
     val view_key_to_workpath : t -> string
     val assert_key : t -> unit
-  end with type t = View.key =
+  end with type t = Store.key = (* is [string] *)
   struct
-    type t = View.key
+    type t = Store.key
 
     let create_account user =
       ["imaplet";user]
@@ -251,6 +252,10 @@ module Key_ :
     let add_list key l =
       List.concat [key;l]
 
+    (* mailboxes are stored under 'mailboxes' folder
+     * inject 'mailboxes' into the logical path to create
+     * the physical path, i.e. foo1/foo2/foo3 ->
+     * mailboxes/foo1/mailboxes/foo2/mailboxes/foo3 *)
     let mailbox_of_list l =
       List.fold_right (fun i (mailbox,acc) -> 
         if i <> "" then (
@@ -267,6 +272,7 @@ module Key_ :
       let key = Str.split (Str.regexp "/") path in
       mailbox_of_list key
       
+    (* append 'mailboxes' to the key *)
     let mailboxes_of_mailbox key =
       add_path key "mailboxes"
 
@@ -322,6 +328,8 @@ let get_irmin_path user config =
   | None -> config.irmin_path
   | Some user -> Utils.user_path ~user ~path:config.irmin_path ()
 
+type step = string
+
 module type GitIntf =
   sig
     type store
@@ -330,7 +338,7 @@ module type GitIntf =
     val remove : store -> Key_.t -> unit Lwt.t
     val read_exn : store -> Key_.t -> string Lwt.t
     val mem : store -> Key_.t -> bool Lwt.t
-    val list : store -> Key_.t -> Key_.t list Lwt.t
+    val list : store -> Key_.t -> step list Lwt.t
     val update : store -> Key_.t -> string -> unit Lwt.t
     val update_view : store -> Key_.t -> view -> unit Lwt.t
     val read_view : store -> Key_.t -> view Lwt.t
@@ -375,8 +383,7 @@ module GitWorkdirIntf : GitIntf with type store = string
     let list store key =
       let path = get_path store key in
       files_of_directory path (fun acc file -> 
-        let key = Key_.add_list key [file] in
-        return (key :: acc)
+        return (file :: acc)
       ) [] >>= function
       | `Ok l -> return l
       | `NoDir -> return [] (* directory doesn't exist -> mailbox with no submailboxes *)
@@ -411,11 +418,11 @@ module GitWorkdirIntf : GitIntf with type store = string
 
   end
 
-module IrminIntf : GitIntf with type store = (string -> Store.t) and 
-  type view = View.t =
+module IrminIntf : GitIntf with type store = Store.t and 
+  type view = Store.tree =
   struct
-    type store = (string -> Store.t)
-    type view = View.t
+    type store = Store.t
+    type view = Store.tree
 
     let fmt t x = Printf.ksprintf (fun str -> t str) x
     let path () = String.concat "/"
@@ -427,50 +434,40 @@ module IrminIntf : GitIntf with type store = (string -> Store.t) and
 
     let create ?user config =
       let _config = Irmin_git.config 
-        ~root:(get_irmin_path user config)
-        ~bare:(config.irmin_expand=false) () in
-      Store.Repo.create _config >>= Store.master task
+        ~bare:(config.irmin_expand=false) (get_irmin_path user config) in
+      Store.Repo.v _config >>= fun repo -> Store.master repo >>= fun s ->
+      return s
 
     let remove store key =
       Key_.assert_key key;
-      Store.remove_rec (fmt store "Remove %a." path key) key
+      Store.remove store ~info:(info "removing %s " (Key_.key_to_path key)) key
 
     let read_exn store key =
       Key_.assert_key key;
-      Store.read_exn (fmt store "Read %a." path key) key
+      Store.get store key
 
     let mem store key =
       Key_.assert_key key;
-      Store.mem (fmt store "Check if %a exists." path key) key
+      Store.mem store key
 
     let list store key =
       Key_.assert_key key;
-      Store.list (fmt store "List the contents of %a" path key) key
+      Store.list store key >>= fun l ->
+      (* second arg (_) is `Node|`Contents, may need to add it, to distinguish
+       * Mailbox from Folder *)
+      Lwt_list.fold_left_s (fun acc (it,_) -> 
+        return (acc @ [it])) [] l
 
     let update store key data =
-      Store.update (fmt store "Update %a." path key) key data
+      Store.set store ~info:(info "updating %s " (Key_.key_to_path key)) key data
 
     let update_view store key view =
       Key_.assert_key key;
-      let msg =
-        let buf = Buffer.create 1024 in
-        let path buf key = Buffer.add_string buf (String.concat "/" key) in
-        Printf.bprintf buf "Updating %a.\n\n" path key;
-        let actions = View.actions view in
-        List.iter (function
-            | `List (k, _)     -> Printf.bprintf buf "- list   %a\n" path k
-            | `Read (k, _)     -> Printf.bprintf buf "- read   %a\n" path k
-            | `Rmdir k         -> Printf.bprintf buf "- rmdir  %a\n" path k
-            | `Write (k, None) -> Printf.bprintf buf "- remove %a\n" path k
-            | `Write (k, _)    -> Printf.bprintf buf "- write  %a\n" path k
-          ) actions;
-        Buffer.contents buf
-      in
-      View.merge_path_exn (store msg) key view
+      Store.set_tree store ~strategy:`Merge ~info:(info "merging %s " (Key_.key_to_path key)) key view
 
     let read_view store key =
       Key_.assert_key key;
-      View.of_path (fmt store "Reading %a" path key) key
+      Store.get_tree store key
 
   end
 
@@ -484,7 +481,7 @@ module type GitIntf_tr =
     val update : transaction -> Key_.t -> string -> unit Lwt.t
     val read : transaction -> Key_.t -> string option Lwt.t
     val read_exn : transaction -> Key_.t -> string Lwt.t
-    val list : transaction -> Key_.t -> Key_.t list Lwt.t
+    val list : transaction -> Key_.t -> step list Lwt.t
     val remove : transaction -> Key_.t -> unit Lwt.t
     val mem : transaction -> Key_.t -> bool Lwt.t
   end
@@ -546,8 +543,7 @@ module GitWorkdirIntf_tr : GitIntf_tr with type transaction =
       let path = Filename.concat store path in
       files_of_directory path (fun acc file ->
         (* include the parent directory (key) relative to the view *)
-        let key = Key_.add_list key [file] in
-        return (key :: acc)
+        return ((Filename.concat (Key_.key_to_workpath key) file) :: acc)
       ) [] >>= function
       | `Ok l -> return l
       | `NoDir -> return []
@@ -570,7 +566,7 @@ module GitWorkdirIntf_tr : GitIntf_tr with type transaction =
 
   end
 
-type irmin_trans = IrminIntf.store * View.t * Key_.t * bool ref
+type irmin_trans = IrminIntf.store * Store.tree ref * Key_.t * bool ref
 
 module IrminIntf_tr : GitIntf_tr with type transaction = irmin_trans =
   struct
@@ -579,13 +575,28 @@ module IrminIntf_tr : GitIntf_tr with type transaction = irmin_trans =
     let begin_transaction ?user config key =
       Key_.assert_key key;
       IrminIntf.create ?user config >>= fun store ->
+      (* there is a problem when the account is not created yet, but
+       * the instance of the storage is created and the root /imaplet/user
+       * doesn't exist. the read view will fail. as a hack, create /imaplet/user
+       * if it doesn't exist, assuming the only time it happens is when the
+       * account is created for the first time, but need to do something better.
+       * yet another problem is that /imaplet/user is the root and by itself
+       * doesn't reference any content. another hack, create empty bootstrap
+       * file under /imaplet/user. TBD
+       *)
+      IrminIntf.mem store key >>= fun exists ->
+      begin
+      if not exists then
+        IrminIntf.update store (key @ ["bootstrap"]) ""
+      else return()
+      end >>
       IrminIntf.read_view store key >>= fun view ->
-      return (store,view,key,ref false)
+      return (store,ref view,key,ref false)
 
     let end_transaction tr =
       let (store,view,key,dirty) = tr in
       if !dirty = true then (
-        IrminIntf.update_view store key view >>= fun () ->
+        IrminIntf.update_view store key !view >>= fun () ->
         dirty := false;
         return ()
       ) else
@@ -597,41 +608,54 @@ module IrminIntf_tr : GitIntf_tr with type transaction = irmin_trans =
 
     let move_view tr key2 =
       let (store,view,_,_) = tr in
-      IrminIntf.update_view store key2 view 
+      IrminIntf.update_view store key2 !view 
 
     let update tr key data =
       Key_.assert_key key;
       let (_,view,_,dirty) = tr in
-      View.update view key data >>= fun () ->
+      (* it looks like it actually updates too 
+       * it returns updated tree, need to change the transaction *)
+      Tree.add !view key data >>= fun view_ ->
       dirty := true;
+      view := view_;
       return ()
 
     let read tr key =
       Key_.assert_key key;
       let (_,view,_,_) = tr in
-      View.read view key
+      Tree.mem !view key >>= fun b ->
+      if b then (
+        Tree.get !view key >>= fun cont ->
+        return (Some cont)
+      ) else (
+        return None
+      )
 
     let read_exn tr key =
       Key_.assert_key key;
       let (_,view,_,_) = tr in
-      View.read_exn view key
+      Tree.get !view key
 
     let list tr key =
       Key_.assert_key key;
       let (_,view,_,_) = tr in
-      View.list view key
+      Tree.list !view key >>= fun l ->
+      Lwt_list.fold_left_s (fun acc (it,_) ->
+        return (acc @ [it])) [] l
 
     let remove tr key =
       Key_.assert_key key;
       let (_,view,_,dirty) = tr in
-      View.remove_rec view key >>= fun () ->
+      (* it should remove all subtrees *)
+      Tree.remove !view key >>= fun view_ ->
+      view := view_;
       dirty := true;
       return ()
 
     let mem tr key =
       Key_.assert_key key;
       let (_,view,_,_) = tr in
-      View.mem view key
+      Tree.mem !view key
 
     let tr_key tr =
       let (_,_,key,_) = tr in
@@ -743,7 +767,7 @@ module GitMailboxMake
 
     let exists_key mbox key =
       catch (fun () ->
-        let key = Key_.add_list mbox.mbox_key (Key_.add_path key "meta") in
+        let key = Key_.add_list mbox.mbox_key (get_key key `Metamailbox) in
         GI_tr.read_exn mbox.trans key >>= fun metadata_sexp_str ->
         let metadata_sexp = Sexp.of_string metadata_sexp_str in
         let metadata = mailbox_metadata_of_sexp metadata_sexp in
@@ -755,7 +779,7 @@ module GitMailboxMake
       list_find l (fun f -> f = fl)
 
     let read_index_uid mbox =
-      match mbox.!index with
+      match !(mbox.index) with
       | None ->
         GI_tr.read_exn mbox.trans (get_key mbox.mbox_key `Index) >>= fun index_sexp_str ->
         let uids = list_of_sexp 
@@ -1073,11 +1097,19 @@ module GitMailboxMake
       GI_tr.update mbox.trans (get_key mbox.mbox_key `Subscriptions)
         (str_sexp_of_list l)
 
+    (* convert logical key to physical, for inst
+     * ["foo1";"foo2";"foo3"] ->
+     * ["mailboxes";"foo1";"mailboxes";"foo2";"mailboxes";"foo3"] *)
+    let logical_to_physical_key mbox key = 
+      Key_.add_list mbox.mbox_key (Key_.mailboxes_of_mailbox key)
+
     let list_mailbox mbox key =
       (* sub-mailboxes are located under 'mailboxes' parent *)
-      GI_tr.list mbox.trans (Key_.add_list mbox.mbox_key (Key_.mailboxes_of_mailbox key))
+      let key = logical_to_physical_key mbox key in
+      GI_tr.list mbox.trans key
 
     let is_folder mbox key =
+      let (_,key) = Key_.mailbox_of_list key in
       exists_key mbox key >>= function
       | `Folder -> return true
       | _ -> return false
@@ -1090,15 +1122,17 @@ module GitMailboxMake
         if access (Key_.view_key_to_path key) = false then
           return (acc,cnt)
         else (
-          let key = Key_.t_of_list name in
+          let key = Key_.t_of_path name in
           is_folder mbox key >>= fun res ->
+          (* 'name' should not have the 'mailboxes' in it??? and should not have
+           * any multiple steps *)
           begin
           if res = true then (
             list_ mbox key subscriptions access acc f >>= fun (acc,cnt) -> 
-            f acc (`Folder ((Key_.view_key_to_path key),cnt)) 
+            f acc (`Folder (name, cnt)) 
           ) else (
             list_ mbox key subscriptions access acc f >>= fun (acc,cnt) -> 
-            f acc (`Mailbox ((Key_.view_key_to_path key), cnt)) 
+            f acc (`Mailbox (name, cnt)) 
           )
           end >>= fun (acc) ->
           return (acc,cnt+1)
@@ -1125,16 +1159,14 @@ module GitMailboxMake
     let list_messages mbox k =
       let list_subtr store k =
         GI.list store k >>= fun l ->
-        return (List.fold_left (fun acc i ->
-          acc ^ ":" ^ (List.nth i ((List.length i) - 1))
-        ) "" l)
+        return (List.fold_left (fun acc i -> acc ^ ":" ^ i) "" l)
       in
       GI.create ~user:mbox.user mbox.config >>= fun store ->
       GI.list store k >>= fun l ->
       Lwt_list.fold_left_s (fun acc i ->
-        let k = Key_.t_of_list ((List.concat [k;i])) in
+        let k = Key_.t_of_list ((List.concat [k;[i]])) in
         list_subtr store k >>= fun s ->
-        return (((Key_.key_to_string (Key_.t_of_list i)) ^ ":" ^ s) :: acc)
+        return (("/" ^ i ^ ":" ^ s) :: acc)
       ) [] l
 
     let show_all mbox =

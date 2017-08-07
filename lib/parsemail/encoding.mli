@@ -9,7 +9,7 @@ type t = [
   `Binary | 
   `Quoted_printable | 
   `Unknown of string
-] with sexp
+] [@@deriving sexp]
 ;;
 
 (** Defaults to mode=`Text *)

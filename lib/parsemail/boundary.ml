@@ -5,7 +5,7 @@ open Core_replace
 open Lazys
 
 
-type t = string with sexp
+type t = string [@@deriving sexp]
 let create = Fn_.id;;
 
 

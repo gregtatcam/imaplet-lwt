@@ -23,8 +23,8 @@
 open Lwt
 open Irmin_unix
 
-module Store = Irmin_git.FS(Irmin.Contents.String)(Irmin.Ref.String)(Irmin.Hash.SHA1)
-module View = Irmin.View(Store)
+module Store = Irmin_unix.Git.FS.KV(Irmin.Contents.String)
+module View = Store.Tree
 module Sync = Irmin.Sync(Store)
 
 let opt = function
@@ -44,6 +44,7 @@ let pr path old x y =
     Log_.log `Info3 (Printf.sprintf "\t--- y %s\n" (opt y));return ()
   | `Conflict c -> Log_.log `Info3 (Printf.sprintf "\t--- conflict %s\n" c);return ()
 
+(* Doesn't appear to be used
 module ImapContents =
   struct
     include Irmin.Contents.String
@@ -60,20 +61,21 @@ module ImapContents =
         ok x
       end
   end
+*)
 
 let create local =
-  let config = Irmin_git.config ~root:local ~bare:true () in
-  Store.Repo.create config >>= Store.master task
+  let config = Irmin_git.config ~bare:true local in
+  Store.Repo.v config >>= fun repo -> Store.master repo
 
 let pull_exn ?depth upstream local =
   let msg = "Synching with upstream store" in
   create local >>= fun t ->
-  Sync.pull_exn (t msg) ?depth upstream `Merge
+  Sync.pull_exn t ?depth upstream (`Merge Irmin.Info.none)
 
 let push_exn ?depth upstream local =
   let msg = "Pushing to upstream store" in
   create local >>= fun t ->
-  Sync.push_exn (t msg) ?depth upstream
+  Sync.push_exn t ?depth upstream
 
 (* how is depth controlled ??? TBD *)
 let sync user mlogout config =

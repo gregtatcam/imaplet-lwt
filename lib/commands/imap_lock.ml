@@ -24,24 +24,24 @@ let create pool_mutex lock_pool =
 
 let get_acct_lock t name =
   Lwt_mutex.with_lock t.pool_mutex (fun() ->
-    if MapStr.mem name t.!lock_pool then (
-      let (refcnt,mutex) = MapStr.find name t.!lock_pool in
-      t.lock_pool := MapStr.add name (refcnt+1,mutex) t.!lock_pool;
+    if MapStr.mem name !(t.lock_pool) then (
+      let (refcnt,mutex) = MapStr.find name !(t.lock_pool) in
+      t.lock_pool := MapStr.add name (refcnt+1,mutex) !(t.lock_pool);
       return mutex
     ) else (
       let mutex = Lwt_mutex.create () in
-      t.lock_pool := MapStr.add name (1,mutex) t.!lock_pool;
+      t.lock_pool := MapStr.add name (1,mutex) !(t.lock_pool);
       return mutex
     )
   )
 
 let rem_acct_lock t name =
   Lwt_mutex.with_lock t.pool_mutex (fun() ->
-    if MapStr.mem name t.!lock_pool then (
-      let (refcnt,mutex) = MapStr.find name t.!lock_pool in
+    if MapStr.mem name !(t.lock_pool) then (
+      let (refcnt,mutex) = MapStr.find name !(t.lock_pool) in
       let refcnt = refcnt - 1 in
       if refcnt = 0 then
-        t.lock_pool := MapStr.remove name t.!lock_pool
+        t.lock_pool := MapStr.remove name !(t.lock_pool)
     );
     return ()
   )

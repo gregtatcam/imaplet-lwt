@@ -7,7 +7,7 @@ type t = [
   `Binary |
   `Quoted_printable |
   `Unknown of Mimestring.Case_insensitive.t
-] with sexp
+] [@@deriving sexp]
 ;;
 
 (* The default encoding must always decode with no errors *)

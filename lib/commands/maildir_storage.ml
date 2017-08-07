@@ -282,7 +282,7 @@ struct
     write_mailbox_metadata (MaildirPath.file_path t.mailbox `Metadata)
 
   let fetch_uidlist t =
-    match t.!uidlist with
+    match !(t.uidlist) with
     | None -> 
       read_uidlist (MaildirPath.file_path t.mailbox `Uidlist) >>= fun uidlist ->
       t.uidlist := Some uidlist;

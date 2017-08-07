@@ -25,7 +25,7 @@ type mailbox_metadata = {
   nunseen: int;
   recent: int;
   selectable: bool;
-} with sexp
+} [@@deriving sexp]
 
 type mbox_mailbox_metadata = {
   mbox_metadata: mailbox_metadata;
@@ -38,7 +38,7 @@ type mailbox_message_metadata = {
   internal_date: Dates.ImapTime.t;
   size: int;
   flags: mailboxFlags list;
-} with sexp
+} [@@deriving sexp]
 
 type mbox_message_metadata = {
   metadata: mailbox_message_metadata;

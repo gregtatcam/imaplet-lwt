@@ -2,7 +2,7 @@ open Sexplib.Conv
 open Core_replace
 
 module Field_name = struct
-  type t = string with sexp
+  type t = string [@@deriving sexp]
   include (Mimestring.Case_insensitive : Mimestring.S with type t := t)
 end
 
@@ -155,7 +155,7 @@ module Assoc_concrete (T : Sexpable_.S) = struct
     type t = T.t z
 
     module As_list = struct
-      type t = (Field_name.t * T.t) list with sexp
+      type t = (Field_name.t * T.t) list [@@deriving sexp]
     end
 
     include (Assoc : Assoc_intf.S with type 'a t := 'a z)

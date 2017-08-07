@@ -82,7 +82,7 @@ module Postmark = struct
   type t = {
     from : string;
     time : float;
-  } with sexp
+  } [@@deriving sexp]
   ;;
 
   let tdiff =
@@ -179,7 +179,7 @@ module Message = struct
   type t = {
     postmark : Postmark.t;
     email : Email.t;
-  } with sexp
+  } [@@deriving sexp]
 
   let to_string message =
     let text = Email.to_string message.email in

@@ -19,7 +19,7 @@ exception InvalidDate
 
 module ImapDate :
   sig
-    type t with sexp
+    type t [@@deriving sexp]
 
     val of_string : string -> t
     val compare : t -> t -> int
@@ -31,7 +31,7 @@ module ImapDate :
 
 module ImapTime : 
   sig
-    type t with sexp
+    type t [@@deriving sexp]
 
     val now : unit -> t
     val of_string : string -> t

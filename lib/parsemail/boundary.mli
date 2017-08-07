@@ -1,4 +1,4 @@
-type t with sexp
+type t [@@deriving sexp]
 
 (** Creates a boundary from the value of the "boundary" parameter in a
   Content-type header (RFC2046, p.19)

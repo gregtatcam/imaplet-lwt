@@ -1,3 +1,7 @@
+### 0.1.17
+* replaced camlp4 with ppx_sexp_conv
+* linked with the latest packages
+
 ### 0.1.16
 
 * git-like modules bundled into imaplet.commands library

@@ -171,7 +171,7 @@ let create config =
                 client_last_active = ref (Unix.gettimeofday());
                 client_timed_out = Lwt_mutex.create (); user_logout;
                 compression = ref None} in
-            compression := ref ctx.!compression;
+            compression := ref !(ctx.compression);
             Lwt_mutex.lock ctx.client_timed_out >>= fun () ->
             Lwt_mutex.lock ctx.user_logout >>= fun () ->
             add_id ctx;
@@ -180,7 +180,7 @@ let create config =
             Lwt_mutex.unlock user_logout;
             Log_.log `Info1 (Printf.sprintf "### closed client connection %s\n" (Int64.to_string id));
             rem_id id;
-            try_close ctx.!netr >> try_close ctx.!netw >> try_close_sock sock_c 
+            try_close !(ctx.netr) >> try_close !(ctx.netw) >> try_close_sock sock_c 
         )
         (fun ex -> 
           cancel_compression_waiter !(!compression);

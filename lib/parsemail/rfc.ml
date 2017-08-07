@@ -20,7 +20,7 @@ end
 
 module RFC2045 = struct
   module Token = struct
-    type t = string with sexp
+    type t = string [@@deriving sexp]
     include (Mimestring.Case_insensitive : Mimestring.S with type t := t)
 
     let is_valid str = Lexer.is_rfc2045_token (Lexing.from_string str)

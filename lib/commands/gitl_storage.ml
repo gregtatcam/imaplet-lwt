@@ -65,7 +65,7 @@ struct
     return {store=ref store;user;mailbox=Key.of_unix mailbox;config;keys}
 
   let update_with_sha t k v =
-    Gitl.update t.!store k v
+    Gitl.update !(t.store) k v
 
   let update t k v =
     update_with_sha t k v >>= fun (_,_) ->
@@ -76,18 +76,18 @@ struct
     | None -> t.mailbox
     | Some k -> Key.add t.mailbox k
     in
-    Gitl.remove t.!store key >>= fun sha ->
+    Gitl.remove !(t.store) key >>= fun sha ->
     return ()
 
   (* check if mailbox exists *)
   let exists t =
-    Gitl.mem t.!store t.mailbox >>= function
+    Gitl.mem !(t.store) t.mailbox >>= function
     | true -> return `Mailbox
     | false -> return `No
 
   (* status *)
   let status t =
-    Gitl.read_exn t.!store (get_key t `Metamailbox) >>= fun sexp_str ->
+    Gitl.read_exn !(t.store) (get_key t `Metamailbox) >>= fun sexp_str ->
     let sexp = Sexp.of_string sexp_str in
     return (mailbox_metadata_of_sexp sexp)
 
@@ -113,11 +113,11 @@ struct
 
   (* rename mailbox1 mailbox2 *)
   let rename t mailbox =
-    Gitl.rename t.!store t.mailbox (Key.of_unix mailbox) >>= fun sha ->
+    Gitl.rename !(t.store) t.mailbox (Key.of_unix mailbox) >>= fun sha ->
     return ()
 
   let read_subscription t =
-    Gitl.read_opt t.!store (get_key t `Subscription) >>= function
+    Gitl.read_opt !(t.store) (get_key t `Subscription) >>= function
     | Some sexp_str -> return (Utils.list_of_str_sexp sexp_str)
     | None -> return []
 
@@ -149,7 +149,7 @@ struct
       return []
     end >>= fun subs ->
     let rec list_ key init =
-      Gitl.list t.!store key >>= fun listing ->
+      Gitl.list !(t.store) key >>= fun listing ->
       Lwt_list.fold_left_s (fun (acc,cnt) name ->
         let leaf = Key.last name in
         if access (Key.to_string name) = false || leaf = ".message" || 
@@ -198,9 +198,9 @@ struct
     in
     begin
     if t.config.hybrid then
-      Gitl.find_obj_opt t.!store (Key.add t.mailbox metamessage_dir)
+      Gitl.find_obj_opt !(t.store) (Key.add t.mailbox metamessage_dir)
     else
-      Gitl.find_obj_opt t.!store (Key.add t.mailbox message_dir)
+      Gitl.find_obj_opt !(t.store) (Key.add t.mailbox message_dir)
     end >>= function
     | `Tree tr ->
       let len = List.length tr in
@@ -242,7 +242,7 @@ struct
     | _ -> return `NotFound
 
   let delete_ t k =
-    Gitl.remove t.!store k >>= fun sha ->
+    Gitl.remove !(t.store) k >>= fun sha ->
     return ()
 
   (* delete a message
@@ -258,7 +258,7 @@ struct
 
   let get_message_metadata t uid sha name =
     if t.config.hybrid then
-      Gitl.read_exn t.!store (get_key t (`Metamessage (uid, sha))) >>= fun sexp_str ->
+      Gitl.read_exn !(t.store) (get_key t (`Metamessage (uid, sha))) >>= fun sexp_str ->
       return (mailbox_message_metadata_of_sexp (Sexp.of_string sexp_str))
     else (
       let (internal_date,size,modseq,flags) = message_file_name_to_data t.mailbox name in
@@ -279,7 +279,7 @@ struct
           let obj = Object.create ?compress:t.config.compress_repo t.config.irmin_path in
           Object.read_raw obj (Sha.of_hex_string sha)
         ) else (
-          Gitl.read_exn t.!store (get_key t (`Message name))
+          Gitl.read_exn !(t.store) (get_key t (`Message name))
         )
         end >>= fun message ->
         Email_parse.message_unparsed_from_blob t.config t.keys message >>= fun message ->
@@ -325,7 +325,7 @@ struct
         let src = get_key t (`Message src) in
         let dest = get_key t (`Message dest) in
         Log_.log `Debug (Printf.sprintf "renaming %s to %s\n" (Key.to_string src) (Key.to_string dest));
-        Gitl.rename t.!store ~src  ~dest >>= fun _ ->
+        Gitl.rename !(t.store) ~src  ~dest >>= fun _ ->
         return ()
       )
     | _ -> return ()
@@ -345,7 +345,7 @@ struct
           (Sexp.to_string (sexp_of_mailbox_message_metadata message_metadata))
       ) else (
         let file = update_message_file_name t2.mailbox name message_metadata in
-        Gitl.update_tree t.!store (Key.add t2.mailbox message_dir) 
+        Gitl.update_tree !(t.store) (Key.add t2.mailbox message_dir) 
           (`Add (file,`Normal,Sha.of_hex_string sha)) >>= fun _ ->
         return ()
       )
@@ -354,7 +354,7 @@ struct
   (* all operations that update the mailbox have to be completed with commit
    *)
   let commit t =
-    Gitl.commit t.!store ~author:"<user@gitl>" 
+    Gitl.commit !(t.store) ~author:"<user@gitl>" 
       ~message:"consolidated commit" >>= fun store ->
     t.store := store;
     return ()

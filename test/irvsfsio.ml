@@ -20,7 +20,8 @@ open Commands
 
 exception InvalidCommand of string
 
-module Store = Irmin_git.FS(Irmin.Contents.String)(Irmin.Ref.String)(Irmin.Hash.SHA1)
+module Store = Irmin_unix.Git.FS.KV(Irmin.Contents.String)
+let info = Irmin_unix.info
 
 type config =
   {serial:bool;init:bool;compress:int option;yield:bool;block:bool;server:bool;content:string;
@@ -151,11 +152,11 @@ let create_file config file content =
         Imap_crypto.do_compress ~header:true ~level content | None -> content))
 
 let create_store () =
-  let _config = Irmin_git.config ~root:"./tmp_ir_fs/irmin" ~bare:true ~level:0 () in
-  Store.Repo.create _config >>= Store.master task
+  let _config = Irmin_git.config ~bare:true ~level:0 "./tmp_ir_fs/irmin" in
+  Store.Repo.v _config >>= fun repo -> Store.master repo
 
 let create_irmin config store file content =
-  Store.update (store (Printf.sprintf "updating %s" file)) ["root";file] content
+  Store.set store ~info:(info "updating") ["root";file] content
 
 let content_generator config f =
   fold_i 1_000 (fun i acc ->
@@ -245,8 +246,8 @@ let file_index config =
   get []
 
 let irmin_index store config =
-  Store.list (store "indexing") ["root"] >>= fun l ->
-  Lwt_list.map_s (fun l -> return (List.nth l 1)) l
+  Store.list store ["root"] >>= fun l ->
+  Lwt_list.map_s (fun (it,_) -> return it) l
 
 let file_index config =
   let strm = Lwt_unix.files_of_directory files_root in
@@ -257,12 +258,12 @@ let file_index config =
   in 
   get []
 
-let irmin_index store config =
+(*let irmin_index store config =
   Store.list (store "indexing") ["root"] >>= fun l ->
-  Lwt_list.map_s (fun l -> return (List.nth l 1)) l
+  Lwt_list.map_s (fun l -> return (List.nth l 1)) l*)
 
 let process_irmin store config id =
-  Store.read_exn (store (Printf.sprintf "reading %s" id)) ["root"; id]
+  Store.get store ["root"; id]
 
 let writet = ref 0.
 let readt = ref 0.
@@ -332,7 +333,7 @@ commands (fun config ->
       let mutex = Lwt_mutex.create () in
       Lwt_mutex.lock mutex >>= fun () ->
       let addr = inet_addr config.addr config.port in
-      let server = Lwt_io.establish_server ~backlog:10 addr (fun (r,w) ->
+      Lwt_io.establish_server_with_client_address ~backlog:10 addr (fun _ (r,w) ->
         let loop () =
           Lwt_io.read_line_opt r >>= function
           | Some cmd ->
@@ -352,7 +353,8 @@ commands (fun config ->
         in
         async(fun () -> loop ());
         Printf.printf "done iteration\n";
-      ) in
+        return ()
+      ) >>= fun server ->
       Printf.printf "established server\n%!";
       Lwt_mutex.lock mutex >>= fun () ->
       Lwt_io.shutdown_server server;

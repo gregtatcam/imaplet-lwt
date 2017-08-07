@@ -368,7 +368,7 @@ let rec _exec_search_all search_one keys =
       Lwt_list.fold_left_s 
       (fun acc k -> 
         if acc then (
-          lwt res = _exec_search_all search_one k in
+          let%lwt res = _exec_search_all search_one k in
           if res = false then
             raise ExecDone
           else
@@ -383,13 +383,13 @@ let rec _exec_search_all search_one keys =
         return false
     )
   | OrKey (k1,k2) ->
-      lwt res1 = _exec_search_all search_one k1 in
+      let%lwt res1 = _exec_search_all search_one k1 in
       if res1 then
         return true
       else
         _exec_search_all search_one k2 
   | NotKey k -> 
-    lwt res = _exec_search_all search_one k in
+    let%lwt res = _exec_search_all search_one k in
     return (res = false)
 
 let exec_search_all message keys seq =

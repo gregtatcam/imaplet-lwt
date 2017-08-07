@@ -940,7 +940,7 @@ let commit t ~author ~message =
       return s
     else
       acc
-  ) t.!cache (return(Sha.empty)) >>= fun root_sha ->
+  ) !(t.cache) (return(Sha.empty)) >>= fun root_sha ->
   if Sha.is_empty root_sha then
     raise InvalidCommit;
   (* multiple parents? *)

@@ -1,6 +1,6 @@
 opam-version: "1.2"
 name: "imaplet-lwt"
-version: "0.1.16"
+version: "0.1.17"
 maintainer: "Gregory Tsipenyuk <gregtsip@gmail.com>"
 authors: "Gregory Tsipenyuk <gregtsip@gmail.com>"
 homepage: "https://github.com/gregtatcam/imaplet-lwt"
@@ -28,16 +28,18 @@ remove: [
 ]
 depends: [
   "ocamlfind" {build}
-  "lwt"
-  "cohttp" {>= "0.19.3"}
-  "git" {>= "1.7.1"}
-  "irmin" {>= "0.9.10"}
-  "irmin-unix"
-  "re"
-  "tls" {>= "0.6.0"}
-  "nocrypto" {>= "0.5.1"}
-  "dns" {>= "0.15.3"}
+  "lwt" {>= 3.1.0}
+  "cohttp" {>= "0.22.0"}
+  "git" {>= "1.11.2"}
+  "irmin" {>= "1.3.0"}
+  "irmin-unix" {>= "1.3.0"}
+  "re" {>= "1.7.1"}
+  "tls" {>= "0.8.0"}
+  "nocrypto" {>= "0.5.4"}
+  "dns" {>= "1.0.0"}
+  "dns-lwt-unix" {>= "1.0.0"}
+  "cstruct-unix" {>= "3.1.1"}
   "menhir"
   "camlzip"
 ]
-available: [ ocaml-version >= "4.01.0" ]
+available: [ ocaml-version = "4.04.2" ]

@@ -6,7 +6,7 @@ module Postmark : sig
   type t = {
     from : string;
     time : float;
-  } with sexp
+  } [@@deriving sexp]
 
   val to_string : t -> string
   val of_string : string -> t
@@ -16,7 +16,7 @@ module Message : sig
   type t = {
     postmark : Postmark.t;
     email : Email.t;
-  } with sexp
+  } [@@deriving sexp]
   val to_string : t -> string;;
 end
 

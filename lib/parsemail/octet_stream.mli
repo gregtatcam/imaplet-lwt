@@ -1,7 +1,7 @@
 open Sexplib.Conv
 open Core_replace
 
-type t with sexp
+type t [@@deriving sexp]
 
 (** 
   These are the most efficient functions to convert to/from octet_streams.

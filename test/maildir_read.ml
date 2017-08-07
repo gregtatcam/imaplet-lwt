@@ -220,16 +220,14 @@ end
 
 module MaildirIrmin : Maildir_intf =
 struct
-  module Store = Irmin_git.FS(Irmin.Contents.String)(Irmin.Ref.String)(Irmin.Hash.SHA1)
+  module Store = Irmin_unix.Git.FS.KV(Irmin.Contents.String)
 
-  type t = {user:string; repo:string; mailbox:string; store:(string ->
-    Store.t);inflate:int option}
+  type t = {user:string; repo:string; mailbox:string; store:Store.t;inflate:int option}
 
   let create_store repo =
     let _config = Irmin_git.config
-      ~root:repo
-      ~bare:true () in
-    Store.Repo.create _config >>= Store.master task
+      ~bare:true repo in
+    Store.Repo.v _config >>= fun repo -> Store.master repo
 
   let create ~user ~repo ~mailbox ~inflate =
     create_store repo >>= fun store ->
@@ -239,7 +237,7 @@ struct
     catch(fun() ->
     let mailbox = if (String.lowercase t.mailbox = "inbox") then "INBOX" else t.mailbox in
     let key = ["imaplet"; t.user; "mailboxes"; mailbox; "index"] in
-    Store.read_exn (t.store "reading") key >>= fun index_sexp_str ->
+    Store.get t.store key >>= fun index_sexp_str ->
     return (list_of_sexp
     (fun i ->
       (* change to same as maildir *)
@@ -251,7 +249,7 @@ struct
 
   let read_message t ~id =
     let key = ["imaplet"; t.user; "storage";id] in
-    Store.read_exn (t.store "reading") key
+    Store.get t.store key
 end
 
 module type MaildirReader_intf =

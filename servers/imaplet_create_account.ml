@@ -250,7 +250,8 @@ let () =
       let config = {srv_config with
       inbox_path;mail_path;irmin_path;user_cert_path;encrypt;hybrid;single_store=single;maildir_parse;compress;compress_attach=compressattch;compress_repo} in
       let user = Regex.replace ~regx:"@.+$" ~tmpl:"" user in
-      build_strg_inst m config user mailbox keys
+      build_strg_inst m config user mailbox keys >>= fun f ->
+      return f
     in
     let get_factory () =
       match mbox_type with
@@ -283,17 +284,18 @@ let () =
         check_force () >>= fun () ->
         created := Some user_path;
         catch (fun () ->
-          Lwt_unix.mkdir (Filename.dirname user_path) 0o775
-        ) (fun _ -> return ()) >>
+          Lwt_unix.mkdir (Filename.dirname user_path) 0o775 >>= fun () ->
+          return ()
+        ) (fun _ -> return ()) >>= fun () ->
         Lwt_unix.mkdir user_path 0o775 >>
         Lwt_unix.mkdir repo_root 0o775 >>
         Lwt_unix.mkdir user_cert_path 0o775 >>
         file_cmd priv_path (fun () -> 
           genrsa user pswd priv_path >>= fun key ->
 	  reqcert key pem_path
-        ) >>
+        ) >>= fun () ->
         dir_cmd repo (fun () -> 
-          repo_init () >>
+          repo_init () >>= fun () ->
           if ignore then
             return ()
           else (

@@ -1,5 +1,6 @@
 open Sexplib.Conv
 open Core_replace
+open Fieldslib
 
 module Params = struct
   module Assoc = Field_name.Assoc_concrete (String);;
@@ -20,7 +21,7 @@ type t = {
   mime_type : string;
   mime_subtype : string;
   params : Params.t;
-} with fields, sexp
+} [@@deriving fields, sexp]
 
 let __UNUSED_VALUE__field_name = "content-type";;
 

@@ -6,7 +6,7 @@ type t =
   {
     text    : bool;
     content : Bigstring_.t
-  } with sexp;;
+  } [@@deriving sexp];;
 
 
 let fix_eol_in_place bstr =

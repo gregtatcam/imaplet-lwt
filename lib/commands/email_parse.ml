@@ -39,8 +39,8 @@ let crlf = "\n"
  * for deduplication
  *)
 
-type data_descr = {offset: int; length: int} with sexp
-type part_descr = {size: int; lines: int} with sexp
+type data_descr = {offset: int; length: int} [@@deriving sexp]
+type part_descr = {size: int; lines: int} [@@deriving sexp]
 type email_map = {part: part_descr; header:data_descr; content: 
   [
     `Data_map of data_descr |
@@ -48,7 +48,7 @@ type email_map = {part: part_descr; header:data_descr; content:
     `Message_map of email_map |
     `Multipart_map of string(*boundary*) * email_map list
   ]
-} with sexp
+} [@@deriving sexp]
 
 let sexp_of t =
   sexp_of_email_map t

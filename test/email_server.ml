@@ -71,9 +71,8 @@ let smtp_server port imapport =
     Lwt_unix.gethostname () >>= fun host ->
     Lwt_io.open_connection (imap_addr imapport) >>= fun (imap_ic,imap_oc) ->
     let sockaddr = Unix.ADDR_INET (Unix.inet_addr_of_string "0.0.0.0", port) in
-    let server = Lwt_io.establish_server ~backlog:10 sockaddr
-    (fun (ic,oc) ->
-      ignore_result (
+    Lwt_io.establish_server_with_client_address ~backlog:10 sockaddr
+    (fun _ (ic,oc) ->
       let rec loop user is_data =
         Lwt_io.read_line_opt ic >>= function
         | None -> return ()
@@ -137,8 +136,7 @@ let smtp_server port imapport =
       in
       Lwt_io.write_line oc ("220 " ^ host) >>= fun () ->
       loop "" false
-      )
-    ) in
+    ) >>= fun server ->
     let sigh = Lwt_unix.on_signal 10 (fun s -> Lwt_mutex.unlock mutex) in
     Lwt_mutex.lock mutex >>= fun () -> 
     Lwt_io.close imap_oc >>= fun () ->
@@ -211,9 +209,8 @@ let imap_server port =
   let push_append_strm = None in
   (*let (strm,push_append_strm) = Lwt_stream.create () in
   async (fun () -> Amailbox.async_append strm);*)
-  let server = Lwt_io.establish_server ~backlog:10 (imap_addr port)
-  (fun (ic,oc) ->
-    ignore_result (
+  Lwt_io.establish_server_with_client_address ~backlog:10 (imap_addr port)
+  (fun _ (ic,oc) ->
       let sprf = Printf.sprintf in
       let response ?(tag="") message =
         let buff = if tag = "" then message else (tag ^ " " ^ message) in
@@ -297,8 +294,7 @@ let imap_server port =
           loop ~user ~password amailbox
       in
       loop (Amailbox.empty())
-    )
-  ) in
+  ) >>= fun server ->
   let sigh = Lwt_unix.on_signal 10 (fun s -> Lwt_mutex.unlock mutex) in
   Lwt_mutex.lock mutex >>= fun () ->
   Lwt_io.shutdown_server server;

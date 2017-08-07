@@ -63,7 +63,7 @@ let post archive from rcpt f =
       Printf.printf "error %s\n%!" err;
       Lwt_io.close ic >>
       return (`Done (cnt))
-  ) 1 >>
+  ) 1 >>= fun _ ->
   return `Ok
 
 let () =

@@ -136,8 +136,8 @@ let list_ mailboxt subscribed mailbox wilcards =
   ~init:[] ~f:(fun acc item ->
     let path item = concat_path mailbox item in
     match item with
-      | `Folder (item,cnt)  -> return (select_item acc (path item) (dir_item (path item)) cnt)
-      | `Mailbox (item,cnt)  -> return (select_item acc (path item) (mbox_item (path item) mailbox) cnt)
+    | `Folder (item,cnt)  -> return (select_item acc (path item) (dir_item (path item)) cnt)
+    | `Mailbox (item,cnt) -> return (select_item acc (path item) (mbox_item (path item) mailbox) cnt)
   )
 
 (** add to the calculated list the reference folder and inbox **)
@@ -516,7 +516,7 @@ let fetch mailboxt resp_prefix resp_writer sequence fetchattr changedsince buid 
     let (strm,push_strm) = Lwt_stream.create () in
     let mutex = Lwt_mutex.create () in
     Lwt_mutex.lock mutex >>= fun () ->
-    lwt _ =
+    let%lwt _ =
     begin
     let t = Unix.gettimeofday() in
     iter_selected_with_seq (module Mailbox) sequence buid (fun acc pos seq ->

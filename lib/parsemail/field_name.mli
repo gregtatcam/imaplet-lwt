@@ -1,7 +1,7 @@
 open Sexplib
 open Sexplib.Conv
 
-type t = string with sexp;;
+type t = string [@@deriving sexp];;
 include Mimestring.S with type t := t
 
 (* Multitables keyed by Field_names *)

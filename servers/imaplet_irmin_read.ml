@@ -67,15 +67,15 @@ let rec tree user key indent =
   IrminIntf.create ~user:(get_user user) srv_config >>= fun store ->
   IrminIntf.list store key >>= fun l ->
   Lwt_list.iter_s (fun i -> 
-    Printf.printf "%s%s%!" indent (Key_.key_to_string (Key_.t_of_list i));
-    IrminIntf.mem store (Key_.t_of_list i) >>= fun res ->
+    Printf.printf "%s%s%!" indent ("/" ^ i);
+    IrminIntf.mem store (Key_.t_of_path i) >>= fun res ->
     if res then (
-      IrminIntf.read_exn store (Key_.t_of_list i) >>= fun v ->
+      IrminIntf.read_exn store (Key_.t_of_path i) >>= fun v ->
       Printf.printf "%s\n%!" v;
       return ()
     ) else (
       Printf.printf "\n%!";
-      tree user (Key_.t_of_list i) (indent ^ "  ")
+      tree user (Key_.t_of_path i) (indent ^ "  ")
     )
   ) l
 

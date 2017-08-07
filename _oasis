@@ -27,13 +27,14 @@ Library imaplet
   Modules         : Server
   BuildDepends	  : lwt,
                     lwt.unix,
-                    lwt.syntax,
+                    lwt.ppx,
                     tls.lwt,
-                    sexplib.syntax,
+                    sexplib,
+                    ppx_sexp_conv,
                     threads,
                     str,
                     cstruct.unix,
-                    irmin.unix,
+                    irmin-unix,
                     nocrypto,
                     imaplet.parsemail,
                     imaplet.commands
@@ -72,8 +73,10 @@ Library parsemail
                     String_monoid
   BuildDepends	  : re,
                     re.posix,
-                    fieldslib.syntax,
-                    sexplib.syntax,
+                    fieldslib,
+                    sexplib,
+                    ppx_sexp_conv,
+                    ppx_fields_conv,
                     threads,
                     str
   XMETARequires   : re,
@@ -130,18 +133,19 @@ Library commands
                     Utils
   BuildDepends	  : lwt,
                     lwt.unix,
-                    lwt.syntax,
+                    lwt.ppx,
                     lwt.preemptive,
                     tls.lwt,
                     dns,
-                    dns.lwt,
+                    dns-lwt-unix,
                     ipaddr,
-                    sexplib.syntax,
+                    sexplib,
+                    ppx_sexp_conv,
                     threads,
                     str,
                     cstruct.unix,
                     mstruct,
-                    irmin.unix,
+                    irmin-unix,
                     nocrypto,
                     zip,
                     imaplet.parsemail
@@ -152,7 +156,7 @@ Executable parse_restore
   Path		  : test
   CompiledObject  : native
   MainIs	  : parse_restore.ml
-  BuildDepends	  : lwt,lwt.unix,lwt.syntax,tls.lwt,sexplib.syntax,threads,str,cstruct.unix,irmin.unix,imaplet,imaplet.parsemail,nocrypto,imaplet.commands
+  BuildDepends	  : lwt,lwt.unix,lwt.ppx,tls.lwt,sexplib,ppx_sexp_conv,threads,str,cstruct.unix,irmin-unix,imaplet,imaplet.parsemail,nocrypto,imaplet.commands
 
 Executable dedup
   Build$:           flag(test)
@@ -160,7 +164,7 @@ Executable dedup
   Path		  : test
   CompiledObject  : native
   MainIs	  : dedup.ml
-  BuildDepends	  : lwt,lwt.unix,lwt.syntax,tls.lwt,sexplib.syntax,threads,str,cstruct.unix,irmin.unix,imaplet,imaplet.parsemail,nocrypto,imaplet.commands
+  BuildDepends	  : lwt,lwt.unix,lwt.ppx,tls.lwt,sexplib,ppx_sexp_conv,threads,str,cstruct.unix,irmin-unix,imaplet,imaplet.parsemail,nocrypto,imaplet.commands
 
 
 Executable imaplet_configure
@@ -169,7 +173,7 @@ Executable imaplet_configure
   Path		  : servers
   CompiledObject  : native
   MainIs	  : imaplet_configure.ml
-  BuildDepends	  : lwt,lwt.unix,lwt.syntax,sexplib.syntax,threads,str,cstruct.unix,imaplet,imaplet.commands
+  BuildDepends	  : lwt,lwt.unix,lwt.ppx,sexplib,ppx_sexp_conv,threads,str,cstruct.unix,imaplet,imaplet.commands
 
 Executable imaplet
   Build		  : true
@@ -177,7 +181,7 @@ Executable imaplet
   Path		  : servers
   CompiledObject  : native
   MainIs	  : imaplet_server.ml
-  BuildDepends	  : lwt,lwt.unix,lwt.syntax,tls.lwt,sexplib.syntax,threads,str,cstruct.unix,irmin.unix,nocrypto,imaplet.commands,imaplet.parsemail,imaplet
+  BuildDepends	  : lwt,lwt.unix,lwt.ppx,tls.lwt,sexplib,ppx_sexp_conv,threads,str,cstruct.unix,irmin-unix,nocrypto,imaplet.commands,imaplet.parsemail,imaplet
   DataFiles	  : ../certificates/server.pem($datadir/imaplet),
                     ../certificates/server.key($datadir/imaplet),
                     ../config/imaplet.cf($datadir/imaplet),
@@ -192,7 +196,7 @@ Executable imaplet_create_account
   Path		  : servers
   CompiledObject  : native
   MainIs	  : imaplet_create_account.ml
-  BuildDepends	  : lwt,lwt.unix,lwt.syntax,threads,irmin.unix,sexplib.syntax,imaplet.commands,imaplet
+  BuildDepends	  : lwt,lwt.unix,lwt.ppx,threads,irmin-unix,sexplib,ppx_sexp_conv,imaplet.commands,imaplet
 
 Executable imaplet_deploy
   Build		  : true
@@ -200,7 +204,7 @@ Executable imaplet_deploy
   Path		  : deploy
   CompiledObject  : native
   MainIs	  : imaplet_deploy.ml
-  BuildDepends	  : lwt,lwt.unix,lwt.syntax,threads,imaplet.commands,imaplet
+  BuildDepends	  : lwt,lwt.unix,lwt.ppx,threads,imaplet.commands,imaplet
 
 Executable imaplet_lmtp
   Build		  : false
@@ -208,7 +212,7 @@ Executable imaplet_lmtp
   Path		  : servers
   CompiledObject  : native
   MainIs	  : imaplet_lmtp.ml
-  BuildDepends	  : lwt,lwt.unix,lwt.syntax,str,threads,sexplib.syntax,imaplet,imaplet.commands
+  BuildDepends	  : lwt,lwt.unix,lwt.ppx,str,threads,sexplib,ppx_sexp_conv,imaplet,imaplet.commands
 
 Executable smtplet
   Build		  : true
@@ -216,7 +220,7 @@ Executable smtplet
   Path		  : servers
   CompiledObject  : native
   MainIs	  : smtplet.ml
-  BuildDepends	  : lwt,lwt.unix,lwt.syntax,str,threads,sexplib.syntax,imaplet,imaplet.commands
+  BuildDepends	  : lwt,lwt.unix,lwt.ppx,str,threads,sexplib,ppx_sexp_conv,imaplet,imaplet.commands
 
 Executable imaplet_irmin_read
   Build		  : true
@@ -224,7 +228,7 @@ Executable imaplet_irmin_read
   Path		  : servers
   CompiledObject  : native
   MainIs	  : imaplet_irmin_read.ml
-  BuildDepends	  : lwt,irmin.unix,sexplib.syntax,str,imaplet.parsemail,threads,nocrypto,imaplet.commands
+  BuildDepends	  : lwt,irmin-unix,sexplib,ppx_sexp_conv,str,imaplet.parsemail,threads,nocrypto,imaplet.commands
 
 Executable imaplet_irmin_build
   Build		  : true
@@ -232,7 +236,7 @@ Executable imaplet_irmin_build
   Path		  : servers
   CompiledObject  : native
   MainIs	  : imaplet_irmin_build.ml
-  BuildDepends	  : lwt,lwt.unix,imaplet.parsemail,str,sexplib.syntax,threads,irmin.unix,nocrypto,imaplet.commands
+  BuildDepends	  : lwt,lwt.unix,imaplet.parsemail,str,sexplib,ppx_sexp_conv,threads,irmin-unix,nocrypto,imaplet.commands
 
 Executable imaplet_maildir_index
   Build		  : true
@@ -240,7 +244,7 @@ Executable imaplet_maildir_index
   Path		  : servers
   CompiledObject  : native
   MainIs	  : imaplet_maildir_index.ml
-  BuildDepends	  : lwt,lwt.unix,lwt.syntax,zip,tls.lwt,str,threads,sexplib.syntax,nocrypto,imaplet.commands,imaplet.parsemail
+  BuildDepends	  : lwt,lwt.unix,lwt.ppx,zip,tls.lwt,str,threads,sexplib,ppx_sexp_conv,nocrypto,imaplet.commands,imaplet.parsemail
 
 Executable imaplet_init_maildir
   Build$:           flag(utils)
@@ -248,7 +252,7 @@ Executable imaplet_init_maildir
   Path		  : utils
   CompiledObject  : native
   MainIs	  : imaplet_init_maildir.ml
-  BuildDepends	  : lwt,lwt.unix,lwt.syntax,str,threads,sexplib.syntax,imaplet,imaplet.commands
+  BuildDepends	  : lwt,lwt.unix,lwt.ppx,str,threads,sexplib,ppx_sexp_conv,imaplet,imaplet.commands
 
 Executable get_messages
   Build$:           flag(utils)
@@ -256,7 +260,7 @@ Executable get_messages
   Path		  : utils
   CompiledObject  : native
   MainIs	  : get_messages.ml
-  BuildDepends	  : lwt,lwt.unix,lwt.syntax,str,threads,sexplib.syntax,imaplet,imaplet.commands
+  BuildDepends	  : lwt,lwt.unix,lwt.ppx,str,threads,sexplib,ppx_sexp_conv,imaplet,imaplet.commands
 
 Executable client
   Build$:           flag(utils)
@@ -264,7 +268,7 @@ Executable client
   Path		  : utils
   CompiledObject  : native
   MainIs	  : client.ml
-  BuildDepends	  : lwt,lwt.unix,lwt.syntax,re,re.posix,threads,tls.lwt,zip,str
+  BuildDepends	  : lwt,lwt.unix,lwt.ppx,re,re.posix,threads,tls.lwt,zip,str
 
 Executable smtp_client
   Build$:           flag(utils)
@@ -272,7 +276,7 @@ Executable smtp_client
   Path		  : utils
   CompiledObject  : native
   MainIs	  : smtp_client.ml
-  BuildDepends	  : lwt,lwt.unix,lwt.syntax,imaplet,imaplet.commands
+  BuildDepends	  : lwt,lwt.unix,lwt.ppx,imaplet,imaplet.commands
 
 Executable test_gitl
   Build$:           flag(test)
@@ -280,7 +284,7 @@ Executable test_gitl
   Path		  : test
   CompiledObject  : native
   MainIs	  : test_gitl.ml
-  BuildDepends	  : unix,threads,lwt,lwt.unix,lwt.syntax,lwt.preemptive,re,re.posix,imaplet,imaplet.commands
+  BuildDepends	  : unix,threads,lwt,lwt.unix,lwt.ppx,lwt.preemptive,re,re.posix,imaplet,imaplet.commands
 
 Executable maildir_read
   Build$:           flag(test)
@@ -288,7 +292,7 @@ Executable maildir_read
   Path		  : test
   CompiledObject  : native
   MainIs	  : maildir_read.ml
-  BuildDepends	  : unix,threads,lwt,lwt.unix,lwt.syntax,lwt.preemptive,re,re.posix,imaplet,imaplet.commands
+  BuildDepends	  : unix,threads,lwt,lwt.unix,lwt.ppx,lwt.preemptive,re,re.posix,imaplet,imaplet.commands
 
 Executable irvsfsio
   Build$:           flag(test)
@@ -296,7 +300,7 @@ Executable irvsfsio
   Path		  : test
   CompiledObject  : native
   MainIs	  : irvsfsio.ml
-  BuildDepends	  : unix,threads,lwt,lwt.unix,lwt.syntax,re,re.posix,imaplet,imaplet.commands
+  BuildDepends	  : unix,threads,lwt,lwt.unix,lwt.ppx,re,re.posix,imaplet,imaplet.commands
 
 Executable irvsfsio_cl
   Build$:           flag(test)
@@ -304,7 +308,7 @@ Executable irvsfsio_cl
   Path		  : test
   CompiledObject  : native
   MainIs	  : irvsfsio_cl.ml
-  BuildDepends	  : unix,threads,lwt,lwt.unix,lwt.syntax
+  BuildDepends	  : unix,threads,lwt,lwt.unix,lwt.ppx
 
 Executable email_server
   Build$:           flag(test)
@@ -312,7 +316,7 @@ Executable email_server
   Path		  : test
   CompiledObject  : native
   MainIs	  : email_server.ml
-  BuildDepends	  : unix,threads,lwt,lwt.unix,lwt.syntax,re,re.posix,imaplet,imaplet.commands
+  BuildDepends	  : unix,threads,lwt,lwt.unix,lwt.ppx,re,re.posix,imaplet,imaplet.commands
 
 Executable email_stats
   Build$:           flag(test)
@@ -320,7 +324,7 @@ Executable email_stats
   Path		  : test
   CompiledObject  : native
   MainIs	  : email_stats.ml
-  BuildDepends	  : unix,threads,lwt,lwt.unix,lwt.syntax,re,re.posix,imaplet,imaplet.commands
+  BuildDepends	  : unix,threads,lwt,lwt.unix,lwt.ppx,re,re.posix,imaplet,imaplet.commands
 
 Executable stun
   Build		  : true
@@ -328,4 +332,4 @@ Executable stun
   Path		  : utils
   CompiledObject  : native
   MainIs	  : stun.ml
-  BuildDepends	  : lwt,lwt.unix,lwt.syntax,re,re.posix,threads,tls.lwt,imaplet,imaplet.commands
+  BuildDepends	  : lwt,lwt.unix,lwt.ppx,re,re.posix,threads,tls.lwt,imaplet,imaplet.commands

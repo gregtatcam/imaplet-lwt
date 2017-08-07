@@ -116,12 +116,10 @@ let default_config = {
 
 let validate_config config =
   let err res msg =
-    begin
     if res = false then (
       return (`Error (Printf.sprintf "%s %s\n" msg Install.config_path))
     ) else
       return `Ok
-    end
   in
   begin
   match config.data_store with
@@ -136,10 +134,13 @@ let validate_config config =
   | `Mailbox ->
     let path = Regex.replace ~regx:"%user%.*$" ~tmpl:"" config.inbox_path in
     Utils.exists path Unix.S_REG >>= fun res ->
-    err res "Invalid Inbox path in " >>
-    let path = Regex.replace ~regx:"%user%.*$" ~tmpl:"" config.mail_path in
-    Utils.exists path Unix.S_DIR >>= fun res ->
-    err res "Invalid Mail path in "
+    if not res then 
+      err res "Invalid Inbox path in "
+    else (
+      let path = Regex.replace ~regx:"%user%.*$" ~tmpl:"" config.mail_path in
+      Utils.exists path Unix.S_DIR >>= fun res ->
+      err res "Invalid Mail path in "
+    )
   | `Maildir ->
     let path = Regex.replace ~regx:"%user%.*$" ~tmpl:"" config.mail_path in
     Utils.exists path Unix.S_DIR >>= fun res ->
