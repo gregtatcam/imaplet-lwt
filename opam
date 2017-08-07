@@ -42,4 +42,4 @@ depends: [
   "menhir"
   "camlzip"
 ]
-available: [ ocaml-version = "4.04.2" ]
+available: [ ocaml-version >= "4.01.0" ]
