@@ -111,6 +111,7 @@ end = struct
 
   (* get location of a file under the mailbox *)
   let file_path_of_maildir t maildir tp =
+    let maildir = if t.mailbox = "" then "" else maildir in
     let (=^) parent child = Filename.concat parent child in
     match tp with
     | `Cur file -> root t =^ maildir =^ "cur" =^ file
@@ -266,11 +267,13 @@ struct
 
   (* mailbox supports both folders and messages *)
   let exists t = 
-    Lwt_unix.stat (MaildirPath.to_maildir t.mailbox) >>= fun st ->
-    if st.Unix.st_kind = Unix.S_DIR then
-      return `Mailbox
-    else
-      return `No
+    catch (fun () ->
+      Lwt_unix.stat (MaildirPath.to_maildir t.mailbox) >>= fun st ->
+      if st.Unix.st_kind = Unix.S_DIR then
+        return `Mailbox
+      else
+        return `No
+    ) (fun _ -> return `No)
 
   let current t file =
     MaildirPath.file_path t.mailbox (`Cur file)
@@ -368,6 +371,7 @@ struct
      * mailbox itself is not included 
      *)
     let strm = Lwt_unix.files_of_directory (MaildirPath.root t.mailbox) in
+    let strm = if mailbox = "" then Lwt_stream.choose [strm; Lwt_stream.of_list [".INBOX"]] else strm in
     Lwt_stream.fold_s (fun file (counts,acc) -> 
       let regx = if mailbox = "" then "" else mailbox ^ "." in
       let regx = Regex.replace ~regx:"\\.\\.$" ~tmpl:"." regx in
