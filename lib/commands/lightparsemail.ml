@@ -191,7 +191,7 @@ struct
   type t = boundary
 
   let re_boundary = Re_posix.compile_pat ~opts:[`ICase]
-    "boundary=((\"([^\"\r\n]+)\")|([^\"\r\n ]+))"
+    "((\"([^\"\r\n]+)\")|([^\"\r\n ]+)[^\r\n ;]+)"
 
   let parse line =
     try
@@ -324,14 +324,20 @@ struct
           let name = Re.get subs 1 in
           let value = Re.get subs 2 in
           read name value acc
-        with Not_found -> (* must be FWS *)
-          let value = 
-            if name <> "" then 
-              String.concat "\n" [value; line] 
-            else 
-              value 
-          in
+        with Not_found -> (* must be FWS or the end of headers *)
+          (* have to check the parsing, should not get the blank line (end of
+           * headers here *)
+          if line = "" then
+            (name,value,acc)
+          else (
+            let value = 
+              if name <> "" then 
+                String.concat "\n" [value; line] 
+              else 
+                value 
+            in
           read name value acc
+          )
     in
     let (name,value,acc) = read "" "" init in
     let acc =
